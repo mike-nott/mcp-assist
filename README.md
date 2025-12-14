@@ -73,7 +73,7 @@ Instead of dumping all entities, MCP Assist:
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for "MCP Assist" and select it
 
-### 2. Setup Flow (4 Steps)
+### 2. Setup Flow
 
 **Step 1 - Profile & Server Type:**
 - Profile Name: Give your assistant a name (e.g., "Living Room Assistant")
@@ -100,37 +100,11 @@ Instead of dumping all entities, MCP Assist:
 - Brave Search API Key: Your API key (if using web search)
 - Debug Mode: Extra logging for troubleshooting
 
-### 3. Configure LM Studio MCP (LM Studio Only)
+### 3. Set as Voice Assistant
 
-Add this to your LM Studio MCP configuration file:
-
-```json
-{
-  "mcpServers": {
-    "home-assistant": {
-      "command": "node",
-      "args": [],
-      "env": {},
-      "transport": {
-        "type": "http",
-        "url": "http://localhost:8090"
-      }
-    }
-  }
-}
-```
-
-**Location of MCP config file:**
-- **macOS**: `~/Library/Application Support/LM Studio/mcp.json`
-- **Windows**: `%APPDATA%/LM Studio/mcp.json`
-- **Linux**: `~/.local/share/LM Studio/mcp.json`
-
-### 4. Set as Voice Assistant
-
-1. Restart LM Studio (if using LM Studio) to load the MCP configuration
-2. In Home Assistant, go to **Settings** → **Voice Assistants**
-3. Set your preferred assistant to your MCP Assist profile name
-4. Test with commands!
+1. In Home Assistant, go to **Settings** → **Voice Assistants**
+2. Set your preferred assistant to your MCP Assist profile name
+3. Test with commands!
 
 ## Usage Examples
 
