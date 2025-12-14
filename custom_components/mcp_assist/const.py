@@ -2,9 +2,16 @@
 
 DOMAIN = "mcp_assist"
 
+# Server type options
+SERVER_TYPE_LMSTUDIO = "lmstudio"
+SERVER_TYPE_OLLAMA = "ollama"
+SERVER_TYPE_OPENAI = "openai"
+SERVER_TYPE_GEMINI = "gemini"
+
 # Configuration keys
 CONF_PROFILE_NAME = "profile_name"
 CONF_SERVER_TYPE = "server_type"
+CONF_API_KEY = "api_key"
 CONF_LMSTUDIO_URL = "lmstudio_url"
 CONF_MODEL_NAME = "model_name"
 CONF_MCP_PORT = "mcp_port"
@@ -27,6 +34,25 @@ DEFAULT_SERVER_TYPE = "lmstudio"
 DEFAULT_LMSTUDIO_URL = "http://localhost:1234"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MCP_PORT = 8090
+DEFAULT_API_KEY = ""
+
+# Cloud provider base URLs
+OPENAI_BASE_URL = "https://api.openai.com"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+# Common model lists for cloud providers
+OPENAI_MODELS = [
+    "gpt-4",
+    "gpt-4-turbo",
+    "gpt-4o",
+    "gpt-3.5-turbo",
+]
+
+GEMINI_MODELS = [
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+]
 DEFAULT_MODEL_NAME = "model"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful Home Assistant voice assistant. Respond naturally and conversationally to user requests."
 DEFAULT_CONTROL_HA = True
