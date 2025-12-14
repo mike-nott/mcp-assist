@@ -4,10 +4,10 @@
   "codeowners": ["@mike-nott"],
   "config_flow": true,
   "dependencies": ["conversation"],
-  "documentation": "https://github.com/mike-nott/ha-mcp-assist",
+  "documentation": "https://github.com/mike-nott/mcp-assist",
   "integration_type": "service",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/mike-nott/ha-mcp-assist/issues",
+  "issue_tracker": "https://github.com/mike-nott/mcp-assist/issues",
   "requirements": ["aiohttp>=3.8.0", "pyyaml>=6.0"],
   "version": "0.2.0"
 }
