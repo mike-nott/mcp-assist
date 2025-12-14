@@ -1,12 +1,12 @@
 # MCP Assist for Home Assistant
 
-A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, Ollama, and soon OpenAI/Gemini.
+A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, Ollama, OpenAI, and Google Gemini.
 
 ## Key Features
 
 - ✅ **95% Token Reduction**: Uses MCP tools for dynamic entity discovery instead of sending all entities
 - ✅ **No Entity Dumps**: Never sends 12,000+ token entity lists to the LLM
-- ✅ **Multi-Platform Support**: Works with LM Studio, Ollama (OpenAI & Gemini coming soon)
+- ✅ **Multi-Platform Support**: Works with LM Studio, Ollama, OpenAI, and Google Gemini
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, state, or name on-demand
 - ✅ **Web Search Tools**: Optional Brave Search integration for current information
@@ -49,10 +49,8 @@ Instead of dumping all entities, MCP Assist:
 
 - Home Assistant 2024.1+
 - One of:
-  - LM Studio v0.3.17+ (with MCP support)
-  - Ollama
-  - OpenAI (coming soon)
-  - Google Gemini (coming soon)
+  - **Local LLMs**: LM Studio v0.3.17+ or Ollama
+  - **Cloud LLMs**: OpenAI or Google Gemini (API key required)
 - Python 3.11+
 
 ## Installation
@@ -77,12 +75,22 @@ Instead of dumping all entities, MCP Assist:
 
 **Step 1 - Profile & Server Type:**
 - Profile Name: Give your assistant a name (e.g., "Living Room Assistant")
-- Server Type: Choose LM Studio or Ollama
+- Server Type: Choose your LLM provider
+  - **LM Studio** - Local, free, runs on your machine
+  - **Ollama** - Local, free, command-line based
+  - **OpenAI** - Cloud, paid, GPT-4/GPT-3.5
+  - **Google Gemini** - Cloud, paid/free tier, Gemini models
 
 **Step 2 - Server Configuration:**
+
+*For Local Servers (LM Studio / Ollama):*
 - Server URL: Where your LLM server is running
   - LM Studio: `http://localhost:1234` (default)
   - Ollama: `http://localhost:11434` (default)
+- MCP Server Port: Port for the MCP server (default: 8090)
+
+*For Cloud Providers (OpenAI / Gemini):*
+- API Key: Your provider API key (see below for setup)
 - MCP Server Port: Port for the MCP server (default: 8090)
 
 **Step 3 - Model & Prompts:**
@@ -105,6 +113,71 @@ Instead of dumping all entities, MCP Assist:
 1. In Home Assistant, go to **Settings** → **Voice Assistants**
 2. Set your preferred assistant to your MCP Assist profile name
 3. Test with commands!
+
+## Cloud Provider Setup
+
+### OpenAI Setup
+
+1. **Get an API Key**:
+   - Visit https://platform.openai.com/api-keys
+   - Sign in or create an account
+   - Click "Create new secret key"
+   - Copy the key immediately (you won't see it again)
+
+2. **Add to MCP Assist**:
+   - Select "OpenAI" as Server Type
+   - Paste your API key in the API Key field
+   - Select your model (GPT-4, GPT-4-turbo, GPT-4o, or GPT-3.5-turbo)
+
+3. **Cost Considerations**:
+   - GPT-4: ~$0.03 per 1K tokens (input), $0.06 per 1K tokens (output)
+   - GPT-3.5-turbo: ~$0.0005 per 1K tokens (input), $0.0015 per 1K tokens (output)
+   - With MCP Assist's 95% reduction: ~$0.01-0.05 per typical conversation
+   - Set up billing limits at https://platform.openai.com/account/limits
+
+4. **Security**:
+   - Never share your API key
+   - Rotate keys regularly
+   - Monitor usage at https://platform.openai.com/usage
+   - Keys are stored securely in Home Assistant's configuration
+
+### Google Gemini Setup
+
+1. **Get an API Key**:
+   - Visit https://aistudio.google.com/app/apikey
+   - Sign in with your Google account
+   - Click "Create API Key"
+   - Copy the key
+
+2. **Add to MCP Assist**:
+   - Select "Google Gemini" as Server Type
+   - Paste your API key in the API Key field
+   - Select your model (gemini-2.0-flash-exp, gemini-1.5-pro, or gemini-1.5-flash)
+
+3. **Cost Considerations**:
+   - Gemini 1.5 Flash: Free tier available (15 RPM, 1 million TPM)
+   - Gemini 1.5 Pro: $3.50 per 1M tokens (input), $10.50 per 1M tokens (output)
+   - With MCP Assist: Most conversations stay within free tier
+   - Check pricing at https://ai.google.dev/pricing
+
+4. **Security**:
+   - Never commit API keys to version control
+   - API keys are stored securely in Home Assistant
+   - Monitor usage at https://aistudio.google.com/
+   - Revoke compromised keys immediately
+
+### Cloud vs Local LLMs
+
+| Feature | Cloud (OpenAI/Gemini) | Local (LM Studio/Ollama) |
+|---------|----------------------|--------------------------|
+| **Cost** | Pay per use | Free (hardware cost) |
+| **Privacy** | Data sent to provider | Stays on your network |
+| **Performance** | Very fast, powerful models | Depends on hardware |
+| **Availability** | Requires internet | Works offline |
+| **Setup** | Just API key | Requires model download |
+| **Token Efficiency** | Critical (saves money) | Nice to have (saves time) |
+
+**MCP Assist's 95% token reduction is especially valuable with cloud providers**, significantly reducing API costs.
 
 ## Usage Examples
 
@@ -190,6 +263,20 @@ Each profile runs independently and connects to the same shared MCP server.
 - Verify Ollama is running: `ollama list`
 - Check the URL matches where Ollama is running (default: `http://localhost:11434`)
 - Ensure the model is loaded in Ollama
+
+### OpenAI Connection Issues
+- Verify your API key is valid at https://platform.openai.com/api-keys
+- Check you have sufficient credits in your OpenAI account
+- Ensure your API key has proper permissions
+- Check for rate limit errors in Home Assistant logs
+- Verify your internet connection is working
+
+### Gemini Connection Issues
+- Verify your API key at https://aistudio.google.com/app/apikey
+- Check if you're within rate limits (free tier: 15 RPM)
+- Ensure your Google Cloud project has the Gemini API enabled
+- Try regenerating your API key if authentication fails
+- Check Home Assistant logs for specific error codes
 
 ### No Response from Assistant
 - Verify your LLM has a model loaded
