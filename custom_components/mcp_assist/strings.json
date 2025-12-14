@@ -37,7 +37,9 @@
           "max_iterations": "Max Tool Iterations",
           "control_home_assistant": "Control Home Assistant",
           "response_mode": "Response Mode",
+          "enable_custom_tools": "Enable Web Search",
           "brave_api_key": "Brave Search API Key",
+          "mcp_port": "MCP Server Port",
           "debug_mode": "Debug Mode"
         }
       }

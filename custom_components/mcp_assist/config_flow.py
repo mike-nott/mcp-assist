@@ -68,15 +68,13 @@ from .const import (
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
-    OPENAI_MODELS,
-    GEMINI_MODELS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]:
-    """Fetch available models from inference server."""
+    """Fetch available models from local inference server (LM Studio/Ollama)."""
     _LOGGER.info("🌐 FETCH: Starting model fetch from %s", url)
     try:
         # Small delay to ensure server is ready
@@ -98,6 +96,80 @@ async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]
                 return sorted_models
     except Exception as err:
         _LOGGER.error("💥 FETCH: Exception during fetch: %s", err, exc_info=True)
+        return []
+
+
+async def fetch_models_from_openai(hass: HomeAssistant, api_key: str) -> list[str]:
+    """Fetch available models from OpenAI API."""
+    _LOGGER.info("🌐 FETCH: Starting OpenAI model fetch")
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            _LOGGER.info("📡 FETCH: Requesting OpenAI models")
+            async with session.get(
+                f"{OPENAI_BASE_URL}/v1/models",
+                headers=headers
+            ) as resp:
+                _LOGGER.info("📥 FETCH: OpenAI response status %d", resp.status)
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    _LOGGER.warning("⚠️ FETCH: OpenAI API error %d: %s", resp.status, error_text[:200])
+                    return []
+
+                data = await resp.json()
+                # Filter for chat models only (exclude embeddings, whisper, etc.)
+                all_models = [m.get("id", "") for m in data.get("data", [])]
+                # Only include GPT models suitable for chat
+                chat_models = [m for m in all_models if m.startswith("gpt-")]
+                sorted_models = sorted(chat_models, reverse=True) if chat_models else []
+                _LOGGER.info("✨ FETCH: Found %d OpenAI chat models", len(sorted_models))
+                return sorted_models
+    except Exception as err:
+        _LOGGER.error("💥 FETCH: OpenAI fetch failed: %s", err)
+        return []
+
+
+async def fetch_models_from_gemini(hass: HomeAssistant, api_key: str) -> list[str]:
+    """Fetch available models from Gemini API."""
+    _LOGGER.info("🌐 FETCH: Starting Gemini model fetch")
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            _LOGGER.info("📡 FETCH: Requesting Gemini models")
+            # Gemini uses native API for model listing, not OpenAI-compatible endpoint
+            # API key goes in query parameter for native API
+            async with session.get(
+                f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            ) as resp:
+                _LOGGER.info("📥 FETCH: Gemini response status %d", resp.status)
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    _LOGGER.warning("⚠️ FETCH: Gemini API error %d: %s", resp.status, error_text[:200])
+                    return []
+
+                data = await resp.json()
+                # Gemini native API response format: {"models": [{"name": "models/gemini-..."}]}
+                all_models = []
+                for model in data.get("models", []):
+                    # Extract model ID from "models/gemini-pro" format
+                    model_name = model.get("name", "")
+                    if model_name.startswith("models/"):
+                        model_id = model_name.replace("models/", "")
+                        all_models.append(model_id)
+
+                # Filter for gemini models only
+                gemini_models = [m for m in all_models if "gemini" in m.lower()]
+                sorted_models = sorted(gemini_models, reverse=True) if gemini_models else []
+                _LOGGER.info("✨ FETCH: Found %d Gemini models", len(sorted_models))
+                return sorted_models
+    except Exception as err:
+        _LOGGER.error("💥 FETCH: Gemini fetch failed: %s", err)
         return []
 
 
@@ -211,15 +283,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Validate MCP port
-            mcp_port = user_input[CONF_MCP_PORT]
-            if not 1024 <= mcp_port <= 65535:
-                errors[CONF_MCP_PORT] = "invalid_port"
-
-            if not errors:
-                # Store data and move to step 3
-                self.step2_data = user_input
-                return await self.async_step_model()
+            # Store data and move to step 3
+            self.step2_data = user_input
+            return await self.async_step_model()
 
         # Get server type from step 1 to build dynamic schema
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
@@ -230,13 +296,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             default_url = DEFAULT_OLLAMA_URL if server_type == SERVER_TYPE_OLLAMA else DEFAULT_LMSTUDIO_URL
             server_schema = vol.Schema({
                 vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
-                vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             })
         else:
             # Cloud providers - show API key field
             server_schema = vol.Schema({
                 vol.Required(CONF_API_KEY): str,
-                vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             })
 
         return self.async_show_form(
@@ -267,13 +331,23 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             models = await fetch_models_from_lmstudio(self.hass, server_url)
             _LOGGER.debug("Fetched %d models: %s", len(models), models)
         elif server_type == SERVER_TYPE_OPENAI:
-            # OpenAI - use predefined model list
-            models = OPENAI_MODELS
-            _LOGGER.debug("Using OpenAI model list: %s", models)
+            # OpenAI - fetch models from API with authentication
+            api_key = self.step2_data.get(CONF_API_KEY, "")
+            _LOGGER.debug("Fetching OpenAI models with API key")
+            models = await fetch_models_from_openai(self.hass, api_key)
+            _LOGGER.debug("Fetched %d OpenAI models: %s", len(models), models)
+            # Show error if fetch failed
+            if not models:
+                errors["base"] = "invalid_api_key"
         elif server_type == SERVER_TYPE_GEMINI:
-            # Gemini - use predefined model list
-            models = GEMINI_MODELS
-            _LOGGER.debug("Using Gemini model list: %s", models)
+            # Gemini - fetch models from API with authentication
+            api_key = self.step2_data.get(CONF_API_KEY, "")
+            _LOGGER.debug("Fetching Gemini models with API key")
+            models = await fetch_models_from_gemini(self.hass, api_key)
+            _LOGGER.debug("Fetched %d Gemini models: %s", len(models), models)
+            # Show error if fetch failed
+            if not models:
+                errors["base"] = "invalid_api_key"
 
         # Build dynamic schema based on whether models were fetched
         if models:
@@ -319,27 +393,42 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Combine data from all 4 steps
-            combined_data = {
-                **self.step1_data,
-                **self.step2_data,
-                **self.step3_data,
-                **user_input
-            }
+            # Validate MCP port
+            mcp_port = user_input.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
+            if not 1024 <= mcp_port <= 65535:
+                errors[CONF_MCP_PORT] = "invalid_port"
 
-            # Create unique ID based on profile name
-            profile_name = combined_data[CONF_PROFILE_NAME]
-            server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-            server_display = "Ollama" if server_type == "ollama" else "LM Studio"
+            if not errors:
+                # Combine data from all 4 steps
+                combined_data = {
+                    **self.step1_data,
+                    **self.step2_data,
+                    **self.step3_data,
+                    **user_input
+                }
 
-            unique_id = f"{DOMAIN}_{profile_name.lower().replace(' ', '_')}"
-            await self.async_set_unique_id(unique_id)
-            self._abort_if_unique_id_configured()
+                # Create unique ID based on server type + profile name
+                profile_name = combined_data[CONF_PROFILE_NAME]
+                server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
-            return self.async_create_entry(
-                title=f"{server_display} - {profile_name}",
-                data=combined_data,
-            )
+                # Map server type to display name
+                server_display_map = {
+                    SERVER_TYPE_LMSTUDIO: "LM Studio",
+                    SERVER_TYPE_OLLAMA: "Ollama",
+                    SERVER_TYPE_OPENAI: "OpenAI",
+                    SERVER_TYPE_GEMINI: "Gemini",
+                }
+                server_display = server_display_map.get(server_type, "LM Studio")
+
+                # Include server type in unique ID to allow same profile name across providers
+                unique_id = f"{DOMAIN}_{server_type}_{profile_name.lower().replace(' ', '_')}"
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+
+                return self.async_create_entry(
+                    title=f"{server_display} - {profile_name}",
+                    data=combined_data,
+                )
 
         advanced_schema = vol.Schema({
             vol.Required(CONF_TEMPERATURE, default=DEFAULT_TEMPERATURE): vol.All(
@@ -359,7 +448,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY): vol.Coerce(int),
             vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
             vol.Required(CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS): vol.Coerce(int),
+            vol.Optional(CONF_ENABLE_CUSTOM_TOOLS, default=DEFAULT_ENABLE_CUSTOM_TOOLS): bool,
             vol.Optional(CONF_BRAVE_API_KEY, default=DEFAULT_BRAVE_API_KEY): str,
+            vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
         })
 
@@ -389,10 +480,18 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
             # Update entry title if profile name changed
             new_profile_name = user_input.get(CONF_PROFILE_NAME)
-            if new_profile_name:
+            old_profile_name = self.config_entry.options.get(CONF_PROFILE_NAME,
+                                                              self.config_entry.data.get(CONF_PROFILE_NAME))
+            if new_profile_name and new_profile_name != old_profile_name:
                 # Get server type from original data (can't be changed in options)
                 server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-                server_display = "Ollama" if server_type == "ollama" else "LM Studio"
+                server_display_map = {
+                    SERVER_TYPE_LMSTUDIO: "LM Studio",
+                    SERVER_TYPE_OLLAMA: "Ollama",
+                    SERVER_TYPE_OPENAI: "OpenAI",
+                    SERVER_TYPE_GEMINI: "Gemini",
+                }
+                server_display = server_display_map.get(server_type, "LM Studio")
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
                     title=f"{server_display} - {new_profile_name}"
@@ -404,21 +503,47 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         options = self.config_entry.options
         data = self.config_entry.data
 
+        # Get server type (can't be changed in options)
+        server_type = data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+
         # Handle backward compatibility
         response_mode_value = options.get(CONF_RESPONSE_MODE,
                                          options.get(CONF_FOLLOW_UP_MODE,
                                          DEFAULT_RESPONSE_MODE))
 
-        # Fetch models from server
-        lmstudio_url = options.get(CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)).rstrip("/")
-        _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from %s", lmstudio_url)
-        try:
-            models = await fetch_models_from_lmstudio(self.hass, lmstudio_url)
-            _LOGGER.info("✅ OPTIONS: Successfully fetched %d models: %s", len(models), models)
-        except Exception as err:
-            _LOGGER.error("❌ OPTIONS: Failed to fetch models: %s", err)
-            models = []
+        # Fetch models based on server type
+        models = []
         current_model = options.get(CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME))
+
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+            # Local servers - fetch from URL
+            server_url = options.get(CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)).rstrip("/")
+            _LOGGER.info(f"🔍 OPTIONS: Attempting to fetch models from {server_type} at {server_url}")
+            try:
+                models = await fetch_models_from_lmstudio(self.hass, server_url)
+                _LOGGER.info(f"✅ OPTIONS: Successfully fetched {len(models)} models")
+            except Exception as err:
+                _LOGGER.error(f"❌ OPTIONS: Failed to fetch models: {err}")
+        elif server_type == SERVER_TYPE_OPENAI:
+            # OpenAI - fetch from API
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            if api_key:
+                _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from OpenAI")
+                try:
+                    models = await fetch_models_from_openai(self.hass, api_key)
+                    _LOGGER.info(f"✅ OPTIONS: Successfully fetched {len(models)} OpenAI models")
+                except Exception as err:
+                    _LOGGER.error(f"❌ OPTIONS: Failed to fetch OpenAI models: {err}")
+        elif server_type == SERVER_TYPE_GEMINI:
+            # Gemini - fetch from API
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            if api_key:
+                _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from Gemini")
+                try:
+                    models = await fetch_models_from_gemini(self.hass, api_key)
+                    _LOGGER.info(f"✅ OPTIONS: Successfully fetched {len(models)} Gemini models")
+                except Exception as err:
+                    _LOGGER.error(f"❌ OPTIONS: Failed to fetch Gemini models: {err}")
 
         # Build model selector based on whether models were fetched
         if models:
@@ -433,48 +558,52 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             # Show text input as fallback
             model_selector = str
 
-        options_schema = vol.Schema(
-            {
-                # 1. Profile Name
-                vol.Required(
-                    CONF_PROFILE_NAME,
-                    default=options.get(CONF_PROFILE_NAME, data.get(CONF_PROFILE_NAME, "Default"))
-                ): str,
+        # Build schema based on server type
+        schema_dict = {
+            # 1. Profile Name
+            vol.Required(
+                CONF_PROFILE_NAME,
+                default=options.get(CONF_PROFILE_NAME, data.get(CONF_PROFILE_NAME, "Default"))
+            ): str,
+        }
 
-                # 2. Server URL
-                vol.Required(
-                    CONF_LMSTUDIO_URL,
-                    default=lmstudio_url
-                ): str,
+        # 2. Server URL or API Key (based on server type)
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+            server_url = options.get(CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL))
+            schema_dict[vol.Required(CONF_LMSTUDIO_URL, default=server_url)] = str
+        else:
+            # Cloud providers use API key
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = str
 
-                # 3. Model Name (dynamic: dropdown if models found, text input if not)
-                vol.Required(
-                    CONF_MODEL_NAME,
-                    default=current_model
-                ): model_selector,
+        # 3. Model Name (dynamic: dropdown if models found, text input if not)
+        schema_dict[vol.Required(CONF_MODEL_NAME, default=current_model)] = model_selector
+
+        # Continue with remaining common fields
+        schema_dict.update({
 
                 # 4. System Prompt
                 vol.Required(
                     CONF_SYSTEM_PROMPT,
-                    default=options.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT)
+                    default=options.get(CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT))
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)),
 
                 # 5. Technical Instructions
                 vol.Required(
                     CONF_TECHNICAL_PROMPT,
-                    default=options.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT)
+                    default=options.get(CONF_TECHNICAL_PROMPT, data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT))
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)),
 
                 # 6. Temperature
                 vol.Required(
                     CONF_TEMPERATURE,
-                    default=options.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE)
+                    default=options.get(CONF_TEMPERATURE, data.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE))
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
 
                 # 7. Max Response Tokens
                 vol.Required(
                     CONF_MAX_TOKENS,
-                    default=options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS)
+                    default=options.get(CONF_MAX_TOKENS, data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS))
                 ): vol.Coerce(int),
 
                 # 8. Response Mode
@@ -495,31 +624,31 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 # 9. Max History Messages
                 vol.Required(
                     CONF_MAX_HISTORY,
-                    default=options.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY)
+                    default=options.get(CONF_MAX_HISTORY, data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
                 ): vol.Coerce(int),
 
                 # 10. Control Home Assistant
                 vol.Required(
                     CONF_CONTROL_HA,
-                    default=options.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA)
+                    default=options.get(CONF_CONTROL_HA, data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA))
                 ): bool,
 
                 # 11. Max Tool Iterations
                 vol.Required(
                     CONF_MAX_ITERATIONS,
-                    default=options.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS)
+                    default=options.get(CONF_MAX_ITERATIONS, data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS))
                 ): vol.Coerce(int),
 
                 # 12. Enable Custom Tools
                 vol.Optional(
                     CONF_ENABLE_CUSTOM_TOOLS,
-                    default=options.get(CONF_ENABLE_CUSTOM_TOOLS, DEFAULT_ENABLE_CUSTOM_TOOLS)
+                    default=options.get(CONF_ENABLE_CUSTOM_TOOLS, data.get(CONF_ENABLE_CUSTOM_TOOLS, DEFAULT_ENABLE_CUSTOM_TOOLS))
                 ): bool,
 
                 # 13. Brave API Key
                 vol.Optional(
                     CONF_BRAVE_API_KEY,
-                    default=options.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY)
+                    default=options.get(CONF_BRAVE_API_KEY, data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY))
                 ): str,
 
                 # 14. MCP Server Port
@@ -531,17 +660,16 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 # 15. Debug Mode
                 vol.Required(
                     CONF_DEBUG_MODE,
-                    default=options.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE)
+                    default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
                 ): bool,
-            }
-        )
+        })
+
+        # Create the schema from the built dictionary
+        options_schema = vol.Schema(schema_dict)
 
         return self.async_show_form(
             step_id="init",
             data_schema=options_schema,
-            description_placeholders={
-                "lmstudio_url": data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL),
-            },
         )
 
 

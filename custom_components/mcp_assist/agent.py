@@ -86,15 +86,17 @@ class MCPAssistAgent(AbstractConversationAgent):
         self.model_name = options.get(CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, ""))
         self.mcp_port = options.get(CONF_MCP_PORT, data.get(CONF_MCP_PORT, 0))
 
-        # Read options with defaults
-        self.debug_mode = options.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE)
-        self.max_iterations = options.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS)
-        self.max_tokens = options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS)
-        self.temperature = options.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE)
+        # Read options with fallback to data, then defaults
+        self.debug_mode = options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
+        self.max_iterations = options.get(CONF_MAX_ITERATIONS, data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS))
+        self.max_tokens = options.get(CONF_MAX_TOKENS, data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS))
+        self.temperature = options.get(CONF_TEMPERATURE, data.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE))
         # Support both old and new config keys for backward compatibility
         self.follow_up_mode = options.get(CONF_RESPONSE_MODE,
+                                          data.get(CONF_RESPONSE_MODE,
                                           options.get(CONF_FOLLOW_UP_MODE,
-                                          DEFAULT_RESPONSE_MODE))
+                                          data.get(CONF_FOLLOW_UP_MODE,
+                                          DEFAULT_RESPONSE_MODE))))
 
         # Log the actual configuration being used
         if self.debug_mode:
@@ -307,9 +309,11 @@ class MCPAssistAgent(AbstractConversationAgent):
     async def _build_system_prompt_with_context(self, user_input: ConversationInput) -> str:
         """Build system prompt with home context (areas, domains)."""
         try:
-            # Get base prompts
-            system_prompt = self.entry.options.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT)
-            technical_prompt = self.entry.options.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT)
+            # Get base prompts (check options first, then data, then defaults)
+            system_prompt = self.entry.options.get(CONF_SYSTEM_PROMPT,
+                                                    self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT))
+            technical_prompt = self.entry.options.get(CONF_TECHNICAL_PROMPT,
+                                                       self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT))
 
             # Format time and date variables
             current_time = dt_util.now().strftime('%H:%M:%S')
@@ -363,11 +367,11 @@ class MCPAssistAgent(AbstractConversationAgent):
     def _build_system_prompt(self) -> str:
         """Build system prompt for LM Studio (legacy sync version)."""
         try:
-            # Get system prompt from options or use default
-            system_prompt = self.entry.options.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT)
-
-            # Get technical prompt from options or use default
-            technical_prompt = self.entry.options.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT)
+            # Get prompts (check options first, then data, then defaults)
+            system_prompt = self.entry.options.get(CONF_SYSTEM_PROMPT,
+                                                    self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT))
+            technical_prompt = self.entry.options.get(CONF_TECHNICAL_PROMPT,
+                                                       self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT))
 
             # Format time and date variables
             current_time = dt_util.now().strftime('%H:%M:%S')
@@ -595,10 +599,8 @@ class MCPAssistAgent(AbstractConversationAgent):
                     elif "conversation_state:false" in content.lower():
                         self._expecting_response = False
                         _LOGGER.debug("🔄 Conversation will close - not expecting response")
-                    # Don't add this tool result to the conversation
-                    _LOGGER.info(f"✅ Tool {tool_name} executed successfully (internal)")
-                    continue  # Skip adding to results array
 
+                # Add tool result to conversation (required for OpenAI strict message format)
                 results.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -668,8 +670,8 @@ class MCPAssistAgent(AbstractConversationAgent):
             # OpenAI uses Bearer token
             return {"Authorization": f"Bearer {self.api_key}"}
         elif self.server_type == SERVER_TYPE_GEMINI:
-            # Gemini uses x-goog-api-key header
-            return {"x-goog-api-key": self.api_key}
+            # Gemini OpenAI-compatible endpoint uses Bearer token like OpenAI
+            return {"Authorization": f"Bearer {self.api_key}"}
         else:
             # Local servers (LM Studio, Ollama) don't need auth
             return {}
@@ -726,14 +728,19 @@ class MCPAssistAgent(AbstractConversationAgent):
             payload = {
                 "model": self.model_name,
                 "messages": cleaned_messages,  # Use cleaned messages
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens if self.max_tokens > 0 else None,
                 "stream": True  # Enable streaming
             }
 
-            # Remove max_tokens if None (unlimited)
-            if payload.get("max_tokens") is None:
-                payload.pop("max_tokens", None)
+            # GPT-5+ and o1 models don't support custom temperature (only default of 1)
+            if not (self.model_name.startswith("gpt-5") or self.model_name.startswith("o1")):
+                payload["temperature"] = self.temperature
+
+            # Add token limit parameter - GPT-5+ uses max_completion_tokens, older models use max_tokens
+            if self.max_tokens > 0:
+                if self.model_name.startswith("gpt-5") or self.model_name.startswith("o1"):
+                    payload["max_completion_tokens"] = self.max_tokens
+                else:
+                    payload["max_tokens"] = self.max_tokens
 
             if tools:
                 payload["tools"] = tools
@@ -947,14 +954,19 @@ class MCPAssistAgent(AbstractConversationAgent):
             payload = {
                 "model": self.model_name,
                 "messages": conversation_messages,
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens if self.max_tokens > 0 else None,
                 "stream": False
             }
 
-            # Remove max_tokens if None (unlimited)
-            if payload.get("max_tokens") is None:
-                payload.pop("max_tokens", None)
+            # GPT-5+ and o1 models don't support custom temperature (only default of 1)
+            if not (self.model_name.startswith("gpt-5") or self.model_name.startswith("o1")):
+                payload["temperature"] = self.temperature
+
+            # Add token limit parameter - GPT-5+ uses max_completion_tokens, older models use max_tokens
+            if self.max_tokens > 0:
+                if self.model_name.startswith("gpt-5") or self.model_name.startswith("o1"):
+                    payload["max_completion_tokens"] = self.max_tokens
+                else:
+                    payload["max_tokens"] = self.max_tokens
 
             # Add tools if available
             if tools:
