@@ -12,8 +12,8 @@ class BraveSearchTool:
     def __init__(self, hass, api_key=None):
         """Initialize Brave Search tool."""
         self.hass = hass
-        # Use provided API key or fall back to hardcoded
-        self.api_key = api_key or "BSAkpJD2rWuNWClQDKIA-tKMU4SCa5i"
+        # Use provided API key - no fallback for security
+        self.api_key = api_key or ""
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
 
     async def initialize(self):
