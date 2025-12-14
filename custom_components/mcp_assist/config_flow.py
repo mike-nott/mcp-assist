@@ -256,13 +256,24 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.step3_data = user_input
             return await self.async_step_advanced()
 
-        # Get server URL from step 2 to fetch models
-        server_url = self.step2_data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL).rstrip("/")
+        # Get server type to determine model source
+        server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        models = []
 
-        # Try to fetch models from the user-provided URL
-        _LOGGER.debug("Attempting to fetch models from %s", server_url)
-        models = await fetch_models_from_lmstudio(self.hass, server_url)
-        _LOGGER.debug("Fetched %d models: %s", len(models), models)
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+            # Local servers - fetch models from API
+            server_url = self.step2_data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL).rstrip("/")
+            _LOGGER.debug("Attempting to fetch models from %s", server_url)
+            models = await fetch_models_from_lmstudio(self.hass, server_url)
+            _LOGGER.debug("Fetched %d models: %s", len(models), models)
+        elif server_type == SERVER_TYPE_OPENAI:
+            # OpenAI - use predefined model list
+            models = OPENAI_MODELS
+            _LOGGER.debug("Using OpenAI model list: %s", models)
+        elif server_type == SERVER_TYPE_GEMINI:
+            # Gemini - use predefined model list
+            models = GEMINI_MODELS
+            _LOGGER.debug("Using Gemini model list: %s", models)
 
         # Build dynamic schema based on whether models were fetched
         if models:
