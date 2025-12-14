@@ -207,7 +207,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_server(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle step 2 - server URL and MCP port."""
+        """Handle step 2 - server configuration (URL for local, API key for cloud)."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -221,14 +221,23 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.step2_data = user_input
                 return await self.async_step_model()
 
-        # Get server type from step 1 to determine default URL
+        # Get server type from step 1 to build dynamic schema
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-        default_url = DEFAULT_OLLAMA_URL if server_type == "ollama" else DEFAULT_LMSTUDIO_URL
 
-        server_schema = vol.Schema({
-            vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
-            vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
-        })
+        # Build schema based on server type
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+            # Local servers - show URL field
+            default_url = DEFAULT_OLLAMA_URL if server_type == SERVER_TYPE_OLLAMA else DEFAULT_LMSTUDIO_URL
+            server_schema = vol.Schema({
+                vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
+                vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
+            })
+        else:
+            # Cloud providers - show API key field
+            server_schema = vol.Schema({
+                vol.Required(CONF_API_KEY): str,
+                vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
+            })
 
         return self.async_show_form(
             step_id="server",
