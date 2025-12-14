@@ -31,6 +31,8 @@ from .const import (
     CONF_TEMPERATURE,
     CONF_FOLLOW_UP_MODE,
     CONF_RESPONSE_MODE,
+    CONF_SERVER_TYPE,
+    CONF_API_KEY,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -39,6 +41,14 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
+    DEFAULT_SERVER_TYPE,
+    DEFAULT_API_KEY,
+    SERVER_TYPE_LMSTUDIO,
+    SERVER_TYPE_OLLAMA,
+    SERVER_TYPE_OPENAI,
+    SERVER_TYPE_GEMINI,
+    OPENAI_BASE_URL,
+    GEMINI_BASE_URL,
 )
 from .conversation_history import ConversationHistory
 
@@ -58,7 +68,21 @@ class LMStudioMCPAgent(AbstractConversationAgent):
         options = entry.options
         data = entry.data
 
-        self.lmstudio_url = options.get(CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, "")).rstrip("/")
+        # Get server type
+        self.server_type = data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+
+        # Get API key for cloud providers
+        self.api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, DEFAULT_API_KEY))
+
+        # Set base URL based on server type
+        if self.server_type == SERVER_TYPE_OPENAI:
+            self.base_url = OPENAI_BASE_URL
+        elif self.server_type == SERVER_TYPE_GEMINI:
+            self.base_url = GEMINI_BASE_URL
+        else:
+            # LM Studio or Ollama - use user-provided URL
+            self.base_url = options.get(CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, "")).rstrip("/")
+
         self.model_name = options.get(CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, ""))
         self.mcp_port = options.get(CONF_MCP_PORT, data.get(CONF_MCP_PORT, 0))
 
@@ -72,23 +96,31 @@ class LMStudioMCPAgent(AbstractConversationAgent):
                                           options.get(CONF_FOLLOW_UP_MODE,
                                           DEFAULT_RESPONSE_MODE))
 
-        # Log the actual URL being used
+        # Log the actual configuration being used
         if self.debug_mode:
-            _LOGGER.debug(f"🔍 LM Studio URL configured as: {self.lmstudio_url}")
+            _LOGGER.debug(f"🔍 Server Type: {self.server_type}")
+            _LOGGER.debug(f"🔍 Base URL: {self.base_url}")
             _LOGGER.debug(f"🔍 Debug mode: ON")
             _LOGGER.debug(f"🔍 Max iterations: {self.max_iterations}")
 
         _LOGGER.info(
-            "LM Studio MCP Agent initialized - Model: %s, MCP Port: %d, URL: %s",
+            "MCP Assist Agent initialized - Server: %s, Model: %s, MCP Port: %d, URL: %s",
+            self.server_type,
             self.model_name,
             self.mcp_port,
-            self.lmstudio_url
+            self.base_url
         )
 
     @property
     def attribution(self) -> str:
         """Return attribution."""
-        return "Powered by LM Studio with MCP entity discovery"
+        server_name = {
+            SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_OLLAMA: "Ollama",
+            SERVER_TYPE_OPENAI: "OpenAI",
+            SERVER_TYPE_GEMINI: "Google Gemini",
+        }.get(self.server_type, "LLM")
+        return f"Powered by {server_name} with MCP entity discovery"
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -597,14 +629,15 @@ class LMStudioMCPAgent(AbstractConversationAgent):
             "max_tokens": 10
         }
 
-        _LOGGER.info(f"🧪 Testing basic streaming to: {self.lmstudio_url}/v1/chat/completions")
+        _LOGGER.info(f"🧪 Testing basic streaming to: {self.base_url}/v1/chat/completions")
         _LOGGER.info(f"🧪 Model: {self.model_name}")
 
         try:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                url = f"{self.lmstudio_url}/v1/chat/completions"
-                async with session.post(url, json=payload) as response:
+                url = f"{self.base_url}/v1/chat/completions"
+                headers = self._get_auth_headers()
+                async with session.post(url, headers=headers, json=payload) as response:
                     _LOGGER.info(f"✅ Basic streaming connected! Status: {response.status}")
                     _LOGGER.info(f"📋 Headers: {dict(response.headers)}")
 
@@ -628,6 +661,18 @@ class LMStudioMCPAgent(AbstractConversationAgent):
             import traceback
             _LOGGER.error(traceback.format_exc())
             return False
+
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Get authentication headers based on server type."""
+        if self.server_type == SERVER_TYPE_OPENAI:
+            # OpenAI uses Bearer token
+            return {"Authorization": f"Bearer {self.api_key}"}
+        elif self.server_type == SERVER_TYPE_GEMINI:
+            # Gemini uses x-goog-api-key header
+            return {"x-goog-api-key": self.api_key}
+        else:
+            # Local servers (LM Studio, Ollama) don't need auth
+            return {}
 
     async def _call_lmstudio_streaming(self, messages: List[Dict[str, Any]]) -> str:
         """Stream LM Studio responses with immediate TTS feedback."""
@@ -717,7 +762,8 @@ class LMStudioMCPAgent(AbstractConversationAgent):
             try:
                 timeout = aiohttp.ClientTimeout(total=30)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
-                    url = f"{self.lmstudio_url}/v1/chat/completions"
+                    url = f"{self.base_url}/v1/chat/completions"
+                    headers = self._get_auth_headers()
 
                     _LOGGER.info(f"📡 Streaming to: {url}")
                     if self.debug_mode:
@@ -725,7 +771,7 @@ class LMStudioMCPAgent(AbstractConversationAgent):
                         _LOGGER.debug(f"🔧 Using model: {self.model_name}")
 
                     # Use clean_payload instead of payload
-                    async with session.post(url, json=clean_payload) as response:
+                    async with session.post(url, headers=headers, json=clean_payload) as response:
                         _LOGGER.info(f"🔌 Connection established, status: {response.status}")
                         if self.debug_mode:
                             _LOGGER.debug(f"📋 Response headers: {dict(response.headers)}")
@@ -943,9 +989,10 @@ class LMStudioMCPAgent(AbstractConversationAgent):
 
             timeout = aiohttp.ClientTimeout(total=30)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                url = f"{self.lmstudio_url}/v1/chat/completions"
+                url = f"{self.base_url}/v1/chat/completions"
+                headers = self._get_auth_headers()
 
-                async with session.post(url, json=clean_payload) as response:
+                async with session.post(url, headers=headers, json=clean_payload) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         raise Exception(f"LM Studio API error {response.status}: {error_text}")
