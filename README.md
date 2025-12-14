@@ -245,39 +245,9 @@ Instead of dumping all entities, MCP Assist:
 
 ## Model Compatibility Guide
 
-Not all LLM models support tool calling (function calling) equally well. Based on testing, here's what works:
+Not all LLM models support tool calling (function calling) equally well. **Model performance varies significantly between inference engines** (LM Studio vs Ollama), so testing is recommended.
 
-### ✅ Confirmed Working Models
-
-**Qwen3 Series (Local - LM Studio/Ollama)**:
-- ✅ **Qwen3 30B @ Q4** - Good balance of speed and capability
-- ✅ **Qwen3 30B @ Q8** - Higher quality, slower but excellent tool calling
-- ✅ **Qwen3 VL 8B @ Q4** - Smaller, faster, still handles tools well
-- ✅ **Qwen3 VL 8B @ Q8** - Good quality for the size
-
-**Cloud Models**:
-- ✅ **OpenAI GPT-5.2 series** - Excellent tool calling support
-- ✅ **Google Gemini 3 Pro** - Excellent tool calling support
-
-### ❌ Models with Issues
-
-- ❌ **Qwen3 4B** - Too small, hallucinates actions instead of calling tools
-  - The model will claim it "turned on the lights" but won't actually call the `perform_action` tool
-  - Actions don't execute, only narrates what it would do
-
-### Recommendations
-
-**For Local LLMs**:
-- **Best Balance**: Qwen3 30B @ Q4 (fast, reliable, good tool calling)
-- **Best Quality**: Qwen3 30B @ Q8 (slower but excellent)
-- **Budget Hardware**: Qwen3 VL 8B @ Q4 (works well for most use cases)
-- **Avoid**: Models smaller than 8B parameters - they struggle with tool calling
-
-**For Cloud LLMs**:
-- **OpenAI**: Any GPT-5.2 variant works excellently
-- **Gemini**: Gemini 3 Pro variants are highly capable
-
-### Why Model Size Matters
+### Understanding Tool Calling Requirements
 
 Tool calling (function calling) requires the model to:
 1. Understand the user's request
@@ -286,12 +256,65 @@ Tool calling (function calling) requires the model to:
 4. Interpret the tool results
 5. Generate a natural response
 
-**Models under 8B parameters** often struggle with steps 2-4, leading to:
-- Hallucinating actions ("I turned on the lights") without calling tools
-- Incorrect JSON formatting
-- Misunderstanding tool results
+**Factors affecting tool calling success**:
+- **Model size**: Larger models (8B+) generally handle tool calling better
+- **Model architecture**: Vision-Language (VL) models behave differently than standard models
+- **Inference engine**: LM Studio and Ollama optimize models differently
+- **Quantization level**: Q4 vs Q8 can affect instruction following
 
-**Larger models (8B+)** handle this reliably because they have more capacity to follow complex instructions while maintaining conversation quality.
+### Inference Engine Differences
+
+**The same model can behave very differently on different platforms:**
+
+**Example findings from testing**:
+- Qwen3 4B: Works on Ollama ✅, hallucinates on LM Studio ❌
+- Qwen3 VL 8B: Works on LM Studio ✅, doesn't work on Ollama ❌
+- Qwen3 8B (standard): Works on both ✅
+- Qwen3 30B: Works excellently on both ✅
+
+This happens because:
+- **Ollama** may have optimized smaller models for tool calling
+- **LM Studio** (with updated runtimes) handles Vision-Language models better
+- Each engine uses different inference optimizations and defaults
+- Quantization implementations vary between platforms
+
+### Recommended Models
+
+**Consistently Reliable (tested on both LM Studio and Ollama)**:
+- ✅ **Qwen3 30B @ Q4/Q8** - Excellent tool calling on all platforms
+- ✅ **Qwen3 8B (standard)** - Good balance, works reliably
+- ✅ **OpenAI GPT-5.2 series** - Excellent (cloud)
+- ✅ **Google Gemini 3 Pro** - Excellent (cloud)
+
+**Platform-Specific Considerations**:
+- **For Ollama**: Smaller models (4B-7B) may work better than on LM Studio
+- **For LM Studio**: Vision-Language (VL) variants work well with updated runtimes
+- **Budget Hardware**: Start with 8B models and test if smaller works on your platform
+
+### Testing Your Model
+
+When tool calling **doesn't work**, you'll see:
+- Model claims "I turned on the lights" but nothing happens
+- No `perform_action` tool calls in the logs
+- Actions don't execute, only narration
+
+When tool calling **works correctly**, you'll see in logs:
+- `discover_entities` called to find devices
+- `perform_action` called to control them
+- "✅ Successfully executed" messages
+- Devices actually change state
+
+### General Guidelines
+
+**Start with larger models** (30B) if your hardware supports it - they work consistently across platforms.
+
+**If using smaller models** (4B-8B), test thoroughly:
+- Try a simple command like "turn on the kitchen lights"
+- Check logs to verify tools are being called
+- Confirm the device actually changes state
+- If it doesn't work, try the same model on a different platform (LM Studio vs Ollama)
+
+**Vision-Language (VL) models** are optimized for multimodal tasks and may have different tool calling behavior than standard models.
 
 ### Dynamic Model Switching
 
