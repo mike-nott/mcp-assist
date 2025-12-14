@@ -55,8 +55,12 @@ Instead of dumping all entities, MCP Assist:
 
 ## Installation
 
+### Add to HACS
+
+[![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mike-nott&repository=mcp-assist&category=integration)
+
 ### Option A: HACS (Recommended)
-1. Add this repository to HACS as a custom repository
+1. Click the badge above to add this repository to HACS, or manually add it as a custom repository
 2. Install "MCP Assist" from HACS
 3. Restart Home Assistant
 
