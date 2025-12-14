@@ -5,6 +5,40 @@ All notable changes to MCP Assist will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-12-14
+
+### Fixed
+- **JSON Serialization Error**: Removed malformed card data structure that prevented voice responses from being delivered to users
+- **OpenAI/Gemini Configuration Bugs**: Fixed server type preservation and data fallback patterns in config flow
+  - Server type now correctly preserved when editing profiles
+  - Data fallback pattern fixed: `options → data → defaults`
+  - Profile type no longer switches unexpectedly when editing
+- **Configuration Caching**: Converted all configuration values to dynamic `@property` methods
+  - Model changes now take effect immediately without restarting Home Assistant
+  - All parameters (temperature, max_tokens, etc.) apply instantly
+  - Significantly improved UX for testing and configuration changes
+
+### Changed
+- **Model Support**: Updated to latest GPT-5.2 and Gemini 3.0 model names
+  - GPT-5 models now use `max_completion_tokens` instead of `max_tokens`
+  - Temperature parameter excluded for GPT-5+ and o1 models (they only support default of 1.0)
+
+### Added
+- **Model Compatibility Guide**: Comprehensive documentation on model performance
+  - Explains inference engine differences (LM Studio vs Ollama)
+  - Documents platform-specific model behavior (e.g., Qwen3 4B works on Ollama but not LM Studio)
+  - Provides testing guidance to verify tool calling works correctly
+  - Includes recommendations for different use cases (local vs cloud, hardware constraints)
+- **Enhanced Debug Logging**: Added comprehensive logging for troubleshooting
+  - System prompt length and preview
+  - Message counts and content lengths
+  - Tool response details with line-by-line output
+  - Exact payload details (model, temperature, max_tokens)
+
+### Improved
+- **Code Refactoring**: Cleaned up obsolete code and simplified CustomToolsLoader
+- **Provider-Agnostic Naming**: Further refinements to multi-provider architecture
+
 ## [0.3.0] - 2025-12-14
 
 ### Added
@@ -89,12 +123,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Local Support | Cloud Support | Models | Key Features |
 |---------|--------------|---------------|--------|--------------|
+| **0.3.1** | LM Studio, Ollama | OpenAI, Gemini | GPT-5.2, Gemini 3.0 | Bug fixes, dynamic config |
 | **0.3.0** | LM Studio, Ollama | OpenAI, Gemini | GPT-5.2, Gemini 3.0 | Multi-provider, cloud auth |
 | **0.2.0** | LM Studio, Ollama | None | Any local model | Initial MCP release |
 
 ---
 
 ## Upgrade Notes
+
+### Upgrading to 0.3.1
+
+**Backward Compatibility**: ✅ Fully compatible
+- All existing configurations continue working
+- No breaking changes
+- Drop-in replacement for 0.3.0
+
+**Key Improvements**:
+- **Voice responses now work correctly** - JSON serialization bug fixed
+- **Model changes take effect immediately** - No need to restart Home Assistant
+- **Configuration editing is more reliable** - Server type preservation fixed
+
+**Recommended Actions**:
+- After upgrading, you can now change models in the config UI without restarting HA
+- If you experienced "no response" issues in 0.3.0, this release fixes it
+- Review the Model Compatibility Guide in the README for optimal model selection
+
+**Breaking Changes**: None
 
 ### Upgrading to 0.3.0
 
