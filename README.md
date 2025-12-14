@@ -243,6 +243,63 @@ Instead of dumping all entities, MCP Assist:
 - **Enable Web Search**: Turn on Brave Search & URL reading tools
 - **Brave Search API Key**: Get one from https://brave.com/search/api/
 
+## Model Compatibility Guide
+
+Not all LLM models support tool calling (function calling) equally well. Based on testing, here's what works:
+
+### ✅ Confirmed Working Models
+
+**Qwen3 Series (Local - LM Studio/Ollama)**:
+- ✅ **Qwen3 30B @ Q4** - Good balance of speed and capability
+- ✅ **Qwen3 30B @ Q8** - Higher quality, slower but excellent tool calling
+- ✅ **Qwen3 VL 8B @ Q4** - Smaller, faster, still handles tools well
+- ✅ **Qwen3 VL 8B @ Q8** - Good quality for the size
+
+**Cloud Models**:
+- ✅ **OpenAI GPT-5.2 series** - Excellent tool calling support
+- ✅ **Google Gemini 3 Pro** - Excellent tool calling support
+
+### ❌ Models with Issues
+
+- ❌ **Qwen3 4B** - Too small, hallucinates actions instead of calling tools
+  - The model will claim it "turned on the lights" but won't actually call the `perform_action` tool
+  - Actions don't execute, only narrates what it would do
+
+### Recommendations
+
+**For Local LLMs**:
+- **Best Balance**: Qwen3 30B @ Q4 (fast, reliable, good tool calling)
+- **Best Quality**: Qwen3 30B @ Q8 (slower but excellent)
+- **Budget Hardware**: Qwen3 VL 8B @ Q4 (works well for most use cases)
+- **Avoid**: Models smaller than 8B parameters - they struggle with tool calling
+
+**For Cloud LLMs**:
+- **OpenAI**: Any GPT-5.2 variant works excellently
+- **Gemini**: Gemini 3 Pro variants are highly capable
+
+### Why Model Size Matters
+
+Tool calling (function calling) requires the model to:
+1. Understand the user's request
+2. Decide which tool to call
+3. Format the tool arguments correctly as JSON
+4. Interpret the tool results
+5. Generate a natural response
+
+**Models under 8B parameters** often struggle with steps 2-4, leading to:
+- Hallucinating actions ("I turned on the lights") without calling tools
+- Incorrect JSON formatting
+- Misunderstanding tool results
+
+**Larger models (8B+)** handle this reliably because they have more capacity to follow complex instructions while maintaining conversation quality.
+
+### Dynamic Model Switching
+
+One of MCP Assist's features is **dynamic model switching** - you can change models in the configuration UI and it takes effect immediately without restarting Home Assistant. This makes it easy to:
+- Test different models
+- Switch between fast (Q4) and quality (Q8) quantizations
+- Try new models as they're released
+
 ## Multi-Profile Support
 
 You can create multiple MCP Assist profiles for different use cases:
