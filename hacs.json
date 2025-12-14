@@ -6,5 +6,5 @@
   "render_readme": true,
   "domains": ["conversation"],
   "iot_class": "Local Polling",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
