@@ -267,22 +267,6 @@ Tool calling (function calling) requires the model to:
 - **Inference engine**: LM Studio and Ollama optimize models differently
 - **Quantization level**: Q4 vs Q8 can affect instruction following
 
-### Inference Engine Differences
-
-**The same model can behave very differently on different platforms:**
-
-**Example findings from testing**:
-- Qwen3 4B: Works on Ollama ✅, hallucinates on LM Studio ❌
-- Qwen3 VL 8B: Works on LM Studio ✅, doesn't work on Ollama ❌
-- Qwen3 8B (standard): Works on both ✅
-- Qwen3 30B: Works excellently on both ✅
-
-This happens because:
-- **Ollama** may have optimized smaller models for tool calling
-- **LM Studio** (with updated runtimes) handles Vision-Language models better
-- Each engine uses different inference optimizations and defaults
-- Quantization implementations vary between platforms
-
 ### Recommended Models
 
 **Consistently Reliable (tested on both LM Studio and Ollama)**:
