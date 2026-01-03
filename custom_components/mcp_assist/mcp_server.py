@@ -1,6 +1,7 @@
 """MCP Server for Home Assistant entity discovery."""
 
 import asyncio
+import ipaddress
 import json
 import logging
 from typing import Any, Dict, List
@@ -19,7 +20,9 @@ from .const import (
     MCP_PROTOCOL_VERSION,
     MAX_ENTITIES_PER_DISCOVERY,
     CONF_LMSTUDIO_URL,
+    CONF_ALLOWED_IPS,
     DEFAULT_LMSTUDIO_URL,
+    DEFAULT_ALLOWED_IPS,
 )
 from .discovery import EntityDiscovery
 from .domain_registry import (
@@ -70,7 +73,20 @@ class MCPServer:
         except Exception as e:
             _LOGGER.warning("Could not parse LM Studio URL '%s': %s", lmstudio_url, e)
 
-        _LOGGER.info("MCP server allowed IPs: %s", self.allowed_ips)
+        # Add user-configured allowed IPs/CIDR ranges
+        if entry:
+            allowed_ips_str = entry.options.get(CONF_ALLOWED_IPS,
+                                               entry.data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS))
+            if allowed_ips_str:
+                # Parse comma-separated list
+                additional_ips = [ip.strip() for ip in allowed_ips_str.split(',') if ip.strip()]
+                for ip_entry in additional_ips:
+                    if ip_entry not in self.allowed_ips:
+                        self.allowed_ips.append(ip_entry)
+                if additional_ips:
+                    _LOGGER.info("MCP server added user-configured allowed IPs/ranges: %s", additional_ips)
+
+        _LOGGER.info("MCP server allowed IPs/ranges: %s", self.allowed_ips)
 
         # Initialize custom tools only if enabled
         self.custom_tools = None
@@ -143,6 +159,7 @@ class MCPServer:
         - IPv4 with port: 192.168.1.7:12345
         - IPv6: ::1 or 2001:db8::1
         - IPv6 with port: [2001:db8::1]:8080
+        - CIDR ranges: 172.30.0.0/16, 192.168.1.0/24
         """
         if not self.allowed_ips:
             # If no IPs configured, allow all (backward compatible)
@@ -165,10 +182,29 @@ class MCPServer:
             ip_only = ip_only.split(':')[0]
         # Else: IPv6 without port (::1) or IPv4 without port - use as-is
 
-        # Check if client IP matches any allowed IP
-        for allowed_ip in self.allowed_ips:
-            if ip_only == allowed_ip:
+        # Convert to IP address object for CIDR checking
+        try:
+            client_ip_obj = ipaddress.ip_address(ip_only)
+        except ValueError:
+            _LOGGER.warning("Invalid client IP format: %s", ip_only)
+            return False
+
+        # Check if client IP matches any allowed IP or CIDR range
+        for allowed_entry in self.allowed_ips:
+            # Check for exact IP match first (backward compatible)
+            if ip_only == allowed_entry:
                 return True
+
+            # Check if it's a CIDR range
+            if '/' in allowed_entry:
+                try:
+                    network = ipaddress.ip_network(allowed_entry, strict=False)
+                    if client_ip_obj in network:
+                        return True
+                except ValueError:
+                    # Invalid CIDR format, skip
+                    _LOGGER.warning("Invalid CIDR format in allowed IPs: %s", allowed_entry)
+                    continue
 
         return False
 

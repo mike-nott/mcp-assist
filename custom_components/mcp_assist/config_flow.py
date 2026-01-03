@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 from typing import Any
 
@@ -44,6 +45,7 @@ from .const import (
     CONF_DEBUG_MODE,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
+    CONF_ALLOWED_IPS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
@@ -65,6 +67,7 @@ from .const import (
     DEFAULT_DEBUG_MODE,
     DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
+    DEFAULT_ALLOWED_IPS,
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
@@ -171,6 +174,31 @@ async def fetch_models_from_gemini(hass: HomeAssistant, api_key: str) -> list[st
     except Exception as err:
         _LOGGER.error("💥 FETCH: Gemini fetch failed: %s", err)
         return []
+
+
+def validate_allowed_ips(allowed_ips_str: str) -> tuple[bool, str]:
+    """Validate comma-separated list of IP addresses and CIDR ranges.
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        If valid, error_message is empty string
+    """
+    if not allowed_ips_str or not allowed_ips_str.strip():
+        # Empty is valid (no additional IPs)
+        return True, ""
+
+    # Parse comma-separated values
+    ip_list = [ip.strip() for ip in allowed_ips_str.split(',') if ip.strip()]
+
+    for ip_entry in ip_list:
+        try:
+            # Try parsing as IP network (handles both individual IPs and CIDR)
+            ipaddress.ip_network(ip_entry, strict=False)
+        except ValueError:
+            # Invalid IP or CIDR format
+            return False, f"Invalid IP address or CIDR range: {ip_entry}"
+
+    return True, ""
 
 
 STEP_USER_DATA_SCHEMA = vol.Schema({
@@ -398,6 +426,13 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not 1024 <= mcp_port <= 65535:
                 errors[CONF_MCP_PORT] = "invalid_port"
 
+            # Validate allowed IPs
+            allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
+            is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
+            if not is_valid:
+                errors[CONF_ALLOWED_IPS] = "invalid_ip"
+                _LOGGER.warning("Invalid allowed IPs: %s", error_msg)
+
             if not errors:
                 # Combine data from all 4 steps
                 combined_data = {
@@ -450,6 +485,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS): vol.Coerce(int),
             vol.Optional(CONF_ENABLE_CUSTOM_TOOLS, default=DEFAULT_ENABLE_CUSTOM_TOOLS): bool,
             vol.Optional(CONF_BRAVE_API_KEY, default=DEFAULT_BRAVE_API_KEY): str,
+            vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
             vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
         })
@@ -472,32 +508,42 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         """Manage the options."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            # Support both old and new config keys
-            if CONF_FOLLOW_UP_MODE in user_input and CONF_RESPONSE_MODE not in user_input:
-                user_input[CONF_RESPONSE_MODE] = user_input[CONF_FOLLOW_UP_MODE]
-                del user_input[CONF_FOLLOW_UP_MODE]
+            # Validate allowed IPs if provided
+            allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
+            is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
+            if not is_valid:
+                errors[CONF_ALLOWED_IPS] = "invalid_ip"
+                _LOGGER.warning("Invalid allowed IPs in options: %s", error_msg)
 
-            # Update entry title if profile name changed
-            new_profile_name = user_input.get(CONF_PROFILE_NAME)
-            old_profile_name = self.config_entry.options.get(CONF_PROFILE_NAME,
-                                                              self.config_entry.data.get(CONF_PROFILE_NAME))
-            if new_profile_name and new_profile_name != old_profile_name:
-                # Get server type from original data (can't be changed in options)
-                server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-                server_display_map = {
-                    SERVER_TYPE_LMSTUDIO: "LM Studio",
-                    SERVER_TYPE_OLLAMA: "Ollama",
-                    SERVER_TYPE_OPENAI: "OpenAI",
-                    SERVER_TYPE_GEMINI: "Gemini",
-                }
-                server_display = server_display_map.get(server_type, "LM Studio")
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    title=f"{server_display} - {new_profile_name}"
-                )
+            if not errors:
+                # Support both old and new config keys
+                if CONF_FOLLOW_UP_MODE in user_input and CONF_RESPONSE_MODE not in user_input:
+                    user_input[CONF_RESPONSE_MODE] = user_input[CONF_FOLLOW_UP_MODE]
+                    del user_input[CONF_FOLLOW_UP_MODE]
 
-            return self.async_create_entry(title="", data=user_input)
+                # Update entry title if profile name changed
+                new_profile_name = user_input.get(CONF_PROFILE_NAME)
+                old_profile_name = self.config_entry.options.get(CONF_PROFILE_NAME,
+                                                                  self.config_entry.data.get(CONF_PROFILE_NAME))
+                if new_profile_name and new_profile_name != old_profile_name:
+                    # Get server type from original data (can't be changed in options)
+                    server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+                    server_display_map = {
+                        SERVER_TYPE_LMSTUDIO: "LM Studio",
+                        SERVER_TYPE_OLLAMA: "Ollama",
+                        SERVER_TYPE_OPENAI: "OpenAI",
+                        SERVER_TYPE_GEMINI: "Gemini",
+                    }
+                    server_display = server_display_map.get(server_type, "LM Studio")
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry,
+                        title=f"{server_display} - {new_profile_name}"
+                    )
+
+                return self.async_create_entry(title="", data=user_input)
 
         # Get current values from options, then data, then defaults
         options = self.config_entry.options
@@ -651,13 +697,19 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     default=options.get(CONF_BRAVE_API_KEY, data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY))
                 ): str,
 
-                # 14. MCP Server Port
+                # 14. Allowed IPs
+                vol.Optional(
+                    CONF_ALLOWED_IPS,
+                    default=options.get(CONF_ALLOWED_IPS, data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS))
+                ): str,
+
+                # 15. MCP Server Port
                 vol.Required(
                     CONF_MCP_PORT,
                     default=options.get(CONF_MCP_PORT, data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT))
                 ): vol.Coerce(int),
 
-                # 15. Debug Mode
+                # 16. Debug Mode
                 vol.Required(
                     CONF_DEBUG_MODE,
                     default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
@@ -670,6 +722,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=options_schema,
+            errors=errors,
         )
 
 
