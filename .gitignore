@@ -137,3 +137,6 @@ quick_test_tools.sh
 ROLLBACK_POINT.txt
 *_SUMMARY.md
 README_DEPLOYMENT.md
+
+# AI Assistant Documentation (private)
+CLAUDE.md
