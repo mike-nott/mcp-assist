@@ -39,6 +39,7 @@
           "response_mode": "Response Mode",
           "enable_custom_tools": "Enable Web Search",
           "brave_api_key": "Brave Search API Key",
+          "allowed_ips": "Additional Allowed IPs/Ranges",
           "mcp_port": "MCP Server Port",
           "debug_mode": "Debug Mode"
         }
@@ -49,6 +50,7 @@
       "no_models": "No models loaded on the server. Please load a model first.",
       "invalid_model": "The specified model is not available on the server.",
       "invalid_port": "Port must be between 1024 and 65535.",
+      "invalid_ip": "Invalid IP address or CIDR range format. Use comma-separated values like: 172.30.0.0/16, 192.168.1.100",
       "profile_name_required": "Profile name is required.",
       "invalid_json": "Invalid JSON format. Please check your MCP servers configuration.",
       "invalid_api_key": "Invalid API key. Please check and try again.",
@@ -78,6 +80,7 @@
           "response_mode": "Response Mode",
           "enable_custom_tools": "Enable Web Search",
           "brave_api_key": "Brave Search API Key",
+          "allowed_ips": "Additional Allowed IPs/Ranges",
           "mcp_port": "MCP Server Port",
           "debug_mode": "Debug Mode"
         }

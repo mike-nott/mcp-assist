@@ -28,6 +28,7 @@ CONF_MAX_ITERATIONS = "max_iterations"
 CONF_DEBUG_MODE = "debug_mode"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
+CONF_ALLOWED_IPS = "allowed_ips"
 
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
@@ -53,6 +54,7 @@ DEFAULT_MAX_ITERATIONS = 5
 DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
+DEFAULT_ALLOWED_IPS = ""
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"
