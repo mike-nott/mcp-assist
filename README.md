@@ -242,6 +242,7 @@ Instead of dumping all entities, MCP Assist:
 
 ### MCP Server Settings
 - **MCP Server Port**: Default 8090 (change if port conflict)
+- **Additional Allowed IPs/Ranges**: Whitelist Docker containers (e.g., `172.30.0.0/16`) or specific IPs for external MCP clients like Claude Code add-on
 
 ### Web Search
 - **Enable Web Search**: Turn on Brave Search & URL reading tools
