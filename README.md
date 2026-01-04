@@ -132,6 +132,12 @@ The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your
 - "Turn off all the lights in the bedroom"
 - "What's the temperature in the living room?"
 
+### Multi-Turn Conversations
+- **User**: "What lights are on?"
+- **Assistant**: "The kitchen and living room lights are on."
+- **User**: "Turn off the kitchen one"
+- **Assistant**: "I've turned off the kitchen light."
+
 ### Complex Query Example
 
 **User**: "Do we have a leak?"
@@ -161,12 +167,6 @@ The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your
 ```
 
 **Assistant**: "I've shut off the main water valve."
-
-### Multi-Turn Conversations
-- **User**: "What lights are on?"
-- **Assistant**: "The kitchen and living room lights are on."
-- **User**: "Turn off the kitchen one"
-- **Assistant**: "I've turned off the kitchen light."
 
 ### Web Search (if enabled)
 - "What's the weather forecast for tomorrow?"
