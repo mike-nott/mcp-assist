@@ -48,8 +48,10 @@ from .const import (
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
     SERVER_TYPE_GEMINI,
+    SERVER_TYPE_ANTHROPIC,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
+    ANTHROPIC_BASE_URL,
 )
 from .conversation_history import ConversationHistory
 
@@ -74,6 +76,8 @@ class MCPAssistAgent(AbstractConversationAgent):
             self.base_url = OPENAI_BASE_URL
         elif self.server_type == SERVER_TYPE_GEMINI:
             self.base_url = GEMINI_BASE_URL
+        elif self.server_type == SERVER_TYPE_ANTHROPIC:
+            self.base_url = ANTHROPIC_BASE_URL
         else:
             # LM Studio or Ollama - URL can change, so make it a property below
             pass
@@ -99,7 +103,7 @@ class MCPAssistAgent(AbstractConversationAgent):
     @property
     def base_url_dynamic(self) -> str:
         """Get base URL (dynamic for local servers)."""
-        if self.server_type in [SERVER_TYPE_OPENAI, SERVER_TYPE_GEMINI]:
+        if self.server_type in [SERVER_TYPE_OPENAI, SERVER_TYPE_GEMINI, SERVER_TYPE_ANTHROPIC]:
             return self.base_url  # Static
         else:
             # LM Studio/Ollama - read dynamically
@@ -165,6 +169,7 @@ class MCPAssistAgent(AbstractConversationAgent):
             SERVER_TYPE_OLLAMA: "Ollama",
             SERVER_TYPE_OPENAI: "OpenAI",
             SERVER_TYPE_GEMINI: "Google Gemini",
+            SERVER_TYPE_ANTHROPIC: "Anthropic Claude",
         }.get(self.server_type, "LLM")
         return f"Powered by {server_name} with MCP entity discovery"
 
@@ -734,6 +739,9 @@ class MCPAssistAgent(AbstractConversationAgent):
             return {"Authorization": f"Bearer {self.api_key}"}
         elif self.server_type == SERVER_TYPE_GEMINI:
             # Gemini OpenAI-compatible endpoint uses Bearer token like OpenAI
+            return {"Authorization": f"Bearer {self.api_key}"}
+        elif self.server_type == SERVER_TYPE_ANTHROPIC:
+            # Anthropic OpenAI-compatible endpoint uses Bearer token
             return {"Authorization": f"Bearer {self.api_key}"}
         else:
             # Local servers (LM Studio, Ollama) don't need auth

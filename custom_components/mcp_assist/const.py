@@ -7,6 +7,7 @@ SERVER_TYPE_LMSTUDIO = "lmstudio"
 SERVER_TYPE_OLLAMA = "ollama"
 SERVER_TYPE_OPENAI = "openai"
 SERVER_TYPE_GEMINI = "gemini"
+SERVER_TYPE_ANTHROPIC = "anthropic"
 
 # Configuration keys
 CONF_PROFILE_NAME = "profile_name"
@@ -41,6 +42,7 @@ DEFAULT_API_KEY = ""
 # Cloud provider base URLs
 OPENAI_BASE_URL = "https://api.openai.com"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 
 # No hardcoded model lists - models are fetched dynamically from provider APIs
 DEFAULT_MODEL_NAME = "model"

@@ -51,6 +51,7 @@ from .const import (
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
     SERVER_TYPE_GEMINI,
+    SERVER_TYPE_ANTHROPIC,
     DEFAULT_SERVER_TYPE,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_OLLAMA_URL,
@@ -212,6 +213,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema({
                 {"value": "ollama", "label": "Ollama"},
                 {"value": "openai", "label": "OpenAI"},
                 {"value": "gemini", "label": "Google Gemini"},
+                {"value": "anthropic", "label": "Anthropic (Claude)"},
             ],
             mode=SelectSelectorMode.LIST,
         )
@@ -454,6 +456,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     SERVER_TYPE_OLLAMA: "Ollama",
                     SERVER_TYPE_OPENAI: "OpenAI",
                     SERVER_TYPE_GEMINI: "Gemini",
+                    SERVER_TYPE_ANTHROPIC: "Claude",
                 }
                 server_display = server_display_map.get(server_type, "LM Studio")
 
@@ -539,6 +542,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         SERVER_TYPE_OLLAMA: "Ollama",
                         SERVER_TYPE_OPENAI: "OpenAI",
                         SERVER_TYPE_GEMINI: "Gemini",
+                        SERVER_TYPE_ANTHROPIC: "Claude",
                     }
                     server_display = server_display_map.get(server_type, "LM Studio")
                     self.hass.config_entries.async_update_entry(

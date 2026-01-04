@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Set
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.core import HomeAssistant, callback, Event, Context
 from homeassistant.helpers import (
     area_registry as ar,
     entity_registry as er,
@@ -43,11 +43,8 @@ class IndexManager:
         self._refresh_debounce_seconds = 60
 
     async def start(self) -> None:
-        """Start index manager and generate initial index."""
+        """Start index manager and set up event listeners."""
         _LOGGER.info("Starting Smart Index Manager")
-
-        # Generate initial index
-        await self.refresh_index()
 
         # Listen for entity registry changes
         @callback
@@ -62,6 +59,7 @@ class IndexManager:
         )
 
         _LOGGER.info("✅ Smart Index Manager started successfully")
+        _LOGGER.debug("Index will be generated lazily on first request")
 
     def _schedule_refresh(self) -> None:
         """Schedule index refresh with debouncing."""
@@ -590,11 +588,15 @@ Focus on meaningful categories that would help discover relevant entities for us
         if not agent:
             raise ValueError("Agent not available for LLM inference")
 
-        # Create a minimal conversation input
+        # Create a minimal conversation input with all required fields
         conversation_input = conversation.ConversationInput(
             text=prompt,
+            context=Context(),  # Minimal context
             conversation_id=None,  # One-shot query
+            device_id=None,  # Not from a specific device
+            satellite_id=None,  # Not from a satellite
             language="en",
+            agent_id=entry.entry_id,  # Use the entry ID as agent ID
         )
 
         # Call the agent
