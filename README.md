@@ -50,72 +50,7 @@ Instead of dumping all entities, MCP Assist:
 
 ## Smart Entity Index (v0.5.0+)
 
-The Smart Entity Index is a pre-generated system structure overview that enables context-aware entity discovery without dumping full entity lists.
-
-### What's in the Index?
-
-The index provides a lightweight (~400-800 tokens) snapshot of your Home Assistant system:
-- **Areas** with entity counts (e.g., "Kitchen: 41 entities")
-- **Domains** with counts (e.g., "sensor: 180, light: 31")
-- **Device Classes** grouped by domain (e.g., "sensor.temperature: 32, binary_sensor.door: 23")
-- **People** registered in your home
-- **Calendars, Zones, Automations, Scripts** available
-- **Input Helpers** for manual controls
-
-### How It Works
-
-1. **Index Generated at Startup** - Automatically created when MCP Assist loads
-2. **Auto-Refresh on Changes** - Updates when entities are added/removed (60-second debounce)
-3. **LLM Calls get_index()** - Retrieves the index once at conversation start
-4. **Smart Queries** - LLM uses device_class information to make targeted discover_entities calls
-
-### Gap-Filling for Uncommon Devices
-
-Many entities don't have a standardized `device_class` (especially custom integrations and uncommon devices). The Smart Entity Index includes **LLM-powered gap-filling** to categorize these entities:
-
-**How Gap-Filling Works**:
-1. Identifies entities without `device_class` attributes
-2. Extracts common naming patterns (e.g., `*_person_detected`, `*_ble_area`)
-3. Groups similar entities together
-4. Uses your configured LLM to infer semantic categories
-5. Adds these as "inferred_types" in the index
-
-**Example**:
-```
-Entities found: sensor.front_door_person_detected, sensor.backyard_person_detected
-Pattern: *_person_detected (2 entities)
-LLM inference: "person_detection_sensor"
-Index entry: "inferred_types.person_detection_sensor: 2"
-```
-
-**Benefits**:
-- Works with **any** custom integration or device
-- Automatically adapts to your specific setup
-- No manual configuration needed
-- Can be disabled in Advanced Settings if not needed
-
-**Privacy**: Gap-filling uses your configured conversation agent (local or cloud), respecting your privacy preferences.
-
-### Example: "Do we have a leak?"
-
-**Without Index:**
-- LLM searches for "leak" in entity names → might miss water flow sensors
-- Multiple trial-and-error queries
-
-**With Index:**
-```
-LLM reads index → sees binary_sensor.moisture: 5, sensor.volume_flow_rate: 1
-LLM knows: leak detection = moisture sensors + water flow
-LLM queries: discover_entities(device_class="moisture")
-Result: 5 moisture sensors found, current states checked
-```
-
-### Benefits
-
-- **Faster queries** - LLM knows what to search for
-- **More accurate** - Uses standardized device_class vocabulary
-- **Token efficient** - ~800 tokens for index vs ~15k for full dump
-- **Works with any HA setup** - Automatically adapts to your devices
+The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your Home Assistant system structure, enabling context-aware queries without full entity dumps. The index includes areas, domains, device classes, people, calendars, zones, automations, and scripts. For entities without standardized device_class attributes (like custom integrations), LLM-powered gap-filling automatically infers semantic categories from naming patterns. This results in faster, more accurate queries that use ~95% fewer tokens compared to traditional entity dumps.
 
 ## Requirements
 
@@ -189,78 +124,6 @@ Result: 5 moisture sensors found, current states checked
 1. In Home Assistant, go to **Settings** → **Voice Assistants**
 2. Set your preferred assistant to your MCP Assist profile name
 3. Test with commands!
-
-## Cloud Provider Setup
-
-### OpenAI Setup
-
-1. **Get an API Key**:
-   - Visit https://platform.openai.com/api-keys
-   - Sign in or create an account
-   - Click "Create new secret key"
-   - Copy the key immediately (you won't see it again)
-
-2. **Add to MCP Assist**:
-   - Select "OpenAI" as Server Type
-   - Paste your API key in the API Key field
-   - Select your model:
-     - **gpt-5.2-2025-12-11** (Standard - most capable)
-     - **gpt-5.2-instant** (Faster for chat/info seeking)
-     - **gpt-5.2-thinking** (Best for coding/planning)
-     - **gpt-5.2-pro-2025-12-11** (Pro - highest accuracy)
-
-3. **Cost Considerations**:
-   - GPT-5.2 Standard: ~$0.05 per 1K tokens (input), $0.15 per 1K tokens (output)
-   - GPT-5.2 Pro: ~$0.10 per 1K tokens (input), $0.30 per 1K tokens (output)
-   - With MCP Assist's 95% reduction: ~$0.02-0.10 per typical conversation
-   - Set up billing limits at https://platform.openai.com/account/limits
-
-4. **Security**:
-   - Never share your API key
-   - Rotate keys regularly
-   - Monitor usage at https://platform.openai.com/usage
-   - Keys are stored securely in Home Assistant's configuration
-
-### Google Gemini Setup
-
-1. **Get an API Key**:
-   - Visit https://aistudio.google.com/app/apikey
-   - Sign in with your Google account
-   - Click "Create API Key"
-   - Copy the key
-
-2. **Add to MCP Assist**:
-   - Select "Google Gemini" as Server Type
-   - Paste your API key in the API Key field
-   - Select your model:
-     - **gemini-3-pro-preview-11-2025** (Latest - reasoning-first)
-     - **gemini-3-pro-preview-11-2025-thinking** (Enhanced reasoning)
-     - **gemini-3-pro-preview** (Global endpoints)
-
-3. **Cost Considerations**:
-   - Gemini 3 Pro: Free tier available for testing
-   - Gemini 3 Pro: ~$0.00125 per 1K tokens (input), ~$0.005 per 1K tokens (output)
-   - With MCP Assist: Most conversations stay within free tier
-   - Check pricing at https://ai.google.dev/pricing
-
-4. **Security**:
-   - Never commit API keys to version control
-   - API keys are stored securely in Home Assistant
-   - Monitor usage at https://aistudio.google.com/
-   - Revoke compromised keys immediately
-
-### Cloud vs Local LLMs
-
-| Feature | Cloud (OpenAI/Gemini/Anthropic) | Local (LM Studio/Ollama) |
-|---------|----------------------|--------------------------|
-| **Cost** | Pay per use | Free (hardware cost) |
-| **Privacy** | Data sent to provider | Stays on your network |
-| **Performance** | Very fast, powerful models | Depends on hardware |
-| **Availability** | Requires internet | Works offline |
-| **Setup** | Just API key | Requires model download |
-| **Token Efficiency** | Critical (saves money) | Nice to have (saves time) |
-
-**MCP Assist's 95% token reduction is especially valuable with cloud providers**, significantly reducing API costs.
 
 ## Usage Examples
 
@@ -340,6 +203,22 @@ Tool calling (function calling) requires the model to:
 - **Inference engine**: LM Studio and Ollama optimize models differently
 - **Quantization level**: Q4 vs Q8 can affect instruction following
 
+### Instruct vs Thinking Models
+
+**Instruct Models** (e.g., `qwen3-8b-instruct`, `gpt-5.2-instant`):
+- Fast response times
+- Best for simple, single-action requests ("turn on the kitchen lights")
+- May struggle with complex queries requiring multiple tool calls
+- Good for basic voice commands
+
+**Thinking Models** (e.g., `qwen3-8b-thinking`, `gpt-5.2-thinking`, `claude-3-5-sonnet`):
+- Slower response times (more deliberate reasoning)
+- **Much better at complex requests** requiring multiple tool calls and context
+- Handles multi-step queries reliably ("check all rooms for open windows, then turn off lights in those rooms")
+- **Recommended for Home Assistant** where queries often involve discovery + action combinations
+
+**Recommendation**: Use thinking models for MCP Assist. The improved reliability with multi-tool queries outweighs the slightly slower response time for most home automation scenarios.
+
 ### Recommended Models
 
 **Consistently Reliable (tested on both LM Studio and Ollama)**:
@@ -384,16 +263,6 @@ One of MCP Assist's features is **dynamic model switching** - you can change mod
 - Test different models
 - Switch between fast (Q4) and quality (Q8) quantizations
 - Try new models as they're released
-
-## Multi-Profile Support
-
-You can create multiple MCP Assist profiles for different use cases:
-
-- **Kitchen Assistant**: Connected to Ollama, casual tone
-- **Bedroom Assistant**: Connected to LM Studio, quiet and efficient
-- **Main Assistant**: Cloud-based (OpenAI), most capable
-
-Each profile runs independently and connects to the same shared MCP server.
 
 ## Troubleshooting
 
@@ -453,35 +322,6 @@ The integration only discovers entities that are exposed to the "conversation" a
 1. Go to **Settings** → **Voice Assistants** → **Expose**
 2. Select entities you want the assistant to control
 3. The integration will automatically discover these when needed
-
-## Development
-
-This integration is open source. Contributions are welcome!
-
-### MCP Tools Available
-
-The integration exposes these MCP tools to your LLM:
-
-- **get_index**: Get system structure index (areas, domains, device_classes, people, pets, calendars, zones)
-- **discover_entities**: Find entities by:
-  - `name_contains` - Search by friendly name
-  - `area` - Filter by location
-  - `domain` - Filter by entity type (light, sensor, etc.)
-  - `device_class` - Filter by device class (temperature, door, etc.)
-  - `name_pattern` - Wildcard pattern matching (e.g., `*_person_detected`)
-  - `inferred_type` - Use LLM-inferred categories from index
-  - `state` - Filter by current state
-- **get_entity_details**: Get detailed state and attributes for specific entities
-- **perform_action**: Control devices (turn_on, turn_off, set_temperature, etc.)
-- **list_areas**: List all areas with entity counts
-- **list_domains**: List all entity types available
-- **set_conversation_state**: Signal if expecting user response (for smart follow-ups)
-
-### Optional Web Search Tools
-
-When "Enable Web Search" is on:
-- **brave_search**: Search the web for current information
-- **read_url**: Extract content from web pages
 
 ## License
 
