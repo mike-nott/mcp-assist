@@ -282,18 +282,12 @@ One of MCP Assist's features is **dynamic model switching** - you can change mod
 - Check the URL matches where Ollama is running (default: `http://localhost:11434`)
 - Ensure the model is loaded in Ollama
 
-### OpenAI Connection Issues
-- Verify your API key is valid at https://platform.openai.com/api-keys
-- Check you have sufficient credits in your OpenAI account
-- Ensure your API key has proper permissions
+### Cloud Provider Connection Issues
+- Verify your API key is valid with your provider
+- Check you have sufficient credits/quota remaining
 - Check for rate limit errors in Home Assistant logs
-- Verify your internet connection is working
-
-### Gemini Connection Issues
-- Verify your API key at https://aistudio.google.com/app/apikey
-- Check if you're within rate limits (free tier: 15 RPM)
-- Ensure your Google Cloud project has the Gemini API enabled
 - Try regenerating your API key if authentication fails
+- Verify your internet connection is working
 - Check Home Assistant logs for specific error codes
 
 ### No Response from Assistant
