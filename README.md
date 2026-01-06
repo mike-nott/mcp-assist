@@ -33,6 +33,8 @@ Instead of dumping all entities, MCP Assist:
    - `discover_entities` - Find entities by type, area, domain, device_class, or state
    - `get_entity_details` - Get current state and attributes
    - `perform_action` - Control devices
+   - `run_script` - Execute scripts and return response data
+   - `run_automation` - Trigger automations manually
    - `list_areas` - List all areas in your home
    - `list_domains` - List all entity types
    - `set_conversation_state` - Smart follow-up handling
