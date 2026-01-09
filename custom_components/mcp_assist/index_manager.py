@@ -575,14 +575,19 @@ Example:
 
 Focus on meaningful categories that would help discover relevant entities for user queries."""
 
-        try:
-            # Call LLM via conversation agent
-            inferred = await self._call_llm_for_inference(prompt)
-            _LOGGER.info("LLM gap-filling completed: found %d inferred types", len(inferred))
-            return inferred
-        except Exception as err:
-            _LOGGER.warning("LLM gap-filling failed: %s. Index will not include inferred types.", err)
-            return {}
+        # TEMPORARY FIX: Disable gap-filling to avoid recursion issues during ConversationEntity migration
+        _LOGGER.debug("Gap-filling temporarily disabled during entity migration")
+        return {}
+
+        # TODO: Re-enable once ConversationEntity recursion is resolved
+        # try:
+        #     # Call LLM via conversation agent
+        #     inferred = await self._call_llm_for_inference(prompt)
+        #     _LOGGER.info("LLM gap-filling completed: found %d inferred types", len(inferred))
+        #     return inferred
+        # except Exception as err:
+        #     _LOGGER.warning("LLM gap-filling failed: %s. Index will not include inferred types.", err)
+        #     return {}
 
     async def _call_llm_for_inference(self, prompt: str) -> Dict[str, Any]:
         """Call the user's configured LLM to perform inference.

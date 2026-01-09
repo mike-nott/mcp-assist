@@ -88,5 +88,12 @@
         }
       }
     }
+  },
+  "entity": {
+    "conversation": {
+      "mcp_assist": {
+        "name": "{profile_name}"
+      }
+    }
   }
 }

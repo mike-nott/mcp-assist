@@ -8,8 +8,11 @@ from typing import Any, Dict, List, Optional, Literal
 
 import aiohttp
 
+from homeassistant.components import conversation
 from homeassistant.components.conversation import (
     AbstractConversationAgent,
+    ConversationEntity,
+    ConversationEntityFeature,
     ConversationInput,
     ConversationResult,
 )
@@ -34,6 +37,7 @@ from .const import (
     CONF_RESPONSE_MODE,
     CONF_SERVER_TYPE,
     CONF_API_KEY,
+    CONF_CONTROL_HA,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -44,6 +48,7 @@ from .const import (
     DEFAULT_RESPONSE_MODE,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
+    DEFAULT_CONTROL_HA,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
@@ -58,18 +63,47 @@ from .conversation_history import ConversationHistory
 _LOGGER = logging.getLogger(__name__)
 
 
-class MCPAssistAgent(AbstractConversationAgent):
-    """MCP Assist conversation agent with multi-provider support."""
+class MCPAssistConversationEntity(ConversationEntity):
+    """MCP Assist conversation entity with multi-provider support."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the agent."""
+        """Initialize the MCP Assist conversation entity."""
+        super().__init__()
+
         self.hass = hass
         self.entry = entry
         self.history = ConversationHistory()
 
+        # Entity attributes
+        profile_name = entry.data.get("profile_name", "MCP Assist")
+
         # Static configuration (doesn't change)
         data = entry.data
         self.server_type = data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+
+        # Server type display names
+        server_display_names = {
+            SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_OLLAMA: "Ollama",
+            SERVER_TYPE_OPENAI: "OpenAI",
+            SERVER_TYPE_GEMINI: "Gemini",
+            SERVER_TYPE_ANTHROPIC: "Claude",
+        }
+        server_display_name = server_display_names.get(self.server_type, self.server_type)
+
+        # Set entity attributes
+        self._attr_unique_id = entry.entry_id
+        self._attr_name = f"{server_display_name} - {profile_name}"
+        self._attr_suggested_object_id = f"{self.server_type}_{profile_name.lower().replace(' ', '_')}"
+
+        # Device info
+        self._attr_device_info = dr.DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=f"{server_display_name} - {profile_name}",
+            manufacturer="MCP Assist",
+            model=server_display_name,
+            entry_type=dr.DeviceEntryType.SERVICE,
+        )
 
         # Set base URL based on server type (static)
         if self.server_type == SERVER_TYPE_OPENAI:
@@ -168,8 +202,8 @@ class MCPAssistAgent(AbstractConversationAgent):
             SERVER_TYPE_LMSTUDIO: "LM Studio",
             SERVER_TYPE_OLLAMA: "Ollama",
             SERVER_TYPE_OPENAI: "OpenAI",
-            SERVER_TYPE_GEMINI: "Google Gemini",
-            SERVER_TYPE_ANTHROPIC: "Anthropic Claude",
+            SERVER_TYPE_GEMINI: "Gemini",
+            SERVER_TYPE_ANTHROPIC: "Claude",
         }.get(self.server_type, "LLM")
         return f"Powered by {server_name} with MCP entity discovery"
 
@@ -177,6 +211,44 @@ class MCPAssistAgent(AbstractConversationAgent):
     def supported_languages(self) -> list[str] | Literal["*"]:
         """Return supported languages."""
         return "*"  # Support all languages
+
+    @property
+    def supported_features(self) -> int:
+        """Return supported features."""
+        features = ConversationEntityFeature(0)
+
+        # Check if home control is enabled in config
+        control_enabled = self.entry.options.get(
+            CONF_CONTROL_HA,
+            self.entry.data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA)
+        )
+
+        if control_enabled:
+            features |= ConversationEntityFeature.CONTROL
+
+        return features
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+        conversation.async_set_agent(self.hass, self.entry, self)
+
+        # Store entity reference for index manager to access
+        if self.entry.entry_id in self.hass.data[DOMAIN]:
+            self.hass.data[DOMAIN][self.entry.entry_id]["agent"] = self
+
+        _LOGGER.info("Conversation entity registered: %s", self._attr_name)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """When entity will be removed from Home Assistant."""
+        conversation.async_unset_agent(self.hass, self.entry)
+
+        # Remove entity reference
+        if self.entry.entry_id in self.hass.data.get(DOMAIN, {}):
+            self.hass.data[DOMAIN][self.entry.entry_id].pop("agent", None)
+
+        await super().async_will_remove_from_hass()
+        _LOGGER.info("Conversation entity unregistered: %s", self._attr_name)
 
     async def async_process(
         self, user_input: ConversationInput

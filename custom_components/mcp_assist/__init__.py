@@ -4,18 +4,18 @@ import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.components import conversation
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN, CONF_MCP_PORT, DEFAULT_MCP_PORT
 from .mcp_server import MCPServer
-from .agent import MCPAssistAgent
 from .index_manager import IndexManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = []
+PLATFORMS = [Platform.CONVERSATION]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -64,19 +64,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["mcp_refcount"] += 1
         _LOGGER.debug("MCP server refcount: %d", hass.data[DOMAIN]["mcp_refcount"])
 
-        # Create conversation agent (unique per profile)
-        agent = MCPAssistAgent(hass, entry)
-
-        # Store agent data (per entry)
+        # Store metadata (per entry)
         hass.data[DOMAIN][entry.entry_id] = {
-            "agent": agent,
-            "profile_name": profile_name
+            "profile_name": profile_name,
+            "mcp_port": mcp_port
         }
 
-        # Register conversation agent
-        conversation.async_set_agent(hass, entry, agent)
+        # Forward to platform to create conversation entity
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-        _LOGGER.info("✅ Agent registered for profile '%s', Entry ID: %s", profile_name, entry.entry_id)
+        _LOGGER.info("✅ Profile '%s' setup complete, Entry ID: %s", profile_name, entry.entry_id)
 
         return True
 
@@ -90,8 +87,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     profile_name = entry.data.get("profile_name", "Default")
     _LOGGER.info("Unloading MCP Assist profile '%s'", profile_name)
 
-    # Unregister conversation agent
-    conversation.async_unset_agent(hass, entry)
+    # Unload platforms (this will unregister conversation entity)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    if not unload_ok:
+        return False
 
     # Remove entry data
     hass.data[DOMAIN].pop(entry.entry_id, None)
