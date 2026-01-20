@@ -249,16 +249,13 @@ Choose the model type that best fits your use case. Thinking/reasoning models of
 
 ### Recommended Models
 
-**Consistently Reliable (tested on both LM Studio and Ollama)**:
-- ✅ **Qwen3 30B @ Q4/Q8** - Excellent tool calling on all platforms
-- ✅ **Qwen3 8B (standard)** - Good balance, works reliably
-- ✅ **OpenAI GPT-5.2 series** - Excellent (cloud)
-- ✅ **Google Gemini 3 Pro** - Excellent (cloud)
-
-**Platform-Specific Considerations**:
-- **For Ollama**: Smaller models (4B-7B) may work better than on LM Studio
-- **For LM Studio**: Vision-Language (VL) variants work well with updated runtimes
-- **Budget Hardware**: Start with 8B models and test if smaller works on your platform
+**Consistently Reliable**:
+- ✅ **Qwen3 VL 32B Instruct** - Excellent tool calling
+- ✅ **Qwen3 30B A3B Instruct** - Very good tool calling
+- ✅ **Qwen3 8B Instruct** - Good balance, works reliably
+- ✅ **Anthropic Opus 4.5** - The absolute best at tool calling (cloud)
+- ✅ **OpenAI GPT-5.2 series** - Very good (cloud)
+- ✅ **Google Gemini 3 Pro** - Very Good (cloud)
 
 ### Testing Your Model
 
