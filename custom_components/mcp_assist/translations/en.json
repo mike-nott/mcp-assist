@@ -42,7 +42,9 @@
           "allowed_ips": "Additional Allowed IPs/Ranges",
           "enable_gap_filling": "Enable Smart Entity Index",
           "mcp_port": "MCP Server Port",
-          "debug_mode": "Debug Mode"
+          "debug_mode": "Debug Mode",
+          "ollama_keep_alive": "Ollama Keep Alive",
+          "ollama_num_ctx": "Ollama Context Window"
         }
       }
     },
@@ -84,7 +86,9 @@
           "allowed_ips": "Additional Allowed IPs/Ranges",
           "enable_gap_filling": "Enable Smart Entity Index",
           "mcp_port": "MCP Server Port",
-          "debug_mode": "Debug Mode"
+          "debug_mode": "Debug Mode",
+          "ollama_keep_alive": "Ollama Keep Alive",
+          "ollama_num_ctx": "Ollama Context Window"
         }
       }
     }

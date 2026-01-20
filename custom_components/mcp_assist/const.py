@@ -31,6 +31,8 @@ CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
 CONF_ENABLE_GAP_FILLING = "enable_gap_filling"
+CONF_OLLAMA_KEEP_ALIVE = "ollama_keep_alive"
+CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
 
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
@@ -59,6 +61,8 @@ DEFAULT_ENABLE_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_ALLOWED_IPS = ""
 DEFAULT_ENABLE_GAP_FILLING = True
+DEFAULT_OLLAMA_KEEP_ALIVE = "5m"  # 5 minutes
+DEFAULT_OLLAMA_NUM_CTX = 0  # 0 = use model default
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"

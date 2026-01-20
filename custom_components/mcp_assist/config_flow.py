@@ -47,6 +47,8 @@ from .const import (
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
     CONF_ENABLE_GAP_FILLING,
+    CONF_OLLAMA_KEEP_ALIVE,
+    CONF_OLLAMA_NUM_CTX,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
@@ -71,6 +73,8 @@ from .const import (
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_ENABLE_GAP_FILLING,
+    DEFAULT_OLLAMA_KEEP_ALIVE,
+    DEFAULT_OLLAMA_NUM_CTX,
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
@@ -470,7 +474,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data=combined_data,
                 )
 
-        advanced_schema = vol.Schema({
+        # Get server type to conditionally show Ollama fields
+        server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+
+        # Build base schema
+        advanced_schema_dict = {
             vol.Required(CONF_TEMPERATURE, default=DEFAULT_TEMPERATURE): vol.All(
                 vol.Coerce(float), vol.Range(min=0.0, max=1.0)
             ),
@@ -494,7 +502,22 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING): bool,
             vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
-        })
+        }
+
+        # Add Ollama-specific fields
+        if server_type == SERVER_TYPE_OLLAMA:
+            advanced_schema_dict.update({
+                vol.Optional(
+                    CONF_OLLAMA_KEEP_ALIVE,
+                    default=DEFAULT_OLLAMA_KEEP_ALIVE
+                ): str,
+                vol.Optional(
+                    CONF_OLLAMA_NUM_CTX,
+                    default=DEFAULT_OLLAMA_NUM_CTX
+                ): vol.Coerce(int),
+            })
+
+        advanced_schema = vol.Schema(advanced_schema_dict)
 
         return self.async_show_form(
             step_id="advanced",
@@ -728,6 +751,25 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
                 ): bool,
         })
+
+        # Add Ollama-specific fields to options
+        if server_type == SERVER_TYPE_OLLAMA:
+            schema_dict.update({
+                vol.Optional(
+                    CONF_OLLAMA_KEEP_ALIVE,
+                    default=options.get(
+                        CONF_OLLAMA_KEEP_ALIVE,
+                        data.get(CONF_OLLAMA_KEEP_ALIVE, DEFAULT_OLLAMA_KEEP_ALIVE)
+                    )
+                ): str,
+                vol.Optional(
+                    CONF_OLLAMA_NUM_CTX,
+                    default=options.get(
+                        CONF_OLLAMA_NUM_CTX,
+                        data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX)
+                    )
+                ): vol.Coerce(int),
+            })
 
         # Create the schema from the built dictionary
         options_schema = vol.Schema(schema_dict)

@@ -38,6 +38,8 @@ from .const import (
     CONF_SERVER_TYPE,
     CONF_API_KEY,
     CONF_CONTROL_HA,
+    CONF_OLLAMA_KEEP_ALIVE,
+    CONF_OLLAMA_NUM_CTX,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -49,6 +51,8 @@ from .const import (
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
     DEFAULT_CONTROL_HA,
+    DEFAULT_OLLAMA_KEEP_ALIVE,
+    DEFAULT_OLLAMA_NUM_CTX,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
@@ -193,6 +197,22 @@ class MCPAssistConversationEntity(ConversationEntity):
                     self.entry.data.get(CONF_FOLLOW_UP_MODE, DEFAULT_RESPONSE_MODE)
                 )
             )
+        )
+
+    @property
+    def ollama_keep_alive(self) -> str:
+        """Get Ollama keep_alive parameter."""
+        return self.entry.options.get(
+            CONF_OLLAMA_KEEP_ALIVE,
+            self.entry.data.get(CONF_OLLAMA_KEEP_ALIVE, DEFAULT_OLLAMA_KEEP_ALIVE)
+        )
+
+    @property
+    def ollama_num_ctx(self) -> int:
+        """Get Ollama num_ctx parameter."""
+        return self.entry.options.get(
+            CONF_OLLAMA_NUM_CTX,
+            self.entry.data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX)
         )
 
     @property
@@ -718,8 +738,13 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
 
             try:
-                # Parse arguments from JSON string
-                arguments = json.loads(arguments_str) if arguments_str else {}
+                # Parse arguments based on server type
+                if self.server_type == SERVER_TYPE_OLLAMA:
+                    # Ollama: Arguments are already parsed objects
+                    arguments = arguments_str if isinstance(arguments_str, dict) else json.loads(arguments_str) if arguments_str else {}
+                else:
+                    # OpenAI: Arguments are JSON strings
+                    arguments = json.loads(arguments_str) if arguments_str else {}
 
                 # Execute the tool
                 result = await self._call_mcp_tool(tool_name, arguments)
@@ -740,22 +765,39 @@ class MCPAssistConversationEntity(ConversationEntity):
                         self._expecting_response = False
                         _LOGGER.debug("🔄 Conversation will close - not expecting response")
 
-                # Add tool result to conversation (required for OpenAI strict message format)
-                results.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": content if content is not None else ""
-                })
+                # Format result based on server type
+                if self.server_type == SERVER_TYPE_OLLAMA:
+                    # Ollama doesn't use tool_call_id
+                    results.append({
+                        "role": "tool",
+                        "content": content if content is not None else ""
+                    })
+                else:
+                    # OpenAI format with tool_call_id
+                    results.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": content if content is not None else ""
+                    })
 
                 _LOGGER.info(f"✅ Tool {tool_name} executed successfully")
 
             except Exception as e:
                 _LOGGER.error(f"Error executing tool {tool_name}: {e}")
-                results.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": json.dumps({"error": str(e)})
-                })
+                # Format error result based on server type
+                if self.server_type == SERVER_TYPE_OLLAMA:
+                    # Ollama doesn't use tool_call_id
+                    results.append({
+                        "role": "tool",
+                        "content": json.dumps({"error": str(e)})
+                    })
+                else:
+                    # OpenAI format with tool_call_id
+                    results.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": json.dumps({"error": str(e)})
+                    })
 
         return results
 
@@ -819,6 +861,90 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Local servers (LM Studio, Ollama) don't need auth
             return {}
 
+    def _build_openai_payload(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = True
+    ) -> Dict[str, Any]:
+        """Build OpenAI-compatible payload for LM Studio, OpenAI, Gemini, Anthropic."""
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": stream
+        }
+
+        # Temperature (skip for GPT-5+/o1 models)
+        if not (self.model_name.startswith("gpt-5") or self.model_name.startswith("o1")):
+            payload["temperature"] = self.temperature
+
+        # Token limits
+        if self.max_tokens > 0:
+            if self.model_name.startswith("gpt-5") or self.model_name.startswith("o1"):
+                payload["max_completion_tokens"] = self.max_tokens
+            else:
+                payload["max_tokens"] = self.max_tokens
+
+        # Tools
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        return payload
+
+    def _build_ollama_payload(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = True
+    ) -> Dict[str, Any]:
+        """Build Ollama native API payload."""
+        # Convert tool messages (Ollama doesn't use tool_call_id)
+        ollama_messages = []
+        for msg in messages:
+            if msg.get("role") == "tool":
+                ollama_messages.append({
+                    "role": "tool",
+                    "content": msg.get("content", "")
+                })
+            else:
+                ollama_messages.append(msg)
+
+        # Parse keep_alive - can be int (seconds/-1) or string (duration like "5m")
+        keep_alive_value = self.ollama_keep_alive
+        try:
+            # Try to parse as integer (for -1, 0, or seconds)
+            keep_alive_value = int(keep_alive_value)
+        except (ValueError, TypeError):
+            # Keep as string for duration format like "5m", "24h", "-1m"
+            pass
+
+        payload = {
+            "model": self.model_name,
+            "messages": ollama_messages,
+            "stream": stream,
+            "keep_alive": keep_alive_value,
+            "options": {}
+        }
+
+        # Temperature
+        if self.temperature is not None:
+            payload["options"]["temperature"] = self.temperature
+
+        # Token limits
+        if self.max_tokens > 0:
+            payload["options"]["num_predict"] = self.max_tokens
+
+        # Context window (if configured)
+        if self.ollama_num_ctx > 0:
+            payload["options"]["num_ctx"] = self.ollama_num_ctx
+
+        # Tools (same format as OpenAI)
+        if tools:
+            payload["tools"] = tools
+
+        return payload
+
     async def _call_llm_streaming(self, messages: List[Dict[str, Any]]) -> str:
         """Stream LLM responses with immediate TTS feedback."""
         _LOGGER.info(f"🚀 Starting streaming {self.server_type} conversation")
@@ -876,26 +1002,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                 cleaned_messages.append(cleaned_msg)
 
 
-            payload = {
-                "model": self.model_name,
-                "messages": cleaned_messages,  # Use cleaned messages
-                "stream": True  # Enable streaming
-            }
-
-            # GPT-5+ and o1 models don't support custom temperature (only default of 1)
-            if not (self.model_name.startswith("gpt-5") or self.model_name.startswith("o1")):
-                payload["temperature"] = self.temperature
-
-            # Add token limit parameter - GPT-5+ uses max_completion_tokens, older models use max_tokens
-            if self.max_tokens > 0:
-                if self.model_name.startswith("gpt-5") or self.model_name.startswith("o1"):
-                    payload["max_completion_tokens"] = self.max_tokens
-                else:
-                    payload["max_tokens"] = self.max_tokens
-
-            if tools:
-                payload["tools"] = tools
-                payload["tool_choice"] = "auto"
+            # Build payload using appropriate method based on server type
+            if self.server_type == SERVER_TYPE_OLLAMA:
+                payload = self._build_ollama_payload(cleaned_messages, tools, stream=True)
+            else:
+                payload = self._build_openai_payload(cleaned_messages, tools, stream=True)
 
             # Debug: Log actual cleaned payload being sent in iteration 2+
             if self.debug_mode and iteration >= 1:
@@ -937,7 +1048,11 @@ class MCPAssistConversationEntity(ConversationEntity):
             try:
                 timeout = aiohttp.ClientTimeout(total=30)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
-                    url = f"{self.base_url_dynamic}/v1/chat/completions"
+                    # Use appropriate endpoint based on server type
+                    if self.server_type == SERVER_TYPE_OLLAMA:
+                        url = f"{self.base_url_dynamic}/api/chat"
+                    else:
+                        url = f"{self.base_url_dynamic}/v1/chat/completions"
                     headers = self._get_auth_headers()
 
                     _LOGGER.info(f"📡 Streaming to: {url}")
@@ -966,15 +1081,38 @@ class MCPAssistConversationEntity(ConversationEntity):
                                 continue
 
                             line_str = line.decode('utf-8').strip()
-                            if not line_str.startswith('data: '):
-                                continue
-
-                            if line_str == 'data: [DONE]':
-                                break
 
                             try:
-                                data = json.loads(line_str[6:])
-                                delta = data['choices'][0].get('delta', {})
+                                if self.server_type == SERVER_TYPE_OLLAMA:
+                                    # Ollama: Each line is complete JSON
+                                    if not line_str:
+                                        continue
+
+                                    data = json.loads(line_str)
+
+                                    # Check for completion
+                                    if data.get("done"):
+                                        break
+
+                                    # Extract message
+                                    message = data.get("message", {})
+                                    delta = {}
+
+                                    if "content" in message and message["content"]:
+                                        delta["content"] = message["content"]
+
+                                    if "tool_calls" in message:
+                                        delta["tool_calls"] = message["tool_calls"]
+
+                                else:
+                                    # OpenAI: SSE format with "data: " prefix
+                                    if not line_str.startswith('data: '):
+                                        continue
+                                    if line_str == 'data: [DONE]':
+                                        break
+
+                                    data = json.loads(line_str[6:])
+                                    delta = data['choices'][0].get('delta', {})
 
                                 # Handle streamed content
                                 if 'content' in delta and delta['content']:
@@ -1119,27 +1257,11 @@ class MCPAssistConversationEntity(ConversationEntity):
         for iteration in range(self.max_iterations):
             _LOGGER.info(f"🔄 HTTP Iteration {iteration + 1}: Calling {self.server_type} with {len(conversation_messages)} messages")
 
-            payload = {
-                "model": self.model_name,
-                "messages": conversation_messages,
-                "stream": False
-            }
-
-            # GPT-5+ and o1 models don't support custom temperature (only default of 1)
-            if not (self.model_name.startswith("gpt-5") or self.model_name.startswith("o1")):
-                payload["temperature"] = self.temperature
-
-            # Add token limit parameter - GPT-5+ uses max_completion_tokens, older models use max_tokens
-            if self.max_tokens > 0:
-                if self.model_name.startswith("gpt-5") or self.model_name.startswith("o1"):
-                    payload["max_completion_tokens"] = self.max_tokens
-                else:
-                    payload["max_tokens"] = self.max_tokens
-
-            # Add tools if available
-            if tools:
-                payload["tools"] = tools
-                payload["tool_choice"] = "auto"
+            # Build payload using appropriate method based on server type
+            if self.server_type == SERVER_TYPE_OLLAMA:
+                payload = self._build_ollama_payload(conversation_messages, tools, stream=False)
+            else:
+                payload = self._build_openai_payload(conversation_messages, tools, stream=False)
 
             # Clean payload to remove None values and ensure no content in assistant+tool_calls
             def clean_for_json_http(obj):
@@ -1169,7 +1291,11 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             timeout = aiohttp.ClientTimeout(total=30)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                url = f"{self.base_url_dynamic}/v1/chat/completions"
+                # Use appropriate endpoint based on server type
+                if self.server_type == SERVER_TYPE_OLLAMA:
+                    url = f"{self.base_url_dynamic}/api/chat"
+                else:
+                    url = f"{self.base_url_dynamic}/v1/chat/completions"
                 headers = self._get_auth_headers()
 
                 async with session.post(url, headers=headers, json=clean_payload) as response:
@@ -1179,11 +1305,16 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                     data = await response.json()
 
-                    if "choices" not in data or not data["choices"]:
-                        raise Exception(f"No response from {self.server_type}")
-
-                    choice = data["choices"][0]
-                    message = choice.get("message", {})
+                    # Parse response based on server type
+                    if self.server_type == SERVER_TYPE_OLLAMA:
+                        # Ollama: Direct message field
+                        message = data.get("message", {})
+                    else:
+                        # OpenAI: Wrapped in choices array
+                        if "choices" not in data or not data["choices"]:
+                            raise Exception(f"No response from {self.server_type}")
+                        choice = data["choices"][0]
+                        message = choice.get("message", {})
 
                     # Check if there are tool calls to execute
                     if "tool_calls" in message and message["tool_calls"]:
