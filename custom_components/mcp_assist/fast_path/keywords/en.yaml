@@ -1,0 +1,95 @@
+# English keywords for Fast Path
+# Add custom keywords in custom.yaml
+
+actions:
+  turn_on:
+    - on
+    - activate
+    - enable
+    - start
+    - switch on
+    - turn on
+
+  turn_off:
+    - off
+    - deactivate
+    - disable
+    - stop
+    - switch off
+    - turn off
+
+  toggle:
+    - toggle
+    - switch
+    - flip
+
+  open:
+    - open
+    - up
+    - raise
+    - lift
+
+  close:
+    - close
+    - down
+    - lower
+    - shut
+
+  lock:
+    - lock
+
+  unlock:
+    - unlock
+
+  increase:
+    - brighter
+    - warmer
+    - louder
+    - more
+    - increase
+    - raise
+
+  decrease:
+    - dimmer
+    - darker
+    - cooler
+    - quieter
+    - less
+    - decrease
+    - dim
+
+values:
+  brightness:
+    patterns:
+      - "to\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+      - "(\\d+)\\s*percent"
+
+  temperature:
+    patterns:
+      - "to\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:°|degrees?)"
+      - "(\\d+(?:[.,]\\d+)?)\\s*(?:°|degrees?)"
+
+  position:
+    patterns:
+      - "to\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%\\s*(?:position|open)"
+
+  color_temp:
+    keywords:
+      - keyword: warm
+        aliases:
+          - cozy
+          - soft
+        value: 2700
+      - keyword: neutral
+        aliases:
+          - normal
+          - standard
+        value: 4000
+      - keyword: cold
+        aliases:
+          - cool
+          - daylight
+          - bright
+        value: 6500

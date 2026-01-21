@@ -38,6 +38,8 @@ CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
 CONF_ENABLE_PRE_RESOLVE = "enable_pre_resolve"
 CONF_PRE_RESOLVE_THRESHOLD = "pre_resolve_threshold"
 CONF_PRE_RESOLVE_MARGIN = "pre_resolve_margin"
+CONF_ENABLE_FAST_PATH = "enable_fast_path"
+CONF_FAST_PATH_LANGUAGE = "fast_path_language"
 
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
@@ -73,6 +75,8 @@ DEFAULT_OLLAMA_NUM_CTX = 0  # 0 = use model default
 DEFAULT_ENABLE_PRE_RESOLVE = True  # Enable entity pre-resolution by default
 DEFAULT_PRE_RESOLVE_THRESHOLD = 0.90  # Minimum similarity score for fuzzy matching
 DEFAULT_PRE_RESOLVE_MARGIN = 0.08  # Minimum margin to second-best match
+DEFAULT_ENABLE_FAST_PATH = True  # Enable Fast Path for simple commands
+DEFAULT_FAST_PATH_LANGUAGE = "auto"  # Auto-detect language from HA config
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"

@@ -1,0 +1,60 @@
+# Respuestas españolas para Fast Path
+
+responses:
+  turn_on:
+    single: "{entity} ha sido encendido."
+    multiple: "{count} dispositivos han sido encendidos."
+
+  turn_off:
+    single: "{entity} ha sido apagado."
+    multiple: "{count} dispositivos han sido apagados."
+
+  toggle:
+    single: "{entity} ha sido alternado."
+    multiple: "{count} dispositivos han sido alternados."
+
+  open:
+    single: "{entity} ha sido abierto."
+    multiple: "{count} dispositivos han sido abiertos."
+
+  close:
+    single: "{entity} ha sido cerrado."
+    multiple: "{count} dispositivos han sido cerrados."
+
+  lock:
+    single: "{entity} ha sido bloqueado."
+    multiple: "{count} cerraduras han sido bloqueadas."
+
+  unlock:
+    single: "{entity} ha sido desbloqueado."
+    multiple: "{count} cerraduras han sido desbloqueadas."
+
+  set_brightness:
+    single: "{entity} ha sido ajustado a {value}% de brillo."
+    multiple: "{count} luces han sido ajustadas a {value}%."
+
+  set_temperature:
+    single: "{entity} ha sido ajustado a {value}°."
+    multiple: "{count} termostatos han sido ajustados a {value}°."
+
+  set_position:
+    single: "{entity} ha sido ajustado a {value}%."
+    multiple: "{count} persianas han sido ajustadas a {value}%."
+
+  set_color_temp:
+    single: "{entity} temperatura de color ajustada a {value}K."
+    multiple: "{count} luces han sido ajustadas a {value}K."
+
+  increase:
+    single: "{entity} ha sido aumentado."
+    multiple: "{count} dispositivos han sido aumentados."
+
+  decrease:
+    single: "{entity} ha sido reducido."
+    multiple: "{count} dispositivos han sido reducidos."
+
+errors:
+  no_entity: "No pude encontrar una entidad correspondiente."
+  no_action: "No pude reconocer una acción."
+  action_failed: "La acción no pudo ser ejecutada: {error}"
+  not_supported: "Esta acción no es compatible con {entity}."

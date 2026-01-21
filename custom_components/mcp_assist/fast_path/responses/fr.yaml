@@ -1,0 +1,60 @@
+# Réponses françaises pour Fast Path
+
+responses:
+  turn_on:
+    single: "{entity} a été allumé."
+    multiple: "{count} appareils ont été allumés."
+
+  turn_off:
+    single: "{entity} a été éteint."
+    multiple: "{count} appareils ont été éteints."
+
+  toggle:
+    single: "{entity} a été basculé."
+    multiple: "{count} appareils ont été basculés."
+
+  open:
+    single: "{entity} a été ouvert."
+    multiple: "{count} appareils ont été ouverts."
+
+  close:
+    single: "{entity} a été fermé."
+    multiple: "{count} appareils ont été fermés."
+
+  lock:
+    single: "{entity} a été verrouillé."
+    multiple: "{count} serrures ont été verrouillées."
+
+  unlock:
+    single: "{entity} a été déverrouillé."
+    multiple: "{count} serrures ont été déverrouillées."
+
+  set_brightness:
+    single: "{entity} a été réglé à {value}% de luminosité."
+    multiple: "{count} lumières ont été réglées à {value}%."
+
+  set_temperature:
+    single: "{entity} a été réglé à {value}°."
+    multiple: "{count} thermostats ont été réglés à {value}°."
+
+  set_position:
+    single: "{entity} a été réglé à {value}%."
+    multiple: "{count} volets ont été réglés à {value}%."
+
+  set_color_temp:
+    single: "{entity} température de couleur réglée à {value}K."
+    multiple: "{count} lumières ont été réglées à {value}K."
+
+  increase:
+    single: "{entity} a été augmenté."
+    multiple: "{count} appareils ont été augmentés."
+
+  decrease:
+    single: "{entity} a été diminué."
+    multiple: "{count} appareils ont été diminués."
+
+errors:
+  no_entity: "Je n'ai pas pu trouver une entité correspondante."
+  no_action: "Je n'ai pas pu reconnaître une action."
+  action_failed: "L'action n'a pas pu être exécutée: {error}"
+  not_supported: "Cette action n'est pas supportée par {entity}."

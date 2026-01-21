@@ -1,0 +1,92 @@
+# Nederlandse trefwoorden voor Fast Path
+# Voeg aangepaste trefwoorden toe in custom.yaml
+
+actions:
+  turn_on:
+    - aan
+    - inschakelen
+    - activeren
+    - starten
+    - aanzetten
+
+  turn_off:
+    - uit
+    - uitschakelen
+    - deactiveren
+    - stoppen
+    - uitzetten
+
+  toggle:
+    - schakelen
+    - wisselen
+    - omschakelen
+
+  open:
+    - openen
+    - omhoog
+    - open
+
+  close:
+    - sluiten
+    - omlaag
+    - dicht
+
+  lock:
+    - vergrendelen
+    - op slot
+    - afsluiten
+
+  unlock:
+    - ontgrendelen
+    - van slot
+    - openen
+
+  increase:
+    - helderder
+    - warmer
+    - harder
+    - meer
+    - verhogen
+
+  decrease:
+    - donkerder
+    - kouder
+    - zachter
+    - minder
+    - verlagen
+    - dimmen
+
+values:
+  brightness:
+    patterns:
+      - "op\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+      - "(\\d+)\\s*procent"
+
+  temperature:
+    patterns:
+      - "op\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:°|graden?)"
+      - "(\\d+(?:[.,]\\d+)?)\\s*(?:°|graden?)"
+
+  position:
+    patterns:
+      - "op\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+
+  color_temp:
+    keywords:
+      - keyword: warm
+        aliases:
+          - gezellig
+          - zacht
+        value: 2700
+      - keyword: neutraal
+        aliases:
+          - normaal
+          - standaard
+        value: 4000
+      - keyword: koud
+        aliases:
+          - daglicht
+          - helder
+        value: 6500

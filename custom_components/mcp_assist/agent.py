@@ -43,6 +43,8 @@ from .const import (
     CONF_ENABLE_PRE_RESOLVE,
     CONF_PRE_RESOLVE_THRESHOLD,
     CONF_PRE_RESOLVE_MARGIN,
+    CONF_ENABLE_FAST_PATH,
+    CONF_FAST_PATH_LANGUAGE,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -59,6 +61,8 @@ from .const import (
     DEFAULT_ENABLE_PRE_RESOLVE,
     DEFAULT_PRE_RESOLVE_THRESHOLD,
     DEFAULT_PRE_RESOLVE_MARGIN,
+    DEFAULT_ENABLE_FAST_PATH,
+    DEFAULT_FAST_PATH_LANGUAGE,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -72,6 +76,7 @@ from .const import (
     OPENROUTER_BASE_URL,
 )
 from .conversation_history import ConversationHistory
+from .fast_path import FastPathProcessor, is_fast_path_candidate, get_available_languages
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -253,6 +258,26 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
     @property
+    def enable_fast_path(self) -> bool:
+        """Get enable_fast_path parameter."""
+        return self.entry.options.get(
+            CONF_ENABLE_FAST_PATH,
+            self.entry.data.get(CONF_ENABLE_FAST_PATH, DEFAULT_ENABLE_FAST_PATH)
+        )
+
+    @property
+    def fast_path_language(self) -> str:
+        """Get fast_path_language parameter."""
+        lang = self.entry.options.get(
+            CONF_FAST_PATH_LANGUAGE,
+            self.entry.data.get(CONF_FAST_PATH_LANGUAGE, DEFAULT_FAST_PATH_LANGUAGE)
+        )
+        if lang == "auto":
+            # Get language from Home Assistant configuration
+            return self.hass.config.language[:2].lower()
+        return lang
+
+    @property
     def attribution(self) -> str:
         """Return attribution."""
         server_name = {
@@ -324,6 +349,32 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.debug("Getting history...")
             history = self.history.get_history(conversation_id)
             _LOGGER.debug("History retrieved: %d turns", len(history))
+
+            # Try Fast Path for simple commands (before LLM call)
+            if self.enable_fast_path:
+                fast_path_result = await self._try_fast_path(user_input.text)
+                if fast_path_result and fast_path_result.handled:
+                    if fast_path_result.success:
+                        _LOGGER.info("⚡ Fast Path handled command successfully")
+                        # Update history with Fast Path interaction
+                        self.history.add_turn(
+                            conversation_id,
+                            user_input.text,
+                            fast_path_result.response
+                        )
+                        # Build intent response with the Fast Path response
+                        intent_response = intent.IntentResponse(language=user_input.language)
+                        intent_response.async_set_speech(fast_path_result.response)
+                        
+                        return ConversationResult(
+                            response=intent_response,
+                            conversation_id=conversation_id,
+                            continue_conversation=False
+                        )
+                    else:
+                        if self.debug_mode:
+                            _LOGGER.debug("⚡ Fast Path attempted but failed: %s", fast_path_result.error)
+                        # Fall through to LLM
 
             # Pre-resolve entities if enabled (before building system prompt)
             pre_resolved_hint = ""
@@ -496,6 +547,64 @@ class MCPAssistConversationEntity(ConversationEntity):
         except Exception as e:
             _LOGGER.warning("Error getting current area: %s", e)
             return "Unknown"
+
+    async def _try_fast_path(self, user_text: str) -> Optional[Any]:
+        """Try to handle a simple command via Fast Path without LLM.
+        
+        Args:
+            user_text: The user's input text
+            
+        Returns:
+            FastPathResult if Fast Path handled the request, None otherwise
+        """
+        from .fast_path import FastPathProcessor, FastPathResult, is_fast_path_candidate, KeywordLoader
+        
+        # Get entity names from index manager
+        index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
+        if not index_manager:
+            _LOGGER.debug("IndexManager not available for Fast Path")
+            return None
+        
+        entity_names = index_manager.get_entity_names()
+        if not entity_names:
+            _LOGGER.debug("No entity names available for Fast Path")
+            return None
+        
+        # Create a reverse mapping: entity_id -> [names]
+        entity_id_to_names: Dict[str, List[str]] = {}
+        for name, entity_id in entity_names.items():
+            if entity_id not in entity_id_to_names:
+                entity_id_to_names[entity_id] = []
+            entity_id_to_names[entity_id].append(name)
+        
+        # Create loader and check if this is a candidate
+        language = self.fast_path_language
+        loader = KeywordLoader(language)
+        
+        if not is_fast_path_candidate(user_text, loader):
+            if self.debug_mode:
+                _LOGGER.debug("⚡ Fast Path: Not a candidate for Fast Path")
+            return None
+        
+        if self.debug_mode:
+            _LOGGER.info(f"⚡ Fast Path: Attempting with language '{language}'")
+        
+        # Process via Fast Path
+        processor = FastPathProcessor(
+            hass=self.hass,
+            language=language,
+            entity_names=entity_id_to_names,
+        )
+        
+        result = await processor.process(user_text)
+        
+        if self.debug_mode:
+            _LOGGER.info(
+                f"⚡ Fast Path result: handled={result.handled}, success={result.success}, "
+                f"action={result.action}, entities={result.entity_ids}"
+            )
+        
+        return result
 
     async def _pre_resolve_entities(self, user_text: str) -> Dict[str, str]:
         """Pre-resolve entity references in user text before LLM call.

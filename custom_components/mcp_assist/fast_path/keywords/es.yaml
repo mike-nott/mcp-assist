@@ -1,0 +1,91 @@
+# Palabras clave en español para Fast Path
+# Añadir palabras clave personalizadas en custom.yaml
+
+actions:
+  turn_on:
+    - encender
+    - activar
+    - iniciar
+    - prender
+    - abrir
+
+  turn_off:
+    - apagar
+    - desactivar
+    - parar
+    - cerrar
+    - cortar
+
+  toggle:
+    - alternar
+    - cambiar
+    - conmutar
+
+  open:
+    - abrir
+    - subir
+    - levantar
+
+  close:
+    - cerrar
+    - bajar
+
+  lock:
+    - cerrar con llave
+    - bloquear
+    - trancar
+
+  unlock:
+    - desbloquear
+    - abrir con llave
+    - destrancar
+
+  increase:
+    - más brillante
+    - más caliente
+    - más alto
+    - subir
+    - aumentar
+
+  decrease:
+    - más oscuro
+    - más frío
+    - más bajo
+    - bajar
+    - reducir
+    - atenuar
+
+values:
+  brightness:
+    patterns:
+      - "a\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+      - "(\\d+)\\s*por\\s*ciento"
+
+  temperature:
+    patterns:
+      - "a\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:°|grados?)"
+      - "(\\d+(?:[.,]\\d+)?)\\s*(?:°|grados?)"
+
+  position:
+    patterns:
+      - "a\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+
+  color_temp:
+    keywords:
+      - keyword: cálido
+        aliases:
+          - caliente
+          - acogedor
+        value: 2700
+      - keyword: neutro
+        aliases:
+          - normal
+          - estándar
+        value: 4000
+      - keyword: frío
+        aliases:
+          - luz del día
+          - brillante
+        value: 6500

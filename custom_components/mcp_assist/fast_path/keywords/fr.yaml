@@ -1,0 +1,90 @@
+# Mots-clés français pour Fast Path
+# Ajouter des mots-clés personnalisés dans custom.yaml
+
+actions:
+  turn_on:
+    - allumer
+    - activer
+    - démarrer
+    - mettre
+    - ouvrir
+
+  turn_off:
+    - éteindre
+    - désactiver
+    - arrêter
+    - fermer
+    - couper
+
+  toggle:
+    - basculer
+    - changer
+    - inverser
+
+  open:
+    - ouvrir
+    - lever
+    - monter
+
+  close:
+    - fermer
+    - baisser
+    - descendre
+
+  lock:
+    - verrouiller
+    - fermer à clé
+
+  unlock:
+    - déverrouiller
+    - ouvrir
+
+  increase:
+    - plus lumineux
+    - plus chaud
+    - plus fort
+    - augmenter
+    - monter
+
+  decrease:
+    - plus sombre
+    - plus froid
+    - moins fort
+    - diminuer
+    - baisser
+    - tamiser
+
+values:
+  brightness:
+    patterns:
+      - "à\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+      - "(\\d+)\\s*pourcent"
+
+  temperature:
+    patterns:
+      - "à\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:°|degrés?)"
+      - "(\\d+(?:[.,]\\d+)?)\\s*(?:°|degrés?)"
+
+  position:
+    patterns:
+      - "à\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+
+  color_temp:
+    keywords:
+      - keyword: chaud
+        aliases:
+          - chaleureux
+          - confortable
+        value: 2700
+      - keyword: neutre
+        aliases:
+          - normal
+          - standard
+        value: 4000
+      - keyword: froid
+        aliases:
+          - lumière du jour
+          - frais
+        value: 6500

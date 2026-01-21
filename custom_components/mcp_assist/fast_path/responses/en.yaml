@@ -1,0 +1,62 @@
+# English responses for Fast Path
+# {entity} will be replaced with the entity name
+# {value} will be replaced with the value (e.g., 50%)
+
+responses:
+  turn_on:
+    single: "{entity} has been turned on."
+    multiple: "{count} devices have been turned on."
+
+  turn_off:
+    single: "{entity} has been turned off."
+    multiple: "{count} devices have been turned off."
+
+  toggle:
+    single: "{entity} has been toggled."
+    multiple: "{count} devices have been toggled."
+
+  open:
+    single: "{entity} has been opened."
+    multiple: "{count} devices have been opened."
+
+  close:
+    single: "{entity} has been closed."
+    multiple: "{count} devices have been closed."
+
+  lock:
+    single: "{entity} has been locked."
+    multiple: "{count} locks have been locked."
+
+  unlock:
+    single: "{entity} has been unlocked."
+    multiple: "{count} locks have been unlocked."
+
+  set_brightness:
+    single: "{entity} has been set to {value}% brightness."
+    multiple: "{count} lights have been set to {value}%."
+
+  set_temperature:
+    single: "{entity} has been set to {value}°."
+    multiple: "{count} thermostats have been set to {value}°."
+
+  set_position:
+    single: "{entity} has been set to {value}% position."
+    multiple: "{count} covers have been set to {value}%."
+
+  set_color_temp:
+    single: "{entity} color temperature has been set to {value}K."
+    multiple: "{count} lights have been set to {value}K."
+
+  increase:
+    single: "{entity} has been increased."
+    multiple: "{count} devices have been increased."
+
+  decrease:
+    single: "{entity} has been decreased."
+    multiple: "{count} devices have been decreased."
+
+errors:
+  no_entity: "I couldn't find a matching entity."
+  no_action: "I couldn't recognize an action."
+  action_failed: "The action could not be executed: {error}"
+  not_supported: "This action is not supported by {entity}."

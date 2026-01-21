@@ -1,0 +1,47 @@
+# Custom Keywords - Eigene Erweiterungen
+# Kopiere diese Datei nach custom.yaml und füge eigene Keywords hinzu.
+# Diese Datei wird bei Updates NICHT überschrieben.
+#
+# Format:
+#   actions:
+#     action_name:
+#       language_code:
+#         - keyword1
+#         - keyword2
+
+actions:
+  # Beispiel: Eigene Keywords für turn_on
+  turn_on:
+    de:
+      - anknipsen
+      - hochfahren
+    en:
+      - fire up
+
+  # Beispiel: Eigene Keywords für turn_off
+  turn_off:
+    de:
+      - abknipsen
+      - runterfahren
+    en:
+      - kill
+
+# Eigene Farbtemperatur-Aliase
+values:
+  color_temp:
+    de:
+      - keyword: romantisch
+        value: 2200
+      - keyword: arbeiten
+        aliases:
+          - büro
+          - konzentrieren
+        value: 5000
+    en:
+      - keyword: romantic
+        value: 2200
+      - keyword: work
+        aliases:
+          - office
+          - focus
+        value: 5000

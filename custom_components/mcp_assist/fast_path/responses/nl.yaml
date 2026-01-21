@@ -1,0 +1,60 @@
+# Nederlandse antwoorden voor Fast Path
+
+responses:
+  turn_on:
+    single: "{entity} is ingeschakeld."
+    multiple: "{count} apparaten zijn ingeschakeld."
+
+  turn_off:
+    single: "{entity} is uitgeschakeld."
+    multiple: "{count} apparaten zijn uitgeschakeld."
+
+  toggle:
+    single: "{entity} is geschakeld."
+    multiple: "{count} apparaten zijn geschakeld."
+
+  open:
+    single: "{entity} is geopend."
+    multiple: "{count} apparaten zijn geopend."
+
+  close:
+    single: "{entity} is gesloten."
+    multiple: "{count} apparaten zijn gesloten."
+
+  lock:
+    single: "{entity} is vergrendeld."
+    multiple: "{count} sloten zijn vergrendeld."
+
+  unlock:
+    single: "{entity} is ontgrendeld."
+    multiple: "{count} sloten zijn ontgrendeld."
+
+  set_brightness:
+    single: "{entity} is ingesteld op {value}% helderheid."
+    multiple: "{count} lampen zijn ingesteld op {value}%."
+
+  set_temperature:
+    single: "{entity} is ingesteld op {value}°."
+    multiple: "{count} thermostaten zijn ingesteld op {value}°."
+
+  set_position:
+    single: "{entity} is ingesteld op {value}%."
+    multiple: "{count} rolluiken zijn ingesteld op {value}%."
+
+  set_color_temp:
+    single: "{entity} kleurtemperatuur is ingesteld op {value}K."
+    multiple: "{count} lampen zijn ingesteld op {value}K."
+
+  increase:
+    single: "{entity} is verhoogd."
+    multiple: "{count} apparaten zijn verhoogd."
+
+  decrease:
+    single: "{entity} is verlaagd."
+    multiple: "{count} apparaten zijn verlaagd."
+
+errors:
+  no_entity: "Ik kon geen overeenkomende entiteit vinden."
+  no_action: "Ik kon geen actie herkennen."
+  action_failed: "De actie kon niet worden uitgevoerd: {error}"
+  not_supported: "Deze actie wordt niet ondersteund door {entity}."

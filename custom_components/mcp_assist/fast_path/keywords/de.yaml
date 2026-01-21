@@ -1,0 +1,110 @@
+# Deutsche Keywords für Fast Path
+# Füge eigene Keywords in custom.yaml hinzu
+
+actions:
+  turn_on:
+    - an
+    - ein
+    - einschalten
+    - anmachen
+    - aktivieren
+    - starten
+    - anschalten
+
+  turn_off:
+    - aus
+    - ausschalten
+    - ausmachen
+    - deaktivieren
+    - stoppen
+    - abschalten
+
+  toggle:
+    - umschalten
+    - wechseln
+    - togglen
+    - schalten
+
+  open:
+    - öffnen
+    - aufmachen
+    - auf
+    - hoch
+    - hochfahren
+    - rauf
+    - rauffahren
+
+  close:
+    - schließen
+    - zumachen
+    - zu
+    - runter
+    - runterfahren
+
+  lock:
+    - abschließen
+    - sperren
+    - verriegeln
+    - zusperren
+
+  unlock:
+    - aufschließen
+    - entsperren
+    - entriegeln
+    - aufsperren
+
+  increase:
+    - heller
+    - wärmer
+    - lauter
+    - mehr
+    - erhöhen
+    - hochdrehen
+
+  decrease:
+    - dunkler
+    - kälter
+    - leiser
+    - weniger
+    - reduzieren
+    - runterdrehen
+    - dimmen
+
+# Wert-Patterns (Regex)
+values:
+  brightness:
+    patterns:
+      - "auf\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%"
+      - "(\\d+)\\s*prozent"
+
+  temperature:
+    patterns:
+      - "auf\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:°|grad)"
+      - "(\\d+(?:[.,]\\d+)?)\\s*(?:°|grad)"
+
+  position:
+    patterns:
+      - "auf\\s+(\\d+)\\s*%"
+      - "(\\d+)\\s*%\\s*(?:position|fahren)"
+
+  color_temp:
+    keywords:
+      - keyword: warm
+        aliases:
+          - warmweiß
+          - gemütlich
+          - kuschelig
+        value: 2700
+      - keyword: neutral
+        aliases:
+          - normal
+          - standard
+        value: 4000
+      - keyword: kalt
+        aliases:
+          - kaltweiß
+          - tageslicht
+          - kühl
+          - hell
+        value: 6500

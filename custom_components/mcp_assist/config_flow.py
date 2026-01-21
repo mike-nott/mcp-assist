@@ -52,6 +52,8 @@ from .const import (
     CONF_ENABLE_PRE_RESOLVE,
     CONF_PRE_RESOLVE_THRESHOLD,
     CONF_PRE_RESOLVE_MARGIN,
+    CONF_ENABLE_FAST_PATH,
+    CONF_FAST_PATH_LANGUAGE,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -84,11 +86,14 @@ from .const import (
     DEFAULT_ENABLE_PRE_RESOLVE,
     DEFAULT_PRE_RESOLVE_THRESHOLD,
     DEFAULT_PRE_RESOLVE_MARGIN,
+    DEFAULT_ENABLE_FAST_PATH,
+    DEFAULT_FAST_PATH_LANGUAGE,
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
     OPENROUTER_BASE_URL,
 )
+from .fast_path import get_available_languages
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -575,6 +580,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_PRE_RESOLVE_MARGIN, default=DEFAULT_PRE_RESOLVE_MARGIN): vol.All(
                 vol.Coerce(float), vol.Range(min=0.0, max=0.5)
             ),
+            vol.Optional(CONF_ENABLE_FAST_PATH, default=DEFAULT_ENABLE_FAST_PATH): bool,
+            vol.Optional(CONF_FAST_PATH_LANGUAGE, default=DEFAULT_FAST_PATH_LANGUAGE): SelectSelector(
+                SelectSelectorConfig(
+                    options=[{"value": "auto", "label": "Auto-detect"}] + [
+                        {"value": lang, "label": lang.upper()}
+                        for lang in get_available_languages()
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
         }
@@ -845,13 +860,33 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     default=options.get(CONF_PRE_RESOLVE_MARGIN, data.get(CONF_PRE_RESOLVE_MARGIN, DEFAULT_PRE_RESOLVE_MARGIN))
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
 
-                # 19. MCP Server Port
+                # 19. Enable Fast Path
+                vol.Optional(
+                    CONF_ENABLE_FAST_PATH,
+                    default=options.get(CONF_ENABLE_FAST_PATH, data.get(CONF_ENABLE_FAST_PATH, DEFAULT_ENABLE_FAST_PATH))
+                ): bool,
+
+                # 20. Fast Path Language
+                vol.Optional(
+                    CONF_FAST_PATH_LANGUAGE,
+                    default=options.get(CONF_FAST_PATH_LANGUAGE, data.get(CONF_FAST_PATH_LANGUAGE, DEFAULT_FAST_PATH_LANGUAGE))
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[{"value": "auto", "label": "Auto-detect"}] + [
+                            {"value": lang, "label": lang.upper()}
+                            for lang in get_available_languages()
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+
+                # 21. MCP Server Port
                 vol.Required(
                     CONF_MCP_PORT,
                     default=options.get(CONF_MCP_PORT, data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT))
                 ): vol.Coerce(int),
 
-                # 20. Debug Mode
+                # 22. Debug Mode
                 vol.Required(
                     CONF_DEBUG_MODE,
                     default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))

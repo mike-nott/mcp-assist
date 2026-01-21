@@ -1,0 +1,62 @@
+# Deutsche Antworten für Fast Path
+# {entity} wird durch den Entity-Namen ersetzt
+# {value} wird durch den Wert ersetzt (z.B. 50%)
+
+responses:
+  turn_on:
+    single: "{entity} wurde eingeschaltet."
+    multiple: "{count} Geräte wurden eingeschaltet."
+
+  turn_off:
+    single: "{entity} wurde ausgeschaltet."
+    multiple: "{count} Geräte wurden ausgeschaltet."
+
+  toggle:
+    single: "{entity} wurde umgeschaltet."
+    multiple: "{count} Geräte wurden umgeschaltet."
+
+  open:
+    single: "{entity} wurde geöffnet."
+    multiple: "{count} Geräte wurden geöffnet."
+
+  close:
+    single: "{entity} wurde geschlossen."
+    multiple: "{count} Geräte wurden geschlossen."
+
+  lock:
+    single: "{entity} wurde verriegelt."
+    multiple: "{count} Schlösser wurden verriegelt."
+
+  unlock:
+    single: "{entity} wurde entriegelt."
+    multiple: "{count} Schlösser wurden entriegelt."
+
+  set_brightness:
+    single: "{entity} wurde auf {value}% Helligkeit gesetzt."
+    multiple: "{count} Lichter wurden auf {value}% gesetzt."
+
+  set_temperature:
+    single: "{entity} wurde auf {value}° eingestellt."
+    multiple: "{count} Thermostate wurden auf {value}° eingestellt."
+
+  set_position:
+    single: "{entity} wurde auf {value}% gefahren."
+    multiple: "{count} Rollläden wurden auf {value}% gefahren."
+
+  set_color_temp:
+    single: "{entity} wurde auf {value}K Farbtemperatur gesetzt."
+    multiple: "{count} Lichter wurden auf {value}K gesetzt."
+
+  increase:
+    single: "{entity} wurde erhöht."
+    multiple: "{count} Geräte wurden erhöht."
+
+  decrease:
+    single: "{entity} wurde reduziert."
+    multiple: "{count} Geräte wurden reduziert."
+
+errors:
+  no_entity: "Ich konnte keine passende Entität finden."
+  no_action: "Ich konnte keine Aktion erkennen."
+  action_failed: "Die Aktion konnte nicht ausgeführt werden: {error}"
+  not_supported: "Diese Aktion wird von {entity} nicht unterstützt."
