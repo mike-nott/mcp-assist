@@ -232,7 +232,7 @@ Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). 
 
 ## Model Compatibility Guide
 
-Not all LLM models support tool calling (function calling) equally well. **Model performance varies significantly between inference engines** (LM Studio vs Ollama), so testing is recommended.
+Not all LLM models support tool calling (function calling) equally well. **This integration works best with frontier models** (GPT-5.2, Claude Opus 4.5, Gemini 3 Flash) **or higher-spec local models**. Smaller models may struggle with complex multi-entity queries that require synthesizing large tool result sets.  
 
 ### Understanding Tool Calling Requirements
 
@@ -271,9 +271,9 @@ Choose the model type that best fits your use case. Thinking/reasoning models of
 - ✅ **Qwen3 VL 32B Instruct** - Excellent tool calling
 - ✅ **Qwen3 30B A3B Instruct** - Very good tool calling
 - ✅ **Qwen3 8B Instruct** - Good balance, works reliably
-- ✅ **Anthropic Opus 4.5** - The absolute best at tool calling (cloud)
+- ✅ **Anthropic Opus 4.5** - The very best at tool calling (cloud)
+- ✅ **OpenAI GPT-5.2** - Excellent tool calling, very fast (cloud)
 - ✅ **Google Gemini 3 Flash** - Excellent tool calling, fast, cost-effective (cloud)
-- ✅ **OpenAI GPT-5.2 series** - Very good (cloud)
 
 ### Testing Your Model
 
