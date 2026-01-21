@@ -166,6 +166,16 @@ class FastPathProcessor:
         """
         text_lower = text.lower()
         
+        # Step 0: Check for conflicting actions (e.g., "kitchen on and bedroom off")
+        # If multiple different actions are detected, let LLM handle it
+        if self._has_conflicting_actions(text_lower):
+            _LOGGER.debug("Fast Path: Multiple different actions detected, falling back to LLM")
+            return FastPathResult(
+                success=False,
+                handled=False,
+                response="",
+            )
+        
         # Step 1: Detect action
         action, action_keyword = self._detect_action(text_lower)
         
@@ -215,13 +225,41 @@ class FastPathProcessor:
             await self._execute_action(entity_ids, final_action, value, value_type)
             
             # Build response
-            entity_name = self._get_friendly_name(entity_ids[0]) if entity_ids else "Entity"
-            response = self._loader.get_response(final_action, len(entity_ids))
-            response = response.format(
-                entity=entity_name,
-                count=len(entity_ids),
-                value=value if value is not None else "",
-            )
+            if len(entity_ids) == 1:
+                # Single entity - use friendly name
+                entity_name = self._get_friendly_name(entity_ids[0])
+                response = self._loader.get_response(final_action, 1)
+                response = response.format(
+                    entity=entity_name,
+                    count=1,
+                    value=value if value is not None else "",
+                )
+            else:
+                # Multiple entities - list all names or use count
+                entity_names_list = [self._get_friendly_name(eid) for eid in entity_ids]
+                conjunction = self._get_conjunction()
+                
+                if len(entity_names_list) <= 3:
+                    # List names for up to 3 entities: "Kitchen, Bedroom and Living Room"
+                    if len(entity_names_list) == 2:
+                        entities_str = f"{entity_names_list[0]} {conjunction} {entity_names_list[1]}"
+                    else:
+                        entities_str = f"{', '.join(entity_names_list[:-1])} {conjunction} {entity_names_list[-1]}"
+                    # Use single response template but with combined names
+                    response = self._loader.get_response(final_action, 1)
+                    response = response.format(
+                        entity=entities_str,
+                        count=len(entity_ids),
+                        value=value if value is not None else "",
+                    )
+                else:
+                    # More than 3 entities - use count template
+                    response = self._loader.get_response(final_action, len(entity_ids))
+                    response = response.format(
+                        entity=entity_names_list[0],  # Fallback
+                        count=len(entity_ids),
+                        value=value if value is not None else "",
+                    )
             
             return FastPathResult(
                 success=True,
@@ -266,6 +304,39 @@ class FastPathProcessor:
                         best_match = (action, keyword_lower)
         
         return best_match
+
+    def _has_conflicting_actions(self, text: str) -> bool:
+        """Check if text contains multiple different actions.
+        
+        If the user says "kitchen on and bedroom off", we should not
+        handle this in Fast Path as it requires different actions.
+        
+        Args:
+            text: Lowercase user input
+            
+        Returns:
+            True if multiple different actions are detected
+        """
+        all_keywords = self._loader.get_all_action_keywords()
+        detected_actions: set[str] = set()
+        
+        for action, keywords in all_keywords.items():
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+                # Use word boundary check to avoid false positives
+                # e.g., "schalten" should not match both "ein" and "aus"
+                pattern = rf'(?:^|[\s,.]){re.escape(keyword_lower)}(?:[\s,.]|$)'
+                if re.search(pattern, text):
+                    detected_actions.add(action)
+                    break  # One keyword per action is enough
+        
+        # If we detected more than one distinct action, there's a conflict
+        # Exception: on/off actions are opposites but some keywords may overlap
+        if len(detected_actions) > 1:
+            _LOGGER.debug("Fast Path detected conflicting actions: %s", detected_actions)
+            return True
+        
+        return False
 
     def _extract_value(self, text: str) -> tuple[Any, str | None]:
         """Extract a value from the text.
@@ -399,6 +470,21 @@ class FastPathProcessor:
             return state.attributes["friendly_name"]
         
         return entity_id
+
+    def _get_conjunction(self) -> str:
+        """Get the conjunction word ('and') for the current language.
+        
+        Returns:
+            The conjunction word for listing entities
+        """
+        conjunctions = {
+            "de": "und",
+            "en": "and",
+            "fr": "et",
+            "es": "y",
+            "nl": "en",
+        }
+        return conjunctions.get(self._language, "and")
 
     async def _execute_action(
         self,
