@@ -22,12 +22,12 @@ class BraveSearchTool:
 
     def handles_tool(self, tool_name: str) -> bool:
         """Check if this class handles the given tool."""
-        return tool_name == "brave_search"
+        return tool_name == "search"
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """Get MCP tool definition for Brave Search."""
         return [{
-            "name": "brave_search",
+            "name": "search",
             "description": "Search the web for current information using Brave Search",
             "inputSchema": {
                 "$schema": "http://json-schema.org/draft-07/schema#",

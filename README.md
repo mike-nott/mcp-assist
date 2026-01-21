@@ -12,7 +12,7 @@ A Home Assistant conversation agent that uses MCP (Model Context Protocol) for e
 - ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
-- ✅ **Web Search Tools**: Optional Brave Search integration for current information
+- ✅ **Web Search Tools**: Optional DuckDuckGo or Brave Search integration for current information
 - ✅ **Works with 1000+ Entities**: Efficient even with large Home Assistant installations
 - ✅ **Multi-Profile Support**: Run multiple conversation agents with different models
 - ✅ **Multi-Language**: Fast Path supports DE, EN, FR, ES, NL with custom keywords
@@ -232,8 +232,8 @@ Fast Path gracefully falls back to the LLM for:
 - Response Mode: Smart / Always / None (follow-up question behavior)
 - Control Home Assistant: Enable/disable device control
 - Max Tool Iterations: How many tool calls allowed per request
-- Enable Web Search: Turn on Brave Search integration
-- Brave Search API Key: Your API key (if using web search)
+- Web Search Provider: Choose none, DuckDuckGo, or Brave Search
+- Brave Search API Key: Your API key (if using Brave Search)
 - Debug Mode: Extra logging for troubleshooting
 - **Ollama Keep Alive** (Ollama only): Control how long models stay loaded in memory
   - `-1` = Keep loaded indefinitely
@@ -344,8 +344,30 @@ Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). 
 - **Additional Allowed IPs/Ranges**: Whitelist Docker containers (e.g., `172.30.0.0/16`) or specific IPs for external MCP clients like Claude Code add-on
 
 ### Web Search
-- **Enable Web Search**: Turn on Brave Search & URL reading tools
-- **Brave Search API Key**: Get one from https://brave.com/search/api/
+- **Web Search Provider**: Choose between:
+  - **None**: Search disabled
+  - **DuckDuckGo**: Free web search (no API key required)
+  - **Brave Search**: Requires API key from https://brave.com/search/api/
+- **Brave Search API Key**: Required only if using Brave Search
+
+### Shared vs Per-Profile Settings
+
+MCP Assist has two types of settings:
+
+**Per-Profile Settings** (independent per conversation agent):
+- Model name, system prompt, technical instructions
+- Temperature, max tokens, response mode
+- Debug mode, max iterations
+- Server URL (for local LLMs)
+
+**Shared Settings** (affect ALL profiles):
+- MCP server port
+- Web search provider (none/duckduckgo/brave)
+- Brave API key
+- Allowed IPs/CIDR ranges
+- Smart entity index (gap-filling)
+
+When you change shared settings in one profile's options, they apply to all profiles. This is intentional since all profiles share the same MCP server.
 
 ## Model Compatibility Guide
 

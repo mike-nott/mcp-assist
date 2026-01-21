@@ -1,6 +1,7 @@
 """Constants for the MCP Assist integration."""
 
 DOMAIN = "mcp_assist"
+SYSTEM_ENTRY_UNIQUE_ID = "mcp_assist_system_settings"
 
 # Server type options
 SERVER_TYPE_LMSTUDIO = "lmstudio"
@@ -32,6 +33,7 @@ CONF_DEBUG_MODE = "debug_mode"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
+CONF_SEARCH_PROVIDER = "search_provider"
 CONF_ENABLE_GAP_FILLING = "enable_gap_filling"
 CONF_OLLAMA_KEEP_ALIVE = "ollama_keep_alive"
 CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
@@ -69,6 +71,7 @@ DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_ALLOWED_IPS = ""
+DEFAULT_SEARCH_PROVIDER = "none"
 DEFAULT_ENABLE_GAP_FILLING = True
 DEFAULT_OLLAMA_KEEP_ALIVE = "5m"  # 5 minutes
 DEFAULT_OLLAMA_NUM_CTX = 0  # 0 = use model default
@@ -111,7 +114,7 @@ When the user message contains `[Pre-resolved entities: "name" = entity_id]`:
 - **run_script**: execute scripts that return data (e.g., camera analysis, calculations)
 - **run_automation**: trigger automations manually
 - **set_conversation_state**: indicate if expecting user response
-- **brave_search**: search the web for current information
+- **search**: search the web for current information
 - **read_url**: read and extract content from web pages
 
 ## Scripts (use run_script tool)

@@ -40,11 +40,11 @@ from .const import (
     CONF_CONTROL_HA,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
-    CONF_ENABLE_PRE_RESOLVE,
-    CONF_PRE_RESOLVE_THRESHOLD,
-    CONF_PRE_RESOLVE_MARGIN,
-    CONF_ENABLE_FAST_PATH,
-    CONF_FAST_PATH_LANGUAGE,
+    CONF_SEARCH_PROVIDER,
+    CONF_BRAVE_API_KEY,
+    CONF_ALLOWED_IPS,
+    CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_CUSTOM_TOOLS,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -53,16 +53,16 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
+    DEFAULT_MCP_PORT,
+    DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_BRAVE_API_KEY,
+    DEFAULT_ALLOWED_IPS,
+    DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
     DEFAULT_CONTROL_HA,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
-    DEFAULT_ENABLE_PRE_RESOLVE,
-    DEFAULT_PRE_RESOLVE_THRESHOLD,
-    DEFAULT_PRE_RESOLVE_MARGIN,
-    DEFAULT_ENABLE_FAST_PATH,
-    DEFAULT_FAST_PATH_LANGUAGE,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -76,7 +76,6 @@ from .const import (
     OPENROUTER_BASE_URL,
 )
 from .conversation_history import ConversationHistory
-from .fast_path import FastPathProcessor, is_fast_path_candidate, get_available_languages
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -155,6 +154,26 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.base_url_dynamic
         )
 
+    def _get_shared_setting(self, key: str, default: Any) -> Any:
+        """Get a shared setting from system entry with fallback to profile entry."""
+        # Import here to avoid circular dependency
+        from . import get_system_entry
+
+        # Try to get from system entry first
+        system_entry = get_system_entry(self.hass)
+        if system_entry:
+            value = system_entry.options.get(key, system_entry.data.get(key))
+            if value is not None:
+                return value
+
+        # Fallback to profile entry for backward compatibility
+        value = self.entry.options.get(key, self.entry.data.get(key))
+        if value is not None:
+            return value
+
+        # Return default
+        return default
+
     # Dynamic configuration properties - read from entry.options/data each time
     @property
     def base_url_dynamic(self) -> str:
@@ -180,8 +199,8 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     @property
     def mcp_port(self) -> int:
-        """Get MCP port (dynamic)."""
-        return self.entry.options.get(CONF_MCP_PORT, self.entry.data.get(CONF_MCP_PORT, 0))
+        """Get MCP port (shared setting)."""
+        return self._get_shared_setting(CONF_MCP_PORT, DEFAULT_MCP_PORT)
 
     @property
     def debug_mode(self) -> bool:
@@ -234,48 +253,18 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
     @property
-    def enable_pre_resolve(self) -> bool:
-        """Get enable_pre_resolve parameter."""
-        return self.entry.options.get(
-            CONF_ENABLE_PRE_RESOLVE,
-            self.entry.data.get(CONF_ENABLE_PRE_RESOLVE, DEFAULT_ENABLE_PRE_RESOLVE)
-        )
+    def search_provider(self) -> str:
+        """Get search provider (shared setting) with backward compatibility."""
+        provider = self._get_shared_setting(CONF_SEARCH_PROVIDER, None)
 
-    @property
-    def pre_resolve_threshold(self) -> float:
-        """Get pre_resolve_threshold parameter."""
-        return self.entry.options.get(
-            CONF_PRE_RESOLVE_THRESHOLD,
-            self.entry.data.get(CONF_PRE_RESOLVE_THRESHOLD, DEFAULT_PRE_RESOLVE_THRESHOLD)
-        )
+        if provider:
+            return provider
 
-    @property
-    def pre_resolve_margin(self) -> float:
-        """Get pre_resolve_margin parameter."""
-        return self.entry.options.get(
-            CONF_PRE_RESOLVE_MARGIN,
-            self.entry.data.get(CONF_PRE_RESOLVE_MARGIN, DEFAULT_PRE_RESOLVE_MARGIN)
-        )
+        # Backward compat: if old enable_custom_tools was True, default to "brave"
+        if self._get_shared_setting(CONF_ENABLE_CUSTOM_TOOLS, False):
+            return "brave"
 
-    @property
-    def enable_fast_path(self) -> bool:
-        """Get enable_fast_path parameter."""
-        return self.entry.options.get(
-            CONF_ENABLE_FAST_PATH,
-            self.entry.data.get(CONF_ENABLE_FAST_PATH, DEFAULT_ENABLE_FAST_PATH)
-        )
-
-    @property
-    def fast_path_language(self) -> str:
-        """Get fast_path_language parameter."""
-        lang = self.entry.options.get(
-            CONF_FAST_PATH_LANGUAGE,
-            self.entry.data.get(CONF_FAST_PATH_LANGUAGE, DEFAULT_FAST_PATH_LANGUAGE)
-        )
-        if lang == "auto":
-            # Get language from Home Assistant configuration
-            return self.hass.config.language[:2].lower()
-        return lang
+        return "none"
 
     @property
     def attribution(self) -> str:
@@ -350,49 +339,13 @@ class MCPAssistConversationEntity(ConversationEntity):
             history = self.history.get_history(conversation_id)
             _LOGGER.debug("History retrieved: %d turns", len(history))
 
-            # Try Fast Path for simple commands (before LLM call)
-            if self.enable_fast_path:
-                fast_path_result = await self._try_fast_path(user_input.text)
-                if fast_path_result and fast_path_result.handled:
-                    if fast_path_result.success:
-                        _LOGGER.info("⚡ Fast Path handled command successfully")
-                        # Update history with Fast Path interaction
-                        self.history.add_turn(
-                            conversation_id,
-                            user_input.text,
-                            fast_path_result.response
-                        )
-                        # Build intent response with the Fast Path response
-                        intent_response = intent.IntentResponse(language=user_input.language)
-                        intent_response.async_set_speech(fast_path_result.response)
-                        
-                        return ConversationResult(
-                            response=intent_response,
-                            conversation_id=conversation_id,
-                            continue_conversation=False
-                        )
-                    else:
-                        if self.debug_mode:
-                            _LOGGER.debug("⚡ Fast Path attempted but failed: %s", fast_path_result.error)
-                        # Fall through to LLM
-
-            # Pre-resolve entities if enabled (before building system prompt)
-            pre_resolved_hint = ""
-            if self.enable_pre_resolve:
-                pre_resolved = await self._pre_resolve_entities(user_input.text)
-                if pre_resolved:
-                    hints = ", ".join([f'"{name}" = {entity_id}' for name, entity_id in pre_resolved.items()])
-                    pre_resolved_hint = f"\n\n## Pre-resolved Entities for Current Request\n[Pre-resolved entities: {hints}]"
-                    if self.debug_mode:
-                        _LOGGER.info(f"🎯 Pre-resolved {len(pre_resolved)} entities: {pre_resolved}")
-
-            # Build system prompt with context (including pre-resolved entities)
-            system_prompt = await self._build_system_prompt_with_context(user_input, pre_resolved_hint)
+            # Build system prompt with context
+            system_prompt = await self._build_system_prompt_with_context(user_input)
             if self.debug_mode:
                 _LOGGER.info(f"📝 System prompt built, length: {len(system_prompt)} chars")
                 _LOGGER.info(f"📝 System prompt preview: {system_prompt[:200]}...")
 
-            # Build conversation messages (user text stays unchanged)
+            # Build conversation messages
             messages = self._build_messages(system_prompt, user_input.text, history)
             if self.debug_mode:
                 _LOGGER.info(f"📨 Messages built: {len(messages)} messages")
@@ -548,256 +501,8 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.warning("Error getting current area: %s", e)
             return "Unknown"
 
-    async def _try_fast_path(self, user_text: str) -> Optional[Any]:
-        """Try to handle a simple command via Fast Path without LLM.
-        
-        Args:
-            user_text: The user's input text
-            
-        Returns:
-            FastPathResult if Fast Path handled the request, None otherwise
-        """
-        from .fast_path import FastPathProcessor, FastPathResult, is_fast_path_candidate, KeywordLoader
-        
-        # Get entity names from index manager
-        index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
-        if not index_manager:
-            _LOGGER.debug("IndexManager not available for Fast Path")
-            return None
-        
-        entity_names = index_manager.get_entity_names()
-        if not entity_names:
-            _LOGGER.debug("No entity names available for Fast Path")
-            return None
-        
-        # Create a reverse mapping: entity_id -> [names]
-        entity_id_to_names: Dict[str, List[str]] = {}
-        for name, entity_id in entity_names.items():
-            if entity_id not in entity_id_to_names:
-                entity_id_to_names[entity_id] = []
-            entity_id_to_names[entity_id].append(name)
-        
-        # Create loader and check if this is a candidate
-        language = self.fast_path_language
-        loader = KeywordLoader(language)
-        
-        if not is_fast_path_candidate(user_text, loader):
-            if self.debug_mode:
-                _LOGGER.debug("⚡ Fast Path: Not a candidate for Fast Path")
-            return None
-        
-        if self.debug_mode:
-            _LOGGER.info(f"⚡ Fast Path: Attempting with language '{language}'")
-        
-        # Process via Fast Path
-        processor = FastPathProcessor(
-            hass=self.hass,
-            language=language,
-            entity_names=entity_id_to_names,
-        )
-        
-        result = await processor.process(user_text)
-        
-        if self.debug_mode:
-            _LOGGER.info(
-                f"⚡ Fast Path result: handled={result.handled}, success={result.success}, "
-                f"action={result.action}, entities={result.entity_ids}"
-            )
-        
-        return result
-
-    async def _pre_resolve_entities(self, user_text: str) -> Dict[str, str]:
-        """Pre-resolve entity references in user text before LLM call.
-        
-        This implements a two-phase entity resolution:
-        Phase 1: Direct matching of known entity names in user text
-        Phase 2: Fuzzy matching using n-grams if Phase 1 finds nothing
-        
-        Args:
-            user_text: The user's input text
-            
-        Returns:
-            Dict mapping matched text fragments to entity_ids
-            E.g. {"küchenlicht": "light.kitchen"}
-        """
-        resolved: Dict[str, str] = {}
-        
-        # Get entity names mapping from index manager
-        index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
-        if not index_manager:
-            _LOGGER.debug("IndexManager not available for pre-resolution")
-            return resolved
-        
-        entity_names = index_manager.get_entity_names()
-        if not entity_names:
-            _LOGGER.debug("No entity names available for pre-resolution")
-            return resolved
-        
-        # Normalize user text for matching
-        user_text_normalized = self._normalize_text_for_matching(user_text)
-        user_text_lower = user_text.lower()
-        
-        # Phase 1: Direct substring matching
-        for name, entity_id in entity_names.items():
-            if name in user_text_normalized:
-                # Avoid duplicate entity_ids (different names may map to same entity)
-                if entity_id not in resolved.values():
-                    resolved[name] = entity_id
-                    if self.debug_mode:
-                        _LOGGER.debug(f"🎯 Phase 1 match: '{name}' -> {entity_id}")
-        
-        # If Phase 1 found matches, return them
-        if resolved:
-            _LOGGER.info(f"🎯 Pre-resolution Phase 1: Found {len(resolved)} direct matches")
-            return resolved
-        
-        # Phase 2: Fuzzy matching with n-grams
-        resolved = await self._fuzzy_match_entities(user_text_normalized, entity_names)
-        
-        if resolved:
-            _LOGGER.info(f"🎯 Pre-resolution Phase 2: Found {len(resolved)} fuzzy matches")
-        
-        return resolved
-    
-    async def _fuzzy_match_entities(
-        self, 
-        user_text: str, 
-        entity_names: Dict[str, str]
-    ) -> Dict[str, str]:
-        """Perform fuzzy matching using n-grams.
-        
-        Args:
-            user_text: Normalized user text
-            entity_names: Dict mapping names to entity_ids
-            
-        Returns:
-            Dict of matched text fragments to entity_ids
-        """
-        resolved: Dict[str, str] = {}
-        
-        # Generate n-grams from user text (1 to 4 words)
-        words = user_text.split()
-        if not words:
-            return resolved
-        
-        ngrams = []
-        for n in range(1, min(5, len(words) + 1)):
-            for i in range(len(words) - n + 1):
-                ngram = ' '.join(words[i:i+n])
-                if len(ngram) >= 3:  # Skip very short n-grams
-                    ngrams.append(ngram)
-        
-        # Calculate similarity scores for each n-gram against entity names
-        threshold = self.pre_resolve_threshold
-        margin = self.pre_resolve_margin
-        
-        for ngram in ngrams:
-            best_match = None
-            best_score = 0.0
-            second_best_score = 0.0
-            
-            for name, entity_id in entity_names.items():
-                score = self._calculate_similarity(ngram, name)
-                
-                if score > best_score:
-                    second_best_score = best_score
-                    best_score = score
-                    best_match = (name, entity_id)
-                elif score > second_best_score:
-                    second_best_score = score
-            
-            # Check if match meets criteria
-            if best_match and best_score >= threshold:
-                score_margin = best_score - second_best_score
-                if score_margin >= margin:
-                    name, entity_id = best_match
-                    # Avoid duplicate entity_ids
-                    if entity_id not in resolved.values():
-                        resolved[ngram] = entity_id
-                        if self.debug_mode:
-                            _LOGGER.debug(
-                                f"🎯 Fuzzy match: '{ngram}' -> {entity_id} "
-                                f"(score: {best_score:.2f}, margin: {score_margin:.2f})"
-                            )
-        
-        return resolved
-    
-    def _calculate_similarity(self, s1: str, s2: str) -> float:
-        """Calculate similarity score between two strings.
-        
-        Uses a combination of:
-        - Exact match (1.0)
-        - Substring match (0.95)
-        - Character-level Jaccard similarity
-        
-        Args:
-            s1: First string
-            s2: Second string
-            
-        Returns:
-            Similarity score between 0.0 and 1.0
-        """
-        if not s1 or not s2:
-            return 0.0
-        
-        # Exact match
-        if s1 == s2:
-            return 1.0
-        
-        # One is substring of the other
-        if s1 in s2 or s2 in s1:
-            # Score based on length ratio
-            shorter = min(len(s1), len(s2))
-            longer = max(len(s1), len(s2))
-            return 0.9 + (0.1 * shorter / longer)
-        
-        # Character-level Jaccard similarity with bigrams
-        def get_bigrams(s: str) -> set:
-            return set(s[i:i+2] for i in range(len(s) - 1)) if len(s) > 1 else {s}
-        
-        bigrams1 = get_bigrams(s1)
-        bigrams2 = get_bigrams(s2)
-        
-        intersection = len(bigrams1 & bigrams2)
-        union = len(bigrams1 | bigrams2)
-        
-        if union == 0:
-            return 0.0
-        
-        return intersection / union
-    
-    def _normalize_text_for_matching(self, text: str) -> str:
-        """Normalize text for entity matching.
-        
-        Args:
-            text: The text to normalize
-            
-        Returns:
-            Normalized text (lowercase, cleaned)
-        """
-        import re
-        
-        if not text:
-            return ""
-        
-        # Convert to lowercase
-        text = text.lower()
-        
-        # Remove punctuation except spaces
-        text = re.sub(r'[^\w\s]', '', text, flags=re.UNICODE)
-        
-        # Normalize whitespace
-        text = ' '.join(text.split())
-        
-        return text
-
-    async def _build_system_prompt_with_context(self, user_input: ConversationInput, pre_resolved_hint: str = "") -> str:
-        """Build system prompt with Smart Entity Index and pre-resolved entities.
-        
-        Args:
-            user_input: The conversation input
-            pre_resolved_hint: Optional pre-resolved entities hint to append to system prompt
-        """
+    async def _build_system_prompt_with_context(self, user_input: ConversationInput) -> str:
+        """Build system prompt with Smart Entity Index."""
         try:
             # Get base prompts (check options first, then data, then defaults)
             system_prompt = self.entry.options.get(CONF_SYSTEM_PROMPT,
@@ -827,12 +532,8 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Replace {index} placeholder
             technical_prompt = technical_prompt.replace('{index}', index_json)
 
-            # Combine: system prompt + technical prompt + pre-resolved entities hint
-            combined_prompt = f"{system_prompt}\n\n{technical_prompt}"
-            if pre_resolved_hint:
-                combined_prompt += pre_resolved_hint
-            
-            return combined_prompt
+            # Combine: system prompt + technical prompt
+            return f"{system_prompt}\n\n{technical_prompt}"
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
