@@ -40,6 +40,11 @@ from .const import (
     CONF_CONTROL_HA,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
+    CONF_SEARCH_PROVIDER,
+    CONF_BRAVE_API_KEY,
+    CONF_ALLOWED_IPS,
+    CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_CUSTOM_TOOLS,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -48,6 +53,11 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
+    DEFAULT_MCP_PORT,
+    DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_BRAVE_API_KEY,
+    DEFAULT_ALLOWED_IPS,
+    DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
     DEFAULT_CONTROL_HA,
@@ -144,6 +154,26 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.base_url_dynamic
         )
 
+    def _get_shared_setting(self, key: str, default: Any) -> Any:
+        """Get a shared setting from system entry with fallback to profile entry."""
+        # Import here to avoid circular dependency
+        from . import get_system_entry
+
+        # Try to get from system entry first
+        system_entry = get_system_entry(self.hass)
+        if system_entry:
+            value = system_entry.options.get(key, system_entry.data.get(key))
+            if value is not None:
+                return value
+
+        # Fallback to profile entry for backward compatibility
+        value = self.entry.options.get(key, self.entry.data.get(key))
+        if value is not None:
+            return value
+
+        # Return default
+        return default
+
     # Dynamic configuration properties - read from entry.options/data each time
     @property
     def base_url_dynamic(self) -> str:
@@ -169,8 +199,8 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     @property
     def mcp_port(self) -> int:
-        """Get MCP port (dynamic)."""
-        return self.entry.options.get(CONF_MCP_PORT, self.entry.data.get(CONF_MCP_PORT, 0))
+        """Get MCP port (shared setting)."""
+        return self._get_shared_setting(CONF_MCP_PORT, DEFAULT_MCP_PORT)
 
     @property
     def debug_mode(self) -> bool:
@@ -221,6 +251,20 @@ class MCPAssistConversationEntity(ConversationEntity):
             CONF_OLLAMA_NUM_CTX,
             self.entry.data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX)
         )
+
+    @property
+    def search_provider(self) -> str:
+        """Get search provider (shared setting) with backward compatibility."""
+        provider = self._get_shared_setting(CONF_SEARCH_PROVIDER, None)
+
+        if provider:
+            return provider
+
+        # Backward compat: if old enable_custom_tools was True, default to "brave"
+        if self._get_shared_setting(CONF_ENABLE_CUSTOM_TOOLS, False):
+            return "brave"
+
+        return "none"
 
     @property
     def attribution(self) -> str:

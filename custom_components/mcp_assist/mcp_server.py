@@ -21,6 +21,8 @@ from .const import (
     MAX_ENTITIES_PER_DISCOVERY,
     CONF_LMSTUDIO_URL,
     CONF_ALLOWED_IPS,
+    CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_CUSTOM_TOOLS,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
 )
@@ -73,29 +75,61 @@ class MCPServer:
         except Exception as e:
             _LOGGER.warning("Could not parse LM Studio URL '%s': %s", lmstudio_url, e)
 
-        # Add user-configured allowed IPs/CIDR ranges
-        if entry:
-            allowed_ips_str = entry.options.get(CONF_ALLOWED_IPS,
-                                               entry.data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS))
-            if allowed_ips_str:
-                # Parse comma-separated list
-                additional_ips = [ip.strip() for ip in allowed_ips_str.split(',') if ip.strip()]
-                for ip_entry in additional_ips:
-                    if ip_entry not in self.allowed_ips:
-                        self.allowed_ips.append(ip_entry)
-                if additional_ips:
-                    _LOGGER.info("MCP server added user-configured allowed IPs/ranges: %s", additional_ips)
+        # Add user-configured allowed IPs/CIDR ranges (shared setting)
+        allowed_ips_str = self._get_shared_setting(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
+        if allowed_ips_str:
+            # Parse comma-separated list
+            additional_ips = [ip.strip() for ip in allowed_ips_str.split(',') if ip.strip()]
+            for ip_entry in additional_ips:
+                if ip_entry not in self.allowed_ips:
+                    self.allowed_ips.append(ip_entry)
+            if additional_ips:
+                _LOGGER.info("MCP server added user-configured allowed IPs/ranges: %s", additional_ips)
 
         _LOGGER.info("MCP server allowed IPs/ranges: %s", self.allowed_ips)
 
-        # Initialize custom tools only if enabled
+        # Initialize custom tools if search provider is enabled
         self.custom_tools = None
-        if entry and entry.options.get("enable_custom_tools", False):
+        search_provider = self._get_search_provider()
+        if search_provider in ["brave", "duckduckgo"]:
             try:
                 from .custom_tools import CustomToolsLoader
                 self.custom_tools = CustomToolsLoader(hass, entry)
             except Exception as e:
                 _LOGGER.error(f"Failed to load custom tools: {e}")
+
+    def _get_shared_setting(self, key: str, default: Any) -> Any:
+        """Get a shared setting from system entry with fallback to profile entry."""
+        # Import here to avoid circular dependency
+        from . import get_system_entry
+
+        # Try to get from system entry first
+        system_entry = get_system_entry(self.hass)
+        if system_entry:
+            value = system_entry.options.get(key, system_entry.data.get(key))
+            if value is not None:
+                return value
+
+        # Fallback to profile entry for backward compatibility
+        if self.entry:
+            value = self.entry.options.get(key, self.entry.data.get(key))
+            if value is not None:
+                return value
+
+        # Return default
+        return default
+
+    def _get_search_provider(self) -> str:
+        """Get search provider (shared setting) with backward compatibility."""
+        provider = self._get_shared_setting(CONF_SEARCH_PROVIDER, None)
+        if provider:
+            return provider
+
+        # Backward compat: if old enable_custom_tools was True, default to "brave"
+        if self._get_shared_setting(CONF_ENABLE_CUSTOM_TOOLS, False):
+            return "brave"
+
+        return "none"
 
     async def start(self) -> None:
         """Start the MCP server."""

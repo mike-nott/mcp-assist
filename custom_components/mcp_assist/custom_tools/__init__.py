@@ -14,28 +14,55 @@ class CustomToolsLoader:
         self.tools = {}
 
     async def initialize(self):
-        """Initialize all custom tools (brave_search and read_url)."""
-        # Load brave_search tool
-        try:
-            from .brave_search import BraveSearchTool
-            # Get API key from options
-            api_key = None
-            if self.entry:
-                api_key = self.entry.options.get("brave_api_key")
-            self.tools["brave_search"] = BraveSearchTool(self.hass, api_key)
-            await self.tools["brave_search"].initialize()
-            _LOGGER.debug("✅ Brave Search tool initialized")
-        except Exception as e:
-            _LOGGER.error(f"Failed to initialize brave_search tool: {e}")
+        """Initialize custom tools based on search provider selection."""
+        # Determine search provider
+        search_provider = self._get_search_provider()
 
-        # Load read_url tool
-        try:
-            from .read_url import ReadUrlTool
-            self.tools["read_url"] = ReadUrlTool(self.hass)
-            await self.tools["read_url"].initialize()
-            _LOGGER.debug("✅ Read URL tool initialized")
-        except Exception as e:
-            _LOGGER.error(f"Failed to initialize read_url tool: {e}")
+        # Load search tool based on provider
+        if search_provider == "brave":
+            try:
+                from .brave_search import BraveSearchTool
+                api_key = self.entry.options.get("brave_api_key") if self.entry else None
+                self.tools["search"] = BraveSearchTool(self.hass, api_key)
+                await self.tools["search"].initialize()
+                _LOGGER.debug("✅ Brave Search tool initialized")
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize Brave Search tool: {e}")
+
+        elif search_provider == "duckduckgo":
+            try:
+                from .duckduckgo_search import DuckDuckGoSearchTool
+                self.tools["search"] = DuckDuckGoSearchTool(self.hass)
+                await self.tools["search"].initialize()
+                _LOGGER.debug("✅ DuckDuckGo Search tool initialized")
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize DuckDuckGo Search tool: {e}")
+
+        # Load read_url tool if search is enabled
+        if search_provider in ["brave", "duckduckgo"]:
+            try:
+                from .read_url import ReadUrlTool
+                self.tools["read_url"] = ReadUrlTool(self.hass)
+                await self.tools["read_url"].initialize()
+                _LOGGER.debug("✅ Read URL tool initialized")
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize read_url tool: {e}")
+
+    def _get_search_provider(self) -> str:
+        """Get search provider with backward compatibility."""
+        if not self.entry:
+            return "none"
+
+        # Check for new search_provider config
+        provider = self.entry.options.get("search_provider", self.entry.data.get("search_provider"))
+        if provider:
+            return provider
+
+        # Backward compat: if old enable_custom_tools was True, default to "brave"
+        if self.entry.options.get("enable_custom_tools", self.entry.data.get("enable_custom_tools", False)):
+            return "brave"
+
+        return "none"
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """Get MCP tool definitions for all enabled tools."""

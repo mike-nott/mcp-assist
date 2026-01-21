@@ -37,14 +37,20 @@
           "max_iterations": "Max Tool Iterations",
           "control_home_assistant": "Control Home Assistant",
           "response_mode": "Response Mode",
-          "enable_custom_tools": "Enable Web Search",
-          "brave_api_key": "Brave Search API Key",
-          "allowed_ips": "Additional Allowed IPs/Ranges",
-          "enable_gap_filling": "Enable Smart Entity Index",
-          "mcp_port": "MCP Server Port",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window"
+        }
+      },
+      "mcp_server": {
+        "title": "Shared MCP Server Settings",
+        "description": "⚠️ These settings affect ALL profiles. Changes here will impact every MCP Assist conversation agent.",
+        "data": {
+          "mcp_port": "MCP Server Port",
+          "search_provider": "Web Search",
+          "brave_api_key": "Brave Search API Key",
+          "allowed_ips": "Additional Allowed IPs/Ranges",
+          "enable_gap_filling": "Enable Smart Entity Index"
         }
       }
     },
@@ -67,7 +73,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Profile Configuration",
+        "title": "Profile Settings",
+        "description": "Configure this conversation profile. These settings only affect this profile.",
         "data": {
           "profile_name": "Profile Name",
           "lmstudio_url": "Server URL",
@@ -81,14 +88,20 @@
           "max_iterations": "Max Tool Iterations",
           "control_home_assistant": "Control Home Assistant",
           "response_mode": "Response Mode",
-          "enable_custom_tools": "Enable Web Search",
-          "brave_api_key": "Brave Search API Key",
-          "allowed_ips": "Additional Allowed IPs/Ranges",
-          "enable_gap_filling": "Enable Smart Entity Index",
-          "mcp_port": "MCP Server Port",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window"
+        }
+      },
+      "mcp_server": {
+        "title": "Shared MCP Server Settings",
+        "description": "⚠️ These settings are shared across ALL profiles",
+        "data": {
+          "mcp_port": "MCP Server Port",
+          "search_provider": "Web Search",
+          "brave_api_key": "Brave Search API Key",
+          "allowed_ips": "Additional Allowed IPs/Ranges",
+          "enable_gap_filling": "Enable Smart Entity Index"
         }
       }
     }

@@ -26,6 +26,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     DOMAIN,
+    SYSTEM_ENTRY_UNIQUE_ID,
     CONF_PROFILE_NAME,
     CONF_SERVER_TYPE,
     CONF_API_KEY,
@@ -46,6 +47,7 @@ from .const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
+    CONF_SEARCH_PROVIDER,
     CONF_ENABLE_GAP_FILLING,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
@@ -75,6 +77,7 @@ from .const import (
     DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_SEARCH_PROVIDER,
     DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
@@ -331,6 +334,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.step1_data: dict[str, Any] = {}
         self.step2_data: dict[str, Any] = {}
         self.step3_data: dict[str, Any] = {}
+        self.step4_data: dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -383,7 +387,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             # Cloud providers (OpenAI, Gemini, Anthropic, OpenRouter) - show API key field
             server_schema = vol.Schema({
-                vol.Required(CONF_API_KEY): str,
+                vol.Required(CONF_API_KEY): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                ),
             })
 
         return self.async_show_form(
@@ -499,39 +505,68 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("Invalid allowed IPs: %s", error_msg)
 
             if not errors:
-                # Combine data from all 4 steps
-                combined_data = {
-                    **self.step1_data,
-                    **self.step2_data,
-                    **self.step3_data,
-                    **user_input
-                }
+                # Check if this is the first profile (MCP server doesn't exist yet)
+                is_first_profile = "shared_mcp_server" not in self.hass.data.get(DOMAIN, {})
 
-                # Create unique ID based on server type + profile name
-                profile_name = combined_data[CONF_PROFILE_NAME]
-                server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+                if is_first_profile:
+                    # First profile - store step 4 data and proceed to MCP server config
+                    self.step4_data = user_input
+                    return await self.async_step_mcp_server()
+                else:
+                    # Subsequent profile - use existing shared MCP server settings
+                    # Get MCP settings from shared server
+                    mcp_port = self.hass.data[DOMAIN].get("mcp_port", DEFAULT_MCP_PORT)
 
-                # Map server type to display name
-                server_display_map = {
-                    SERVER_TYPE_LMSTUDIO: "LM Studio",
-                    SERVER_TYPE_LLAMACPP: "llama.cpp",
-                    SERVER_TYPE_OLLAMA: "Ollama",
-                    SERVER_TYPE_OPENAI: "OpenAI",
-                    SERVER_TYPE_GEMINI: "Gemini",
-                    SERVER_TYPE_ANTHROPIC: "Claude",
-                    SERVER_TYPE_OPENROUTER: "OpenRouter",
-                }
-                server_display = server_display_map.get(server_type, "LM Studio")
+                    # Get search provider from any existing entry (they all share it)
+                    # Find first entry to copy shared settings from
+                    existing_entry = None
+                    for entry in self.hass.config_entries.async_entries(DOMAIN):
+                        existing_entry = entry
+                        break
 
-                # Include server type in unique ID to allow same profile name across providers
-                unique_id = f"{DOMAIN}_{server_type}_{profile_name.lower().replace(' ', '_')}"
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
+                    # Copy shared settings from existing entry
+                    shared_settings = {}
+                    if existing_entry:
+                        shared_settings = {
+                            CONF_MCP_PORT: existing_entry.data.get(CONF_MCP_PORT, mcp_port),
+                            CONF_SEARCH_PROVIDER: existing_entry.data.get(CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER),
+                            CONF_BRAVE_API_KEY: existing_entry.data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
+                            CONF_ALLOWED_IPS: existing_entry.data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS),
+                            CONF_ENABLE_GAP_FILLING: existing_entry.data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING),
+                        }
 
-                return self.async_create_entry(
-                    title=f"{server_display} - {profile_name}",
-                    data=combined_data,
-                )
+                    # Combine data from steps 1-4 + shared settings
+                    combined_data = {
+                        **self.step1_data,
+                        **self.step2_data,
+                        **self.step3_data,
+                        **user_input,  # Step 4 data
+                        **shared_settings,  # Copy from existing entry
+                    }
+
+                    # Create config entry (same as before)
+                    profile_name = combined_data[CONF_PROFILE_NAME]
+                    server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+
+                    server_display_map = {
+                        SERVER_TYPE_LMSTUDIO: "LM Studio",
+                        SERVER_TYPE_LLAMACPP: "llama.cpp",
+                        SERVER_TYPE_OLLAMA: "Ollama",
+                        SERVER_TYPE_OPENAI: "OpenAI",
+                        SERVER_TYPE_GEMINI: "Gemini",
+                        SERVER_TYPE_ANTHROPIC: "Claude",
+                        SERVER_TYPE_OPENROUTER: "OpenRouter",
+                    }
+                    server_display = server_display_map.get(server_type, "LM Studio")
+
+                    unique_id = f"{DOMAIN}_{server_type}_{profile_name.lower().replace(' ', '_')}"
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_configured()
+
+                    return self.async_create_entry(
+                        title=f"{server_display} - {profile_name}",
+                        data=combined_data,
+                    )
 
         # Get server type to conditionally show Ollama fields and set defaults
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
@@ -558,11 +593,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY): vol.Coerce(int),
             vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
             vol.Required(CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS): vol.Coerce(int),
-            vol.Optional(CONF_ENABLE_CUSTOM_TOOLS, default=DEFAULT_ENABLE_CUSTOM_TOOLS): bool,
-            vol.Optional(CONF_BRAVE_API_KEY, default=DEFAULT_BRAVE_API_KEY): str,
-            vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
-            vol.Optional(CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING): bool,
-            vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
         }
 
@@ -587,6 +617,117 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_mcp_server(self, user_input=None) -> FlowResult:
+        """Handle step 5 - shared MCP server settings (first profile only)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # Validate MCP port
+            mcp_port = user_input.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
+            if not 1024 <= mcp_port <= 65535:
+                errors[CONF_MCP_PORT] = "invalid_port"
+
+            # Validate allowed IPs
+            allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
+            is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
+            if not is_valid:
+                errors[CONF_ALLOWED_IPS] = "invalid_ip"
+                _LOGGER.warning("Invalid allowed IPs: %s", error_msg)
+
+            if not errors:
+                # Create/update system entry with shared settings
+                from . import get_system_entry
+                system_entry = get_system_entry(self.hass)
+
+                if not system_entry:
+                    # Create system entry with shared settings
+                    await self.hass.config_entries.flow.async_init(
+                        DOMAIN,
+                        context={"source": "system"},
+                        data=user_input
+                    )
+                    _LOGGER.info("Created system entry with shared MCP settings from initial setup")
+                else:
+                    # Update existing system entry
+                    self.hass.config_entries.async_update_entry(
+                        system_entry,
+                        data={**system_entry.data, **user_input}
+                    )
+                    _LOGGER.info("Updated existing system entry with shared MCP settings")
+
+                # Combine data from steps 1-4 (profile settings only, no shared settings)
+                combined_data = {
+                    **self.step1_data,
+                    **self.step2_data,
+                    **self.step3_data,
+                    **self.step4_data,
+                }
+
+                # Create profile config entry
+                profile_name = combined_data[CONF_PROFILE_NAME]
+                server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+
+                server_display_map = {
+                    SERVER_TYPE_LMSTUDIO: "LM Studio",
+                    SERVER_TYPE_LLAMACPP: "llama.cpp",
+                    SERVER_TYPE_OLLAMA: "Ollama",
+                    SERVER_TYPE_OPENAI: "OpenAI",
+                    SERVER_TYPE_GEMINI: "Gemini",
+                    SERVER_TYPE_ANTHROPIC: "Claude",
+                    SERVER_TYPE_OPENROUTER: "OpenRouter",
+                }
+                server_display = server_display_map.get(server_type, "LM Studio")
+
+                unique_id = f"{DOMAIN}_{server_type}_{profile_name.lower().replace(' ', '_')}"
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+
+                return self.async_create_entry(
+                    title=f"{server_display} - {profile_name}",
+                    data=combined_data,
+                )
+
+        # Build schema for MCP server settings
+        mcp_schema = vol.Schema({
+            vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
+            vol.Required(CONF_SEARCH_PROVIDER, default=DEFAULT_SEARCH_PROVIDER): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        {"value": "none", "label": "Disabled"},
+                        {"value": "duckduckgo", "label": "DuckDuckGo"},
+                        {"value": "brave", "label": "Brave Search (requires API key)"},
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(CONF_BRAVE_API_KEY, default=DEFAULT_BRAVE_API_KEY): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            ),
+            vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
+            vol.Optional(CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING): bool,
+        })
+
+        return self.async_show_form(
+            step_id="mcp_server",
+            data_schema=mcp_schema,
+            errors=errors,
+            description_placeholders={
+                "info": "⚠️ These settings will be shared across ALL profiles"
+            }
+        )
+
+    async def async_step_system(self, data: dict[str, Any]) -> FlowResult:
+        """Handle programmatic creation of system entry (no UI)."""
+        # Set unique ID for system entry
+        await self.async_set_unique_id(SYSTEM_ENTRY_UNIQUE_ID)
+        self._abort_if_unique_id_configured()
+
+        # Create system entry with provided data
+        return self.async_create_entry(
+            title="System Settings",
+            data=data,
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
@@ -597,47 +738,38 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class MCPAssistOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for MCP Assist integration."""
 
+    def __init__(self) -> None:
+        """Initialize options flow."""
+        super().__init__()
+        self.profile_options: dict[str, Any] = {}
+
+    def _get_search_provider_default(self, options: dict, data: dict) -> str:
+        """Get default search provider with backward compatibility."""
+        # Check if search_provider is already set
+        provider = options.get(CONF_SEARCH_PROVIDER, data.get(CONF_SEARCH_PROVIDER))
+        if provider:
+            return provider
+
+        # Backward compat: if old enable_custom_tools was True, default to "brave"
+        if options.get(CONF_ENABLE_CUSTOM_TOOLS, data.get(CONF_ENABLE_CUSTOM_TOOLS, False)):
+            return "brave"
+
+        return DEFAULT_SEARCH_PROVIDER
+
     async def async_step_init(self, user_input=None):
         """Manage the options."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Validate allowed IPs if provided
-            allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
-            is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
-            if not is_valid:
-                errors[CONF_ALLOWED_IPS] = "invalid_ip"
-                _LOGGER.warning("Invalid allowed IPs in options: %s", error_msg)
-
             if not errors:
                 # Support both old and new config keys
                 if CONF_FOLLOW_UP_MODE in user_input and CONF_RESPONSE_MODE not in user_input:
                     user_input[CONF_RESPONSE_MODE] = user_input[CONF_FOLLOW_UP_MODE]
                     del user_input[CONF_FOLLOW_UP_MODE]
 
-                # Update entry title if profile name changed
-                new_profile_name = user_input.get(CONF_PROFILE_NAME)
-                old_profile_name = self.config_entry.options.get(CONF_PROFILE_NAME,
-                                                                  self.config_entry.data.get(CONF_PROFILE_NAME))
-                if new_profile_name and new_profile_name != old_profile_name:
-                    # Get server type from original data (can't be changed in options)
-                    server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-                    server_display_map = {
-                        SERVER_TYPE_LMSTUDIO: "LM Studio",
-                        SERVER_TYPE_LLAMACPP: "llama.cpp",
-                        SERVER_TYPE_OLLAMA: "Ollama",
-                        SERVER_TYPE_OPENAI: "OpenAI",
-                        SERVER_TYPE_GEMINI: "Gemini",
-                        SERVER_TYPE_ANTHROPIC: "Claude",
-                        SERVER_TYPE_OPENROUTER: "OpenRouter",
-                    }
-                    server_display = server_display_map.get(server_type, "LM Studio")
-                    self.hass.config_entries.async_update_entry(
-                        self.config_entry,
-                        title=f"{server_display} - {new_profile_name}"
-                    )
-
-                return self.async_create_entry(title="", data=user_input)
+                # Store profile settings and proceed to MCP server settings
+                self.profile_options = user_input
+                return await self.async_step_mcp_server()
 
         # Get current values from options, then data, then defaults
         options = self.config_entry.options
@@ -725,7 +857,9 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         else:
             # Cloud providers use API key
             api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-            schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = str
+            schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = TextSelector(
+                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            )
 
         # 3. Model Name (dynamic: dropdown if models found, text input if not)
         schema_dict[vol.Required(CONF_MODEL_NAME, default=current_model)] = model_selector
@@ -790,37 +924,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     default=options.get(CONF_MAX_ITERATIONS, data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS))
                 ): vol.Coerce(int),
 
-                # 12. Enable Custom Tools
-                vol.Optional(
-                    CONF_ENABLE_CUSTOM_TOOLS,
-                    default=options.get(CONF_ENABLE_CUSTOM_TOOLS, data.get(CONF_ENABLE_CUSTOM_TOOLS, DEFAULT_ENABLE_CUSTOM_TOOLS))
-                ): bool,
-
-                # 13. Brave API Key
-                vol.Optional(
-                    CONF_BRAVE_API_KEY,
-                    default=options.get(CONF_BRAVE_API_KEY, data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY))
-                ): str,
-
-                # 14. Allowed IPs
-                vol.Optional(
-                    CONF_ALLOWED_IPS,
-                    default=options.get(CONF_ALLOWED_IPS, data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS))
-                ): str,
-
-                # 15. Enable Gap-Filling
-                vol.Optional(
-                    CONF_ENABLE_GAP_FILLING,
-                    default=options.get(CONF_ENABLE_GAP_FILLING, data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING))
-                ): bool,
-
-                # 16. MCP Server Port
-                vol.Required(
-                    CONF_MCP_PORT,
-                    default=options.get(CONF_MCP_PORT, data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT))
-                ): vol.Coerce(int),
-
-                # 17. Debug Mode
+                # 12. Debug Mode
                 vol.Required(
                     CONF_DEBUG_MODE,
                     default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
@@ -853,6 +957,117 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=options_schema,
             errors=errors,
+        )
+
+    async def async_step_mcp_server(self, user_input=None):
+        """Configure shared MCP server settings (affects all profiles)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # Validate allowed IPs
+            allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
+            is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
+            if not is_valid:
+                errors[CONF_ALLOWED_IPS] = "invalid_ip"
+                _LOGGER.warning("Invalid allowed IPs in options: %s", error_msg)
+
+            if not errors:
+                # Import get_system_entry
+                from . import get_system_entry
+
+                # Update system entry with shared MCP settings
+                system_entry = get_system_entry(self.hass)
+                if system_entry:
+                    self.hass.config_entries.async_update_entry(
+                        system_entry,
+                        options={**system_entry.options, **user_input}
+                    )
+                    _LOGGER.info("Updated system entry with shared MCP settings")
+                else:
+                    _LOGGER.error("System entry not found when saving shared settings")
+
+                # Update profile entry with per-profile settings only
+                # Update entry title if profile name changed
+                new_profile_name = self.profile_options.get(CONF_PROFILE_NAME)
+                old_profile_name = self.config_entry.options.get(CONF_PROFILE_NAME,
+                                                                  self.config_entry.data.get(CONF_PROFILE_NAME))
+                if new_profile_name and new_profile_name != old_profile_name:
+                    server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+                    server_display_map = {
+                        SERVER_TYPE_LMSTUDIO: "LM Studio",
+                        SERVER_TYPE_LLAMACPP: "llama.cpp",
+                        SERVER_TYPE_OLLAMA: "Ollama",
+                        SERVER_TYPE_OPENAI: "OpenAI",
+                        SERVER_TYPE_GEMINI: "Gemini",
+                        SERVER_TYPE_ANTHROPIC: "Claude",
+                        SERVER_TYPE_OPENROUTER: "OpenRouter",
+                    }
+                    server_display = server_display_map.get(server_type, "LM Studio")
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry,
+                        title=f"{server_display} - {new_profile_name}"
+                    )
+
+                # Save profile settings only (not shared settings)
+                return self.async_create_entry(title="", data=self.profile_options)
+
+        # Get current values from system entry
+        from . import get_system_entry
+        system_entry = get_system_entry(self.hass)
+
+        # Get shared settings from system entry (with fallback to profile for backward compat)
+        if system_entry:
+            sys_options = system_entry.options
+            sys_data = system_entry.data
+        else:
+            # Fallback to profile entry for backward compatibility
+            sys_options = self.config_entry.options
+            sys_data = self.config_entry.data
+
+        # Build schema for MCP server settings
+        mcp_schema = vol.Schema({
+            vol.Required(
+                CONF_MCP_PORT,
+                default=sys_options.get(CONF_MCP_PORT, sys_data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT))
+            ): vol.Coerce(int),
+
+            vol.Required(
+                CONF_SEARCH_PROVIDER,
+                default=self._get_search_provider_default(sys_options, sys_data)
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        {"value": "none", "label": "Disabled"},
+                        {"value": "duckduckgo", "label": "DuckDuckGo"},
+                        {"value": "brave", "label": "Brave Search (requires API key)"},
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+
+            vol.Optional(
+                CONF_BRAVE_API_KEY,
+                default=sys_options.get(CONF_BRAVE_API_KEY, sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY))
+            ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+
+            vol.Optional(
+                CONF_ALLOWED_IPS,
+                default=sys_options.get(CONF_ALLOWED_IPS, sys_data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS))
+            ): str,
+
+            vol.Optional(
+                CONF_ENABLE_GAP_FILLING,
+                default=sys_options.get(CONF_ENABLE_GAP_FILLING, sys_data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING))
+            ): bool,
+        })
+
+        return self.async_show_form(
+            step_id="mcp_server",
+            data_schema=mcp_schema,
+            errors=errors,
+            description_placeholders={
+                "warning": "⚠️ These settings are shared across ALL MCP Assist profiles"
+            }
         )
 
 
