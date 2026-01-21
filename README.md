@@ -272,8 +272,8 @@ Choose the model type that best fits your use case. Thinking/reasoning models of
 - ✅ **Qwen3 30B A3B Instruct** - Very good tool calling
 - ✅ **Qwen3 8B Instruct** - Good balance, works reliably
 - ✅ **Anthropic Opus 4.5** - The absolute best at tool calling (cloud)
+- ✅ **Google Gemini 3 Flash** - Excellent tool calling, fast, cost-effective (cloud)
 - ✅ **OpenAI GPT-5.2 series** - Very good (cloud)
-- ✅ **Google Gemini 3 Pro** - Very Good (cloud)
 
 ### Testing Your Model
 
