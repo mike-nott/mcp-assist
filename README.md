@@ -1,13 +1,13 @@
 # MCP Assist for Home Assistant
 
-A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
+A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
 
 ## Key Features
 
 - ✅ **95% Token Reduction**: Uses MCP tools for dynamic entity discovery instead of sending all entities
 - ✅ **No Entity Dumps**: Never sends 12,000+ token entity lists to the LLM
 - ✅ **Smart Entity Index**: Pre-generated system structure index (~400-800 tokens) for context-aware queries
-- ✅ **Multi-Platform Support**: Works with LM Studio, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
+- ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
 - ✅ **Web Search Tools**: Optional Brave Search integration for current information
@@ -58,7 +58,7 @@ The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your
 
 - Home Assistant 2024.1+
 - One of:
-  - **Local LLMs**: LM Studio v0.3.17+ or Ollama
+  - **Local LLMs**: LM Studio v0.3.17+, llama.cpp, or Ollama
   - **Cloud LLMs**: OpenAI, Google Gemini, Anthropic Claude, or OpenRouter (API key required)
 - Python 3.11+
 
@@ -90,6 +90,7 @@ The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your
 - Profile Name: Give your assistant a name (e.g., "Living Room Assistant")
 - Server Type: Choose your LLM provider
   - **LM Studio** - Local, free, runs on your machine
+  - **llama.cpp** - Local, free, official llama.cpp server
   - **Ollama** - Local, free, command-line based
   - **OpenAI** - Cloud, paid, GPT-5.2 series
   - **Google Gemini** - Cloud, paid/free tier, Gemini 3.0 series
@@ -97,9 +98,10 @@ The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your
 
 **Step 2 - Server Configuration:**
 
-*For Local Servers (LM Studio / Ollama):*
+*For Local Servers (LM Studio / llama.cpp / Ollama):*
 - Server URL: Where your LLM server is running
   - LM Studio: `http://localhost:1234` (default)
+  - llama.cpp: `http://localhost:8080` (default)
   - Ollama: `http://localhost:11434` (default)
 - MCP Server Port: Port for the MCP server (default: 8090)
 

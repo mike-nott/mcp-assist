@@ -54,6 +54,7 @@ from .const import (
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
     SERVER_TYPE_LMSTUDIO,
+    SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
     SERVER_TYPE_GEMINI,
@@ -90,6 +91,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         # Server type display names
         server_display_names = {
             SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_LLAMACPP: "llama.cpp",
             SERVER_TYPE_OLLAMA: "Ollama",
             SERVER_TYPE_OPENAI: "OpenAI",
             SERVER_TYPE_GEMINI: "Gemini",
@@ -225,6 +227,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Return attribution."""
         server_name = {
             SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_LLAMACPP: "llama.cpp",
             SERVER_TYPE_OLLAMA: "Ollama",
             SERVER_TYPE_OPENAI: "OpenAI",
             SERVER_TYPE_GEMINI: "Gemini",

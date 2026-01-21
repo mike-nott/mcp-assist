@@ -50,6 +50,7 @@ from .const import (
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
     SERVER_TYPE_LMSTUDIO,
+    SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
     SERVER_TYPE_GEMINI,
@@ -57,6 +58,7 @@ from .const import (
     SERVER_TYPE_OPENROUTER,
     DEFAULT_SERVER_TYPE,
     DEFAULT_LMSTUDIO_URL,
+    DEFAULT_LLAMACPP_URL,
     DEFAULT_OLLAMA_URL,
     DEFAULT_MCP_PORT,
     DEFAULT_MODEL_NAME,
@@ -252,6 +254,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema({
         SelectSelectorConfig(
             options=[
                 {"value": "lmstudio", "label": "LM Studio"},
+                {"value": "llamacpp", "label": "llama.cpp"},
                 {"value": "ollama", "label": "Ollama"},
                 {"value": "openai", "label": "OpenAI"},
                 {"value": "gemini", "label": "Google Gemini"},
@@ -366,9 +369,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         # Build schema based on server type
-        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_LLAMACPP, SERVER_TYPE_OLLAMA]:
             # Local servers - show URL field
-            default_url = DEFAULT_OLLAMA_URL if server_type == SERVER_TYPE_OLLAMA else DEFAULT_LMSTUDIO_URL
+            if server_type == SERVER_TYPE_OLLAMA:
+                default_url = DEFAULT_OLLAMA_URL
+            elif server_type == SERVER_TYPE_LLAMACPP:
+                default_url = DEFAULT_LLAMACPP_URL
+            else:
+                default_url = DEFAULT_LMSTUDIO_URL
             server_schema = vol.Schema({
                 vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
             })
@@ -399,7 +407,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
         models = []
 
-        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_LLAMACPP, SERVER_TYPE_OLLAMA]:
             # Local servers - fetch models from API
             server_url = self.step2_data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL).rstrip("/")
             _LOGGER.debug("Attempting to fetch models from %s", server_url)
@@ -506,6 +514,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Map server type to display name
                 server_display_map = {
                     SERVER_TYPE_LMSTUDIO: "LM Studio",
+                    SERVER_TYPE_LLAMACPP: "llama.cpp",
                     SERVER_TYPE_OLLAMA: "Ollama",
                     SERVER_TYPE_OPENAI: "OpenAI",
                     SERVER_TYPE_GEMINI: "Gemini",
@@ -612,6 +621,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
                     server_display_map = {
                         SERVER_TYPE_LMSTUDIO: "LM Studio",
+                        SERVER_TYPE_LLAMACPP: "llama.cpp",
                         SERVER_TYPE_OLLAMA: "Ollama",
                         SERVER_TYPE_OPENAI: "OpenAI",
                         SERVER_TYPE_GEMINI: "Gemini",
@@ -642,7 +652,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         models = []
         current_model = options.get(CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME))
 
-        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_OLLAMA]:
+        if server_type in [SERVER_TYPE_LMSTUDIO, SERVER_TYPE_LLAMACPP, SERVER_TYPE_OLLAMA]:
             # Local servers - fetch from URL
             server_url = options.get(CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)).rstrip("/")
             _LOGGER.info(f"🔍 OPTIONS: Attempting to fetch models from {server_type} at {server_url}")

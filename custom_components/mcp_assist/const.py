@@ -4,6 +4,7 @@ DOMAIN = "mcp_assist"
 
 # Server type options
 SERVER_TYPE_LMSTUDIO = "lmstudio"
+SERVER_TYPE_LLAMACPP = "llamacpp"
 SERVER_TYPE_OLLAMA = "ollama"
 SERVER_TYPE_OPENAI = "openai"
 SERVER_TYPE_GEMINI = "gemini"
@@ -38,6 +39,7 @@ CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
 DEFAULT_LMSTUDIO_URL = "http://localhost:1234"
+DEFAULT_LLAMACPP_URL = "http://localhost:8080"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MCP_PORT = 8090
 DEFAULT_API_KEY = ""
