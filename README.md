@@ -1,6 +1,6 @@
 # MCP Assist for Home Assistant
 
-A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
+A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
 
 ## Key Features
 
@@ -8,7 +8,7 @@ A Home Assistant conversation agent that uses MCP (Model Context Protocol) for e
 - ✅ **Instant Entity Recognition**: Pre-resolves device names before the LLM call - faster responses, fewer API calls
 - ✅ **No Entity Dumps**: Never sends 12,000+ token entity lists to the LLM
 - ✅ **Smart Entity Index**: Pre-generated system structure index (~400-800 tokens) for context-aware queries
-- ✅ **Multi-Platform Support**: Works with LM Studio, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
+- ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
 - ✅ **Web Search Tools**: Optional Brave Search integration for current information
@@ -95,7 +95,7 @@ You: "Turn on the kitchen light"
 
 - Home Assistant 2024.1+
 - One of:
-  - **Local LLMs**: LM Studio v0.3.17+ or Ollama
+  - **Local LLMs**: LM Studio v0.3.17+, llama.cpp, or Ollama
   - **Cloud LLMs**: OpenAI, Google Gemini, Anthropic Claude, or OpenRouter (API key required)
 - Python 3.11+
 
@@ -127,6 +127,7 @@ You: "Turn on the kitchen light"
 - Profile Name: Give your assistant a name (e.g., "Living Room Assistant")
 - Server Type: Choose your LLM provider
   - **LM Studio** - Local, free, runs on your machine
+  - **llama.cpp** - Local, free, official llama.cpp server
   - **Ollama** - Local, free, command-line based
   - **OpenAI** - Cloud, paid, GPT-5.2 series
   - **Google Gemini** - Cloud, paid/free tier, Gemini 3.0 series
@@ -134,9 +135,10 @@ You: "Turn on the kitchen light"
 
 **Step 2 - Server Configuration:**
 
-*For Local Servers (LM Studio / Ollama):*
+*For Local Servers (LM Studio / llama.cpp / Ollama):*
 - Server URL: Where your LLM server is running
   - LM Studio: `http://localhost:1234` (default)
+  - llama.cpp: `http://localhost:8080` (default)
   - Ollama: `http://localhost:11434` (default)
 - MCP Server Port: Port for the MCP server (default: 8090)
 
@@ -232,10 +234,9 @@ You: "Turn on the kitchen light"
 - **Technical Instructions**: Low-level instructions for tool usage (usually leave as default)
 
 ### Advanced Settings
-- **Temperature**: 0.0 (deterministic) to 1.0 (creative)
 - **Max Response Tokens**: Limit response length (default: 500)
 - **Max History Messages**: How many conversation turns to remember (default: 10)
-- **Max Tool Iterations**: Prevent infinite loops (default: 5)
+- **Max Tool Iterations**: Prevent infinite loops (default: 10)
 - **Response Mode**:
   - **Smart** (default): LLM decides if follow-up needed
   - **Always**: Always wait for follow-up
@@ -244,6 +245,22 @@ You: "Turn on the kitchen light"
 - **Enable Pre-Resolution**: Automatically recognize device names before LLM call for faster responses (default: enabled)
 - **Pre-Resolution Threshold**: How confident the match must be (0.5-1.0, default: 0.90)
 - **Pre-Resolution Margin**: How much better the best match must be than the second-best (0.0-0.5, default: 0.08)
+
+### Temperature Settings
+
+Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). Different providers have different optimal values:
+
+| Provider | Default | Reason |
+|----------|---------|--------|
+| **Gemini** | `1.0` | Google requires 1.0 for Gemini 3 to avoid "looping or degraded performance" |
+| **OpenAI (GPT-4)** | `0.5` | Balanced for reliable tool calling |
+| **OpenAI (GPT-5/o1)** | N/A | Reasoning models don't use temperature |
+| **Anthropic Claude** | `0.5` | Works well across 0.5-1.0 range |
+| **LM Studio / llama.cpp** | `0.5` | Lower temps improve tool calling accuracy |
+| **Ollama** | `0.5` | Model-dependent, lower is safer for tools |
+| **OpenRouter** | `0.5` | Depends on underlying model |
+
+**Note**: You can always override these defaults in Advanced Settings. For Home Assistant voice control, lower temperatures (0.5-0.7) generally provide more consistent tool calling and accurate entity control.
 
 ### MCP Server Settings
 - **MCP Server Port**: Default 8090 (change if port conflict)
@@ -255,7 +272,7 @@ You: "Turn on the kitchen light"
 
 ## Model Compatibility Guide
 
-Not all LLM models support tool calling (function calling) equally well. **Model performance varies significantly between inference engines** (LM Studio vs Ollama), so testing is recommended.
+Not all LLM models support tool calling (function calling) equally well. **This integration works best with frontier models** (GPT-5.2, Claude Opus 4.5, Gemini 3 Flash) **or higher-spec local models**. Smaller models may struggle with complex multi-entity queries that require synthesizing large tool result sets.  
 
 ### Understanding Tool Calling Requirements
 
@@ -294,9 +311,9 @@ Choose the model type that best fits your use case. Thinking/reasoning models of
 - ✅ **Qwen3 VL 32B Instruct** - Excellent tool calling
 - ✅ **Qwen3 30B A3B Instruct** - Very good tool calling
 - ✅ **Qwen3 8B Instruct** - Good balance, works reliably
-- ✅ **Anthropic Opus 4.5** - The absolute best at tool calling (cloud)
-- ✅ **OpenAI GPT-5.2 series** - Very good (cloud)
-- ✅ **Google Gemini 3 Pro** - Very Good (cloud)
+- ✅ **Anthropic Opus 4.5** - The very best at tool calling (cloud)
+- ✅ **OpenAI GPT-5.2** - Excellent tool calling, very fast (cloud)
+- ✅ **Google Gemini 3 Flash** - Excellent tool calling, fast, cost-effective (cloud)
 
 ### Testing Your Model
 

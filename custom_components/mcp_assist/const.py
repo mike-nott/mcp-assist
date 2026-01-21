@@ -4,6 +4,7 @@ DOMAIN = "mcp_assist"
 
 # Server type options
 SERVER_TYPE_LMSTUDIO = "lmstudio"
+SERVER_TYPE_LLAMACPP = "llamacpp"
 SERVER_TYPE_OLLAMA = "ollama"
 SERVER_TYPE_OPENAI = "openai"
 SERVER_TYPE_GEMINI = "gemini"
@@ -41,6 +42,7 @@ CONF_PRE_RESOLVE_MARGIN = "pre_resolve_margin"
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
 DEFAULT_LMSTUDIO_URL = "http://localhost:1234"
+DEFAULT_LLAMACPP_URL = "http://localhost:8080"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MCP_PORT = 8090
 DEFAULT_API_KEY = ""
@@ -60,7 +62,7 @@ DEFAULT_FOLLOW_UP_MODE = "default"  # Keep for backward compatibility
 DEFAULT_TEMPERATURE = 0.5
 DEFAULT_MAX_TOKENS = 500
 DEFAULT_MAX_HISTORY = 10
-DEFAULT_MAX_ITERATIONS = 5
+DEFAULT_MAX_ITERATIONS = 10
 DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""

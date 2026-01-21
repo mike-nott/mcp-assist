@@ -60,6 +60,7 @@ from .const import (
     DEFAULT_PRE_RESOLVE_THRESHOLD,
     DEFAULT_PRE_RESOLVE_MARGIN,
     SERVER_TYPE_LMSTUDIO,
+    SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_OPENAI,
     SERVER_TYPE_GEMINI,
@@ -96,6 +97,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         # Server type display names
         server_display_names = {
             SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_LLAMACPP: "llama.cpp",
             SERVER_TYPE_OLLAMA: "Ollama",
             SERVER_TYPE_OPENAI: "OpenAI",
             SERVER_TYPE_GEMINI: "Gemini",
@@ -255,6 +257,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Return attribution."""
         server_name = {
             SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_LLAMACPP: "llama.cpp",
             SERVER_TYPE_OLLAMA: "Ollama",
             SERVER_TYPE_OPENAI: "OpenAI",
             SERVER_TYPE_GEMINI: "Gemini",
@@ -1291,6 +1294,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             has_tool_calls = False
             current_tool_calls = []
+            current_thought_signature = None  # Track Gemini 3 thought signatures
 
             try:
                 timeout = aiohttp.ClientTimeout(total=30)
@@ -1314,9 +1318,14 @@ class MCPAssistConversationEntity(ConversationEntity):
                             _LOGGER.debug(f"📋 Response headers: {dict(response.headers)}")
 
                         if response.status != 200:
-                            error_text = await response.text()
+                            try:
+                                error_data = await response.json()
+                                error_text = json.dumps(error_data, indent=2)
+                            except:
+                                error_text = await response.text()
                             # Fallback to non-streaming
-                            _LOGGER.error(f"❌ Streaming failed with status {response.status}: {error_text[:500]}")
+                            _LOGGER.error(f"❌ Streaming failed with status {response.status}")
+                            _LOGGER.error(f"❌ Full error response: {error_text}")
                             raise Exception(f"Streaming failed: {error_text}")  # Raise to trigger fallback
 
                         if self.debug_mode:
@@ -1359,7 +1368,18 @@ class MCPAssistConversationEntity(ConversationEntity):
                                         break
 
                                     data = json.loads(line_str[6:])
-                                    delta = data['choices'][0].get('delta', {})
+                                    choice = data['choices'][0]
+                                    delta = choice.get('delta', {})
+
+                                    # Capture thought_signature from tool_calls (it's inside the first tool_call, not at choice/delta level)
+                                    if 'tool_calls' in delta and current_thought_signature is None:
+                                        for tc_delta in delta['tool_calls']:
+                                            if 'extra_content' in tc_delta:
+                                                google_data = tc_delta.get('extra_content', {}).get('google', {})
+                                                if 'thought_signature' in google_data:
+                                                    current_thought_signature = google_data['thought_signature']
+                                                    _LOGGER.info(f"🧠 Captured thought_signature: {current_thought_signature[:50]}...")
+                                                    break  # Only in first tool_call
 
                                 # Handle streamed content
                                 if 'content' in delta and delta['content']:
@@ -1449,11 +1469,24 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                 # Add assistant message with tool calls
                 # LM Studio streaming requires NO content field at all when tool_calls exist
+                # Gemini 3: thought_signature goes INSIDE each tool_call, not at message level
+                if current_thought_signature is not None:
+                    for tool_call in current_tool_calls:
+                        tool_call["extra_content"] = {
+                            "google": {
+                                "thought_signature": current_thought_signature
+                            }
+                        }
+                    _LOGGER.info(f"🧠 Added thought_signature to {len(current_tool_calls)} tool calls")
+                else:
+                    _LOGGER.warning("⚠️ No thought_signature captured for Gemini 3 (this will cause 400 error on next turn)")
+
                 assistant_msg = {
                     "role": "assistant",
                     "tool_calls": current_tool_calls
                     # NO content field - must be completely absent
                 }
+
                 conversation_messages.append(assistant_msg)
 
                 # Execute tools
@@ -1553,6 +1586,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                     data = await response.json()
 
                     # Parse response based on server type
+                    thought_signature = None  # Track for Gemini 3
                     if self.server_type == SERVER_TYPE_OLLAMA:
                         # Ollama: Direct message field
                         message = data.get("message", {})
@@ -1568,6 +1602,13 @@ class MCPAssistConversationEntity(ConversationEntity):
                         tool_calls = message["tool_calls"]
                         _LOGGER.info(f"🛠️ {self.server_type} requested {len(tool_calls)} tool calls")
 
+                        # Capture thought_signature from first tool_call (Gemini 3)
+                        if tool_calls and 'extra_content' in tool_calls[0]:
+                            google_data = tool_calls[0].get('extra_content', {}).get('google', {})
+                            if 'thought_signature' in google_data:
+                                thought_signature = google_data['thought_signature']
+                                _LOGGER.info(f"🧠 Captured thought_signature: {thought_signature[:50]}...")
+
                         # Ensure each tool_call has the required type field
                         for tc in tool_calls:
                             if 'type' not in tc:
@@ -1575,13 +1616,15 @@ class MCPAssistConversationEntity(ConversationEntity):
                             if "function" in tc:
                                 _LOGGER.info(f"  - {tc['function'].get('name')}: {tc['function'].get('arguments')}")
 
-                        # Add assistant message with tool calls to conversation
-                        # LM Studio requires NO content field at all when tool_calls exist
+                        # Preserve thought_signature in tool_calls for Gemini 3
+                        # It should already be there from the response, just keep it
+
                         assistant_msg = {
                             "role": "assistant",
                             "tool_calls": tool_calls
                             # NO content field - must be completely absent
                         }
+
                         conversation_messages.append(assistant_msg)
 
                         # Execute the tool calls
