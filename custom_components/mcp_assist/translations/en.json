@@ -37,6 +37,8 @@
           "max_iterations": "Max Tool Iterations",
           "control_home_assistant": "Control Home Assistant",
           "response_mode": "Response Mode",
+          "follow_up_phrases": "Follow-up Phrases",
+          "end_words": "End Conversation Words",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window"
@@ -88,6 +90,8 @@
           "max_iterations": "Max Tool Iterations",
           "control_home_assistant": "Control Home Assistant",
           "response_mode": "Response Mode",
+          "follow_up_phrases": "Follow-up Phrases",
+          "end_words": "End Conversation Words",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window"

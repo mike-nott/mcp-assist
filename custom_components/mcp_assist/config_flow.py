@@ -51,6 +51,8 @@ from .const import (
     CONF_ENABLE_GAP_FILLING,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
+    CONF_FOLLOW_UP_PHRASES,
+    CONF_END_WORDS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -81,6 +83,8 @@ from .const import (
     DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
+    DEFAULT_FOLLOW_UP_PHRASES,
+    DEFAULT_END_WORDS,
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
@@ -574,40 +578,42 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Gemini requires temperature=1.0 for optimal performance (Google's guidance)
         default_temp = 1.0 if server_type == SERVER_TYPE_GEMINI else DEFAULT_TEMPERATURE
 
-        # Build base schema
+        # Build base schema with correct field order
         advanced_schema_dict = {
             vol.Required(CONF_TEMPERATURE, default=default_temp): vol.All(
                 vol.Coerce(float), vol.Range(min=0.0, max=1.0)
             ),
             vol.Required(CONF_MAX_TOKENS, default=DEFAULT_MAX_TOKENS): vol.Coerce(int),
+        }
+
+        # Add Ollama-specific fields in correct position (after Max Tokens)
+        if server_type == SERVER_TYPE_OLLAMA:
+            advanced_schema_dict[vol.Optional(CONF_OLLAMA_NUM_CTX, default=DEFAULT_OLLAMA_NUM_CTX)] = vol.Coerce(int)
+            advanced_schema_dict[vol.Optional(CONF_OLLAMA_KEEP_ALIVE, default=DEFAULT_OLLAMA_KEEP_ALIVE)] = str
+
+        # Continue with remaining fields
+        advanced_schema_dict.update({
+            vol.Required(CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY): vol.Coerce(int),
+            vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
+            vol.Required(CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS): vol.Coerce(int),
             vol.Required(CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE): SelectSelector(
                 SelectSelectorConfig(
                     options=[
+                        {"value": "none", "label": "None"},
                         {"value": "default", "label": "Smart"},
                         {"value": "always", "label": "Always"},
-                        {"value": "none", "label": "None"},
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Required(CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY): vol.Coerce(int),
-            vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
-            vol.Required(CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS): vol.Coerce(int),
+            vol.Optional(CONF_FOLLOW_UP_PHRASES, default=DEFAULT_FOLLOW_UP_PHRASES): TextSelector(
+                TextSelectorConfig(multiline=True)
+            ),
+            vol.Optional(CONF_END_WORDS, default=DEFAULT_END_WORDS): TextSelector(
+                TextSelectorConfig(multiline=True)
+            ),
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
-        }
-
-        # Add Ollama-specific fields
-        if server_type == SERVER_TYPE_OLLAMA:
-            advanced_schema_dict.update({
-                vol.Optional(
-                    CONF_OLLAMA_KEEP_ALIVE,
-                    default=DEFAULT_OLLAMA_KEEP_ALIVE
-                ): str,
-                vol.Optional(
-                    CONF_OLLAMA_NUM_CTX,
-                    default=DEFAULT_OLLAMA_NUM_CTX
-                ): vol.Coerce(int),
-            })
+        })
 
         advanced_schema = vol.Schema(advanced_schema_dict)
 
@@ -890,65 +896,78 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     CONF_MAX_TOKENS,
                     default=options.get(CONF_MAX_TOKENS, data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS))
                 ): vol.Coerce(int),
+        })
 
-                # 8. Response Mode
+        # Add Ollama-specific fields in correct position (after Max Tokens)
+        if server_type == SERVER_TYPE_OLLAMA:
+            schema_dict[vol.Optional(
+                CONF_OLLAMA_NUM_CTX,
+                default=options.get(
+                    CONF_OLLAMA_NUM_CTX,
+                    data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX)
+                )
+            )] = vol.Coerce(int)
+            schema_dict[vol.Optional(
+                CONF_OLLAMA_KEEP_ALIVE,
+                default=options.get(
+                    CONF_OLLAMA_KEEP_ALIVE,
+                    data.get(CONF_OLLAMA_KEEP_ALIVE, DEFAULT_OLLAMA_KEEP_ALIVE)
+                )
+            )] = str
+
+        # Continue with remaining fields
+        schema_dict.update({
+                # 8/10. Max History Messages
+                vol.Required(
+                    CONF_MAX_HISTORY,
+                    default=options.get(CONF_MAX_HISTORY, data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
+                ): vol.Coerce(int),
+
+                # 9/11. Control Home Assistant
+                vol.Required(
+                    CONF_CONTROL_HA,
+                    default=options.get(CONF_CONTROL_HA, data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA))
+                ): bool,
+
+                # 10/12. Max Tool Iterations
+                vol.Required(
+                    CONF_MAX_ITERATIONS,
+                    default=options.get(CONF_MAX_ITERATIONS, data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS))
+                ): vol.Coerce(int),
+
+                # 11/13. Response Mode
                 vol.Required(
                     CONF_RESPONSE_MODE,
                     default=response_mode_value
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
+                            {"value": "none", "label": "None"},
                             {"value": "default", "label": "Smart"},
                             {"value": "always", "label": "Always"},
-                            {"value": "none", "label": "None"},
                         ],
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
 
-                # 9. Max History Messages
-                vol.Required(
-                    CONF_MAX_HISTORY,
-                    default=options.get(CONF_MAX_HISTORY, data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
-                ): vol.Coerce(int),
+                # 12/14. Follow-up Phrases
+                vol.Optional(
+                    CONF_FOLLOW_UP_PHRASES,
+                    default=options.get(CONF_FOLLOW_UP_PHRASES, data.get(CONF_FOLLOW_UP_PHRASES, DEFAULT_FOLLOW_UP_PHRASES))
+                ): TextSelector(TextSelectorConfig(multiline=True)),
 
-                # 10. Control Home Assistant
-                vol.Required(
-                    CONF_CONTROL_HA,
-                    default=options.get(CONF_CONTROL_HA, data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA))
-                ): bool,
+                # 13/15. End Conversation Words
+                vol.Optional(
+                    CONF_END_WORDS,
+                    default=options.get(CONF_END_WORDS, data.get(CONF_END_WORDS, DEFAULT_END_WORDS))
+                ): TextSelector(TextSelectorConfig(multiline=True)),
 
-                # 11. Max Tool Iterations
-                vol.Required(
-                    CONF_MAX_ITERATIONS,
-                    default=options.get(CONF_MAX_ITERATIONS, data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS))
-                ): vol.Coerce(int),
-
-                # 12. Debug Mode
+                # 14/16. Debug Mode
                 vol.Required(
                     CONF_DEBUG_MODE,
                     default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
                 ): bool,
         })
-
-        # Add Ollama-specific fields to options
-        if server_type == SERVER_TYPE_OLLAMA:
-            schema_dict.update({
-                vol.Optional(
-                    CONF_OLLAMA_KEEP_ALIVE,
-                    default=options.get(
-                        CONF_OLLAMA_KEEP_ALIVE,
-                        data.get(CONF_OLLAMA_KEEP_ALIVE, DEFAULT_OLLAMA_KEEP_ALIVE)
-                    )
-                ): str,
-                vol.Optional(
-                    CONF_OLLAMA_NUM_CTX,
-                    default=options.get(
-                        CONF_OLLAMA_NUM_CTX,
-                        data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX)
-                    )
-                ): vol.Coerce(int),
-            })
 
         # Create the schema from the built dictionary
         options_schema = vol.Schema(schema_dict)

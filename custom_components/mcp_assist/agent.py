@@ -25,6 +25,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    CONF_PROFILE_NAME,
     CONF_LMSTUDIO_URL,
     CONF_MODEL_NAME,
     CONF_MCP_PORT,
@@ -46,6 +47,8 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_FOLLOW_UP_PHRASES,
+    CONF_END_WORDS,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -64,6 +67,9 @@ from .const import (
     DEFAULT_CONTROL_HA,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
+    DEFAULT_FOLLOW_UP_PHRASES,
+    DEFAULT_END_WORDS,
+    RESPONSE_MODE_INSTRUCTIONS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -302,6 +308,27 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         return features
 
+    @property
+    def follow_up_phrases(self) -> str:
+        """Return follow-up phrases for pattern detection."""
+        return self.entry.options.get(
+            CONF_FOLLOW_UP_PHRASES,
+            self.entry.data.get(CONF_FOLLOW_UP_PHRASES, DEFAULT_FOLLOW_UP_PHRASES)
+        )
+
+    @property
+    def end_words(self) -> str:
+        """Return end conversation words for user ending detection."""
+        return self.entry.options.get(
+            CONF_END_WORDS,
+            self.entry.data.get(CONF_END_WORDS, DEFAULT_END_WORDS)
+        )
+
+    @property
+    def profile_name(self) -> str:
+        """Return profile name."""
+        return self.entry.data.get(CONF_PROFILE_NAME, "MCP Assist")
+
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant."""
         await super().async_added_to_hass()
@@ -430,6 +457,13 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.info(f"📡 Calling {self.server_type} API...")
             response_text = await self._call_llm(messages)
             _LOGGER.info(f"✅ {self.server_type} response received, length: %d", len(response_text))
+            if self.debug_mode:
+                # Use repr() to show newlines and hidden characters
+                _LOGGER.info(f"💬 Full response (repr): {repr(response_text)}")
+            else:
+                # For non-debug, just show first 500 chars
+                preview = response_text[:500] if len(response_text) > 500 else response_text
+                _LOGGER.info(f"💬 Full response preview: {preview}")
 
             # Parse response and execute any Home Assistant actions
             actions_taken = await self._execute_actions(response_text, user_input)
@@ -449,8 +483,18 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Note: Card data removed as it was causing JSON serialization errors
             # Actions are already executed via MCP tools, so card isn't needed
 
+            # Check if user wants to end (stopwords+1 algorithm)
+            user_wants_to_end = False
+            if self.follow_up_mode in ["default", "always"]:
+                user_wants_to_end = self._detect_user_ending_intent(user_input.text)
+                if user_wants_to_end and self.debug_mode:
+                    _LOGGER.info("🎯 User ending intent detected (stopwords+1)")
+
             # Determine follow-up mode
-            if self.follow_up_mode == "always":
+            if user_wants_to_end:
+                # User explicitly wants to end
+                continue_conversation = False
+            elif self.follow_up_mode == "always":
                 # Always continue regardless of tool
                 continue_conversation = True
             elif self.follow_up_mode == "none":
@@ -462,16 +506,19 @@ class MCPAssistConversationEntity(ConversationEntity):
                     continue_conversation = self._expecting_response
                     # Clear for next conversation
                     delattr(self, '_expecting_response')
-                    _LOGGER.debug("🎯 Using LLM's set_conversation_state indication")
+                    if self.debug_mode:
+                        _LOGGER.info("🎯 Using LLM's set_conversation_state indication")
                 else:
                     # LLM didn't indicate, use pattern detection as fallback
                     continue_conversation = self._detect_follow_up_patterns(response_text)
-                    if continue_conversation:
-                        _LOGGER.debug("🎯 Pattern detection triggered continuation")
-                    else:
-                        _LOGGER.debug("🎯 No patterns detected, closing conversation")
+                    if self.debug_mode:
+                        if continue_conversation:
+                            _LOGGER.info("🎯 Pattern detection triggered continuation")
+                        else:
+                            _LOGGER.info("🎯 No patterns detected, closing conversation")
 
-            _LOGGER.debug(f"🎯 Follow-up mode: {self.follow_up_mode}, Continue: {continue_conversation}")
+            if self.debug_mode:
+                _LOGGER.info(f"🎯 Follow-up mode: {self.follow_up_mode}, Continue: {continue_conversation}")
 
             return ConversationResult(
                 response=intent_response,
@@ -494,41 +541,95 @@ class MCPAssistConversationEntity(ConversationEntity):
                 continue_conversation=False  # Don't continue on errors
             )
 
+    def _detect_user_ending_intent(self, text: str) -> bool:
+        """Detect if user wants to end conversation using stopwords+1 algorithm.
+
+        Handles both single words and multi-word phrases.
+
+        Returns True if:
+        - User message contains at least one stop word/phrase, AND
+        - User message has ≤1 non-stop word (excluding agent name and matched phrases)
+
+        Examples:
+        - "stop" → True (0 non-stop words)
+        - "no thanks" → True (both are stop words)
+        - "no thank you" → True ("thank you" is a stop phrase)
+        - "bye Jarvis" → True (Jarvis removed, 0 non-stop)
+        - "ok please" → True (1 non-stop word)
+        - "no turn on light" → False (3 non-stop words)
+        """
+        if not text:
+            return False
+
+        # Parse end words from config
+        end_words_raw = [word.strip().lower() for word in self.end_words.split(',') if word.strip()]
+        if not end_words_raw:
+            return False
+
+        # Separate multi-word phrases from single words
+        multi_word_phrases = [phrase for phrase in end_words_raw if ' ' in phrase]
+        single_words = [word for word in end_words_raw if ' ' not in word]
+
+        # Normalize text
+        text_lower = text.lower().strip()
+
+        # Check if any multi-word phrases are present and remove them
+        has_stop_word = False
+        remaining_text = text_lower
+
+        for phrase in multi_word_phrases:
+            if phrase in remaining_text:
+                has_stop_word = True
+                # Replace matched phrase with spaces to preserve word boundaries
+                remaining_text = remaining_text.replace(phrase, ' ')
+
+        # Split remaining text into words
+        words = remaining_text.split()
+
+        # Remove agent name
+        profile_name_lower = self.profile_name.lower()
+        words = [word for word in words if word != profile_name_lower]
+
+        # Check if any single-word stop words are present
+        for word in words:
+            if word in single_words:
+                has_stop_word = True
+
+        if not has_stop_word:
+            return False
+
+        # Count non-stop words (words not in single_words list)
+        non_stop_words = [word for word in words if word not in single_words and word.strip()]
+
+        # End if ≤1 non-stop word
+        return len(non_stop_words) <= 1
+
     def _detect_follow_up_patterns(self, text: str) -> bool:
         """Detect if the response expects a follow-up based on patterns."""
         if not text:
             return False
+
+        # Debug logging to see what we're checking
+        if self.debug_mode:
+            _LOGGER.info(f"🔍 Pattern detection - Full response length: {len(text)} chars")
+            _LOGGER.info(f"🔍 Pattern detection - Last 200 chars: {text[-200:]}")
 
         # Check last 200 characters for efficiency
         check_text = text[-200:].lower()
 
         # Pattern 1: Ends with a question mark
         if check_text.rstrip().endswith('?'):
-            _LOGGER.debug("📊 Pattern detected: ends with question mark")
+            if self.debug_mode:
+                _LOGGER.info("📊 Question detected: phrase ends with question mark")
             return True
 
-        # Pattern 2: Question phrases
-        question_phrases = [
-            "which one", "would you like", "would you prefer", "should i",
-            "do you want", "how about", "shall i", "can i", "may i",
-            "want me to", "need anything else", "anything else"
-        ]
+        # Pattern 2: Question phrases (user-configurable)
+        question_phrases = [phrase.strip().lower() for phrase in self.follow_up_phrases.split(',') if phrase.strip()]
 
         for phrase in question_phrases:
             if phrase in check_text:
-                _LOGGER.debug(f"📊 Pattern detected: question phrase '{phrase}'")
-                return True
-
-        # Pattern 3: Offering alternatives
-        alternative_patterns = [
-            " or ", "instead", "alternatively"
-        ]
-
-        # Only check for alternatives if there's also a question indicator
-        if any(pattern in check_text for pattern in alternative_patterns):
-            # Check if it's actually offering a choice (has question indicators)
-            if any(phrase in check_text for phrase in ["would you", "do you", "should", "?"]):
-                _LOGGER.debug("📊 Pattern detected: offering alternatives")
+                if self.debug_mode:
+                    _LOGGER.info(f"📊 Follow-up phrase detected: '{phrase}'")
                 return True
 
         return False
@@ -591,6 +692,10 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Get current area from satellite (if available)
             current_area = await self._get_current_area(user_input)
             technical_prompt = technical_prompt.replace('{current_area}', current_area)
+
+            # Inject mode-specific instructions
+            mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"])
+            technical_prompt = technical_prompt.replace('{response_mode}', mode_instructions)
 
             # Get Smart Entity Index from IndexManager
             index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
@@ -1529,6 +1634,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                         # No more tool calls, we have the final response
                         final_content = message.get("content", "").strip()
                         _LOGGER.info(f"💬 Final response received (length: {len(final_content)})")
+                        _LOGGER.info(f"💬 Full response: {final_content}")
                         return final_content
 
         # If we hit max iterations, return what we have
