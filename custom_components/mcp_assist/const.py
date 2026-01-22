@@ -86,7 +86,6 @@ MAX_DISCOVERY_RESULTS = 100
 RESPONSE_MODE_INSTRUCTIONS = {
     "none": """## Follow-up Questions
 Do NOT ask follow-up questions. Complete the task and end immediately.
-Use the set_conversation_state tool to indicate you're not expecting a response.
 
 ## Ending Conversations
 Always end after completing the task.""",

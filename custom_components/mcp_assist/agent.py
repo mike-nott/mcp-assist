@@ -17,10 +17,11 @@ from homeassistant.components.conversation import (
     ConversationInput,
     ConversationResult,
 )
+from homeassistant.components.conversation import chat_log
 from homeassistant.components.conversation.const import DOMAIN as CONVERSATION_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import intent, area_registry as ar, device_registry as dr, entity_registry as er
+from homeassistant.helpers import intent, area_registry as ar, device_registry as dr, entity_registry as er, llm, chat_session
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -97,6 +98,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         self.hass = hass
         self.entry = entry
         self.history = ConversationHistory()
+        self._current_chat_log = None  # ChatLog for debug view tracking
 
         # Entity attributes
         profile_name = entry.data.get("profile_name", "MCP Assist")
@@ -422,19 +424,93 @@ class MCPAssistConversationEntity(ConversationEntity):
         error_snippet = error_full.split('\n')[0][:100]
         return f"An unexpected error occurred while talking to {self._get_server_display_name()}. The error was: {error_snippet}. Check the Home Assistant logs for more details."
 
+    def _record_tool_calls_to_chatlog(self, tool_calls: List[Dict[str, Any]]) -> None:
+        """Record tool calls to ChatLog for debug view."""
+        if not self._current_chat_log:
+            return
+
+        try:
+            # Convert tool calls to llm.ToolInput format
+            llm_tool_calls = []
+            for tc in tool_calls:
+                tool_input = llm.ToolInput(
+                    id=tc.get("id", str(uuid.uuid4())),
+                    tool_name=tc.get("function", {}).get("name", "unknown"),
+                    tool_args=json.loads(tc.get("function", {}).get("arguments", "{}")),
+                    external=True  # MCP tools are executed externally, not by ChatLog
+                )
+                llm_tool_calls.append(tool_input)
+
+            # Add assistant content with tool calls
+            assistant_content = chat_log.AssistantContent(
+                agent_id=self.entity_id,
+                tool_calls=llm_tool_calls
+            )
+            self._current_chat_log.async_add_assistant_content_without_tools(assistant_content)
+
+            if self.debug_mode:
+                _LOGGER.debug(f"📊 Recorded {len(tool_calls)} tool calls to ChatLog")
+        except Exception as e:
+            _LOGGER.error(f"Error recording tool calls to ChatLog: {e}")
+
+    def _record_tool_result_to_chatlog(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        tool_result: Dict[str, Any]
+    ) -> None:
+        """Record a single tool result to ChatLog for debug view."""
+        if not self._current_chat_log:
+            return
+
+        try:
+            result_content = chat_log.ToolResultContent(
+                agent_id=self.entity_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_result=tool_result
+            )
+            # Use callback method to add tool result
+            self._current_chat_log.async_add_assistant_content_without_tools(result_content)
+
+            if self.debug_mode:
+                _LOGGER.debug(f"📊 Recorded tool result for {tool_name} to ChatLog")
+        except Exception as e:
+            _LOGGER.error(f"Error recording tool result to ChatLog: {e}")
+
     async def async_process(
         self, user_input: ConversationInput
     ) -> ConversationResult:
         """Process user input and return response."""
         _LOGGER.info("🎤 Voice request started - Processing: %s", user_input.text)
 
+        # Create ChatLog for debug view
+        with chat_session.async_get_chat_session(
+            self.hass,
+            user_input.conversation_id
+        ) as session:
+            with chat_log.async_get_chat_log(
+                self.hass,
+                session,
+                user_input  # Automatically adds user content
+            ) as log:
+                # Store ChatLog for tool execution methods to access
+                self._current_chat_log = log
+
+                try:
+                    return await self._async_process_with_chatlog(user_input, session.conversation_id)
+                finally:
+                    # Clean up
+                    self._current_chat_log = None
+
+    async def _async_process_with_chatlog(
+        self, user_input: ConversationInput, conversation_id: str
+    ) -> ConversationResult:
+        """Process user input with ChatLog tracking."""
         try:
-            _LOGGER.debug("Getting conversation ID...")
-            # Get conversation history
-            conversation_id = user_input.conversation_id or "default"
             _LOGGER.debug("Conversation ID: %s", conversation_id)
 
-            _LOGGER.debug("Getting history...")
+            # Get conversation history
             history = self.history.get_history(conversation_id)
             _LOGGER.debug("History retrieved: %d turns", len(history))
 
@@ -467,6 +543,14 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             # Parse response and execute any Home Assistant actions
             actions_taken = await self._execute_actions(response_text, user_input)
+
+            # Add final assistant response to ChatLog
+            if self._current_chat_log:
+                final_content = chat_log.AssistantContent(
+                    agent_id=self.entity_id,
+                    content=response_text
+                )
+                self._current_chat_log.async_add_assistant_content_without_tools(final_content)
 
             # Store in conversation history
             self.history.add_turn(
@@ -1476,8 +1560,25 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                 conversation_messages.append(assistant_msg)
 
+                # Record tool calls to ChatLog for debug view
+                self._record_tool_calls_to_chatlog(current_tool_calls)
+
                 # Execute tools
                 tool_results = await self._execute_tool_calls(current_tool_calls)
+
+                # Record tool results to ChatLog for debug view
+                for idx, result in enumerate(tool_results):
+                    if idx < len(current_tool_calls):
+                        tc = current_tool_calls[idx]
+                        tool_call_id = result.get("tool_call_id", tc.get("id", "unknown"))
+                        tool_name = tc.get("function", {}).get("name", "unknown")
+                        # Parse content as JSON if possible, otherwise use as-is
+                        try:
+                            tool_result_data = json.loads(result.get("content", "{}"))
+                        except:
+                            tool_result_data = {"result": result.get("content", "")}
+                        self._record_tool_result_to_chatlog(tool_call_id, tool_name, tool_result_data)
+
                 conversation_messages.extend(tool_results)
 
                 # Reset for next iteration - we don't want intermediate narration in final response
@@ -1618,9 +1719,25 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                         conversation_messages.append(assistant_msg)
 
+                        # Record tool calls to ChatLog for debug view
+                        self._record_tool_calls_to_chatlog(tool_calls)
+
                         # Execute the tool calls
                         _LOGGER.info("⚡ Executing tool calls against MCP server...")
                         tool_results = await self._execute_tool_calls(tool_calls)
+
+                        # Record tool results to ChatLog for debug view
+                        for idx, result in enumerate(tool_results):
+                            if idx < len(tool_calls):
+                                tc = tool_calls[idx]
+                                tool_call_id = result.get("tool_call_id", tc.get("id", "unknown"))
+                                tool_name = tc.get("function", {}).get("name", "unknown")
+                                # Parse content as JSON if possible, otherwise use as-is
+                                try:
+                                    tool_result_data = json.loads(result.get("content", "{}"))
+                                except:
+                                    tool_result_data = {"result": result.get("content", "")}
+                                self._record_tool_result_to_chatlog(tool_call_id, tool_name, tool_result_data)
 
                         # Add tool results to conversation
                         conversation_messages.extend(tool_results)
