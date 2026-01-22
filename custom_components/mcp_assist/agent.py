@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional, Literal
 
@@ -323,6 +324,77 @@ class MCPAssistConversationEntity(ConversationEntity):
         await super().async_will_remove_from_hass()
         _LOGGER.info("Conversation entity unregistered: %s", self._attr_name)
 
+    def _get_server_display_name(self) -> str:
+        """Get friendly display name for the server type."""
+        return {
+            SERVER_TYPE_LMSTUDIO: "LM Studio",
+            SERVER_TYPE_LLAMACPP: "llama.cpp",
+            SERVER_TYPE_OLLAMA: "Ollama",
+            SERVER_TYPE_OPENAI: "OpenAI",
+            SERVER_TYPE_GEMINI: "Gemini",
+            SERVER_TYPE_ANTHROPIC: "Claude",
+            SERVER_TYPE_OPENROUTER: "OpenRouter",
+        }.get(self.server_type, "the LLM server")
+
+    def _get_friendly_error_message(self, error: Exception) -> str:
+        """Convert technical errors to user-friendly TTS messages."""
+        error_str = str(error).lower()
+        error_full = str(error)  # Keep original case for extracting details
+
+        # Category A: Connection/Network Errors
+        if any(x in error_str for x in ["connection", "refused", "cannot connect", "no route", "unreachable"]):
+            if self.server_type in [SERVER_TYPE_OPENAI, SERVER_TYPE_GEMINI, SERVER_TYPE_ANTHROPIC]:
+                return f"I couldn't reach {self._get_server_display_name()}'s API servers. Please check your internet connection and try again."
+            else:
+                return f"I couldn't connect to {self._get_server_display_name()} at {self.base_url_dynamic}. Please check that the server is running and the address is correct in your integration settings."
+
+        if "timeout" in error_str or "timed out" in error_str:
+            return f"The {self._get_server_display_name()} server took too long to respond. This might be because the model is slow or busy. Try again or consider using a faster model."
+
+        # Category B: Authentication
+        if any(x in error_str for x in ["401", "403", "unauthorized", "invalid_api_key", "invalid api key"]):
+            return f"Your {self._get_server_display_name()} API key is invalid or missing. Please check your API key in the integration settings."
+
+        if "insufficient_quota" in error_str or "permission denied" in error_str:
+            return f"Your {self._get_server_display_name()} account doesn't have permission for this operation. Check your account status and billing."
+
+        # Category C: Resource Limits
+        if "maximum context length" in error_str or "context_length_exceeded" in error_str or "too many tokens" in error_str:
+            # Try to extract token limit if present
+            token_match = re.search(r'(\d+)\s*tokens?', error_str)
+            if token_match:
+                return f"The conversation has exceeded the model's {token_match.group(1)} token limit. Start a new conversation or reduce the history limit in Advanced Settings."
+            return "The conversation has exceeded the model's token limit. Start a new conversation or reduce the history limit in Advanced Settings."
+
+        if "rate limit" in error_str or "429" in error_str or "too many requests" in error_str:
+            return f"You've hit {self._get_server_display_name()}'s rate limit. Wait a minute and try again, or upgrade your plan for higher limits."
+
+        if "quota exceeded" in error_str or "insufficient credits" in error_str:
+            return f"Your {self._get_server_display_name()} account has run out of credits or quota. Check your billing and add credits to continue."
+
+        # Category D: Model Errors
+        if "404" in error_str or ("model" in error_str and "not found" in error_str):
+            return f"The model '{self.model_name}' wasn't found on {self._get_server_display_name()}. Check that the model name is correct in your integration settings."
+
+        if self.server_type == SERVER_TYPE_OLLAMA and ("model not loaded" in error_str or "pull the model" in error_str):
+            return f"The model '{self.model_name}' isn't loaded in Ollama. Run 'ollama pull {self.model_name}' to download it first."
+
+        # Category E: MCP Errors
+        if f"localhost:{self.mcp_port}" in error_str or f"127.0.0.1:{self.mcp_port}" in error_str:
+            return f"I couldn't connect to the MCP server on port {self.mcp_port}. The integration may not have initialized correctly. Try restarting Home Assistant."
+
+        # Category F: Response Errors
+        if "empty response" in error_str or "no response" in error_str:
+            return f"The {self._get_server_display_name()} server returned an empty response. This sometimes happens with certain models. Try rephrasing your request."
+
+        if "json" in error_str and ("parse" in error_str or "decode" in error_str or "malformed" in error_str):
+            return f"I received a malformed response from {self._get_server_display_name()}. This might be a temporary server issue. Please try again."
+
+        # Category G: Generic fallback
+        # Extract first meaningful part of error (up to 100 chars, stop at newline)
+        error_snippet = error_full.split('\n')[0][:100]
+        return f"An unexpected error occurred while talking to {self._get_server_display_name()}. The error was: {error_snippet}. Check the Home Assistant logs for more details."
+
     async def async_process(
         self, user_input: ConversationInput
     ) -> ConversationResult:
@@ -413,7 +485,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             intent_response = intent.IntentResponse(language=user_input.language)
             intent_response.async_set_error(
                 intent.IntentResponseErrorCode.UNKNOWN,
-                f"Sorry, I encountered an error: {err}"
+                self._get_friendly_error_message(err)
             )
 
             return ConversationResult(
@@ -1320,7 +1392,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                     # No content and no tools, might need another iteration
                     _LOGGER.warning("Empty response from streaming, retrying...")
 
-        return response_text if response_text else "I'm processing your request."
+        # Hit max iterations
+        if response_text:
+            return response_text
+        else:
+            return f"I reached the maximum of {self.max_iterations} tool calls while processing your request. Try simplifying your request, or increase the limit in Advanced Settings if you have a complex automation need."
 
     async def _call_llm(self, messages: List[Dict[str, Any]]) -> str:
         """Call LLM API with MCP tools and handle tool execution loop."""
@@ -1456,8 +1532,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                         return final_content
 
         # If we hit max iterations, return what we have
-        _LOGGER.warning("⚠️ Hit maximum iterations (5) in tool execution loop")
-        return "I'm still processing your request. Please try again."
+        _LOGGER.warning(f"⚠️ Hit maximum iterations ({self.max_iterations}) in tool execution loop")
+        return f"I reached the maximum of {self.max_iterations} tool calls while processing your request. Try simplifying your request, or increase the limit in Advanced Settings if you have a complex automation need."
 
     async def _execute_actions(
         self,
