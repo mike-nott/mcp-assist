@@ -39,6 +39,7 @@ CONF_OLLAMA_KEEP_ALIVE = "ollama_keep_alive"
 CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
 CONF_FOLLOW_UP_PHRASES = "follow_up_phrases"
 CONF_END_WORDS = "end_words"
+CONF_CLEAN_RESPONSES = "clean_responses"
 
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
@@ -74,6 +75,7 @@ DEFAULT_OLLAMA_KEEP_ALIVE = "5m"  # 5 minutes
 DEFAULT_OLLAMA_NUM_CTX = 0  # 0 = use model default
 DEFAULT_FOLLOW_UP_PHRASES = "anything else, what else, would you, do you, should i, can i, which, how can, what about, is there"
 DEFAULT_END_WORDS = "stop, cancel, no, nope, thanks, thank you, bye, goodbye, done, never mind, nevermind, forget it, that's all, that's it"
+DEFAULT_CLEAN_RESPONSES = False
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"

@@ -39,6 +39,7 @@
           "response_mode": "Antwortmodus",
           "follow_up_phrases": "Nachfrage-Phrasen",
           "end_words": "Gespraech-beenden-Woerter",
+          "clean_responses": "Antworten für Sprachausgabe bereinigen",
           "debug_mode": "Debug-Modus",
           "ollama_keep_alive": "Ollama am Leben halten",
           "ollama_num_ctx": "Ollama Kontextfenster"
@@ -92,6 +93,7 @@
           "response_mode": "Antwortmodus",
           "follow_up_phrases": "Nachfrage-Phrasen",
           "end_words": "Gespraech-beenden-Woerter",
+          "clean_responses": "Antworten für Sprachausgabe bereinigen",
           "debug_mode": "Debug-Modus",
           "ollama_keep_alive": "Ollama am Leben halten",
           "ollama_num_ctx": "Ollama Kontextfenster"

@@ -41,7 +41,8 @@
           "end_words": "Avsluta konversation-ord",
           "debug_mode": "Felsokningslage",
           "ollama_keep_alive": "Hall Ollama aktiv",
-          "ollama_num_ctx": "Ollama kontextfonster"
+          "ollama_num_ctx": "Ollama kontextfonster",
+          "clean_responses": "Rensa svar för röstutmatning"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Avsluta konversation-ord",
           "debug_mode": "Felsokningslage",
           "ollama_keep_alive": "Hall Ollama aktiv",
-          "ollama_num_ctx": "Ollama kontextfonster"
+          "ollama_num_ctx": "Ollama kontextfonster",
+          "clean_responses": "Rensa svar för röstutmatning"
         }
       },
       "mcp_server": {

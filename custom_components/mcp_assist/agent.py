@@ -50,6 +50,7 @@ from .const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_FOLLOW_UP_PHRASES,
     CONF_END_WORDS,
+    CONF_CLEAN_RESPONSES,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -70,6 +71,7 @@ from .const import (
     DEFAULT_OLLAMA_NUM_CTX,
     DEFAULT_FOLLOW_UP_PHRASES,
     DEFAULT_END_WORDS,
+    DEFAULT_CLEAN_RESPONSES,
     RESPONSE_MODE_INSTRUCTIONS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
@@ -215,6 +217,11 @@ class MCPAssistConversationEntity(ConversationEntity):
     def debug_mode(self) -> bool:
         """Get debug mode (dynamic)."""
         return self.entry.options.get(CONF_DEBUG_MODE, self.entry.data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))
+
+    @property
+    def clean_responses(self) -> bool:
+        """Get clean responses setting (dynamic)."""
+        return self.entry.options.get(CONF_CLEAN_RESPONSES, self.entry.data.get(CONF_CLEAN_RESPONSES, DEFAULT_CLEAN_RESPONSES))
 
     @property
     def max_iterations(self) -> int:
@@ -562,7 +569,9 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             # Create intent response
             intent_response = intent.IntentResponse(language=user_input.language)
-            intent_response.async_set_speech(response_text)
+            # Clean response for TTS (character normalization always, aggressive cleaning if enabled)
+            cleaned_text = self._clean_text_for_tts(response_text)
+            intent_response.async_set_speech(cleaned_text)
 
             # Note: Card data removed as it was causing JSON serialization errors
             # Actions are already executed via MCP tools, so card isn't needed
@@ -984,6 +993,9 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     def _clean_text_for_tts(self, text: str) -> str:
         """Clean text for TTS to handle special characters properly."""
+        import re
+
+        # ALWAYS run character normalization (existing fixes)
         # Replace ALL apostrophe variants with standard apostrophe
         text = text.replace(''', "'")  # U+2019 RIGHT SINGLE QUOTATION MARK
         text = text.replace(''', "'")  # U+2018 LEFT SINGLE QUOTATION MARK
@@ -1012,6 +1024,54 @@ class MCPAssistConversationEntity(ConversationEntity):
         # Other fixes
         text = text.replace('…', '...')  # U+2026 HORIZONTAL ELLIPSIS
         text = text.replace('•', '-')    # U+2022 BULLET
+
+        # ONLY apply aggressive cleaning if clean_responses enabled
+        if not self.clean_responses:
+            return text
+
+        # 1. Strip emojis
+        text = re.sub(r'[\U00010000-\U0010ffff]', '', text)  # Supplementary planes (most emojis)
+        text = re.sub(r'[\u2600-\u26FF\u2700-\u27BF]', '', text)  # Misc symbols & dingbats
+        text = re.sub(r'[\uE000-\uF8FF]', '', text)  # Private use area
+
+        # 2. Remove markdown (order matters - bold before italic)
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold** → bold
+        text = re.sub(r'\*(.+?)\*', r'\1', text)  # *italic* → italic
+        text = re.sub(r'__(.+?)__', r'\1', text)  # __bold__ → bold
+        text = re.sub(r'_(.+?)_', r'\1', text)  # _italic_ → italic
+        text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)  # [text](url) → text
+        text = re.sub(r'`([^`]+)`', r'\1', text)  # `code` → code
+        text = re.sub(r'```[\s\S]+?```', '', text)  # ```code block``` → removed
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)  # # Header → Header
+
+        # 3. Convert symbols to words
+        SYMBOL_MAP = {
+            '°C': ' degrees celsius',
+            '°F': ' degrees fahrenheit',
+            '°': ' degrees',
+            '%': ' percent',
+            '€': ' euros',
+            '£': ' pounds',
+            '$': ' dollars',
+            '&': ' and',
+            '+': ' plus',
+            '=': ' equals',
+            '<': ' less than',
+            '>': ' greater than',
+            '@': ' at',
+            '#': ' number',
+            '×': ' times',
+            '÷': ' divided by',
+        }
+        for symbol, word in SYMBOL_MAP.items():
+            text = text.replace(symbol, word)
+
+        # 4. Remove URLs
+        text = re.sub(r'https?://\S+', '', text)
+
+        # Clean up extra whitespace
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
 
         return text
 

@@ -41,7 +41,8 @@
           "end_words": "End Conversation Words",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
-          "ollama_num_ctx": "Ollama Context Window"
+          "ollama_num_ctx": "Ollama Context Window",
+          "clean_responses": "Clean Responses for Voice Output"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "End Conversation Words",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
-          "ollama_num_ctx": "Ollama Context Window"
+          "ollama_num_ctx": "Ollama Context Window",
+          "clean_responses": "Clean Responses for Voice Output"
         }
       },
       "mcp_server": {

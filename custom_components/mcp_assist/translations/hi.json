@@ -41,7 +41,8 @@
           "end_words": "बातचीत समाप्त करने के शब्द",
           "debug_mode": "डीबग मोड",
           "ollama_keep_alive": "Ollama जीवित रखें",
-          "ollama_num_ctx": "Ollama संदर्भ विंडो"
+          "ollama_num_ctx": "Ollama संदर्भ विंडो",
+          "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "बातचीत समाप्त करने के शब्द",
           "debug_mode": "डीबग मोड",
           "ollama_keep_alive": "Ollama जीवित रखें",
-          "ollama_num_ctx": "Ollama संदर्भ विंडो"
+          "ollama_num_ctx": "Ollama संदर्भ विंडो",
+          "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ"
         }
       },
       "mcp_server": {

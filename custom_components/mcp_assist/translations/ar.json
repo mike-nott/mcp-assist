@@ -41,7 +41,8 @@
           "end_words": "كلمات انهاء المحادثة",
           "debug_mode": "وضع التصحيح",
           "ollama_keep_alive": "ابق Ollama نشطا",
-          "ollama_num_ctx": "نافذة سياق Ollama"
+          "ollama_num_ctx": "نافذة سياق Ollama",
+          "clean_responses": "تنظيف الردود للإخراج الصوتي"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "كلمات انهاء المحادثة",
           "debug_mode": "وضع التصحيح",
           "ollama_keep_alive": "ابق Ollama نشطا",
-          "ollama_num_ctx": "نافذة سياق Ollama"
+          "ollama_num_ctx": "نافذة سياق Ollama",
+          "clean_responses": "تنظيف الردود للإخراج الصوتي"
         }
       },
       "mcp_server": {

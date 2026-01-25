@@ -41,7 +41,8 @@
           "end_words": "Mots de fin de conversation",
           "debug_mode": "Mode debogage",
           "ollama_keep_alive": "Maintenir Ollama actif",
-          "ollama_num_ctx": "Fenetre de contexte Ollama"
+          "ollama_num_ctx": "Fenetre de contexte Ollama",
+          "clean_responses": "Nettoyer les réponses pour la sortie vocale"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Mots de fin de conversation",
           "debug_mode": "Mode debogage",
           "ollama_keep_alive": "Maintenir Ollama actif",
-          "ollama_num_ctx": "Fenetre de contexte Ollama"
+          "ollama_num_ctx": "Fenetre de contexte Ollama",
+          "clean_responses": "Nettoyer les réponses pour la sortie vocale"
         }
       },
       "mcp_server": {

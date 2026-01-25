@@ -41,7 +41,8 @@
           "end_words": "대화 종료 단어",
           "debug_mode": "디버그 모드",
           "ollama_keep_alive": "Ollama 활성 유지",
-          "ollama_num_ctx": "Ollama 컨텍스트 창"
+          "ollama_num_ctx": "Ollama 컨텍스트 창",
+          "clean_responses": "음성 출력용 응답 정리"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "대화 종료 단어",
           "debug_mode": "디버그 모드",
           "ollama_keep_alive": "Ollama 활성 유지",
-          "ollama_num_ctx": "Ollama 컨텍스트 창"
+          "ollama_num_ctx": "Ollama 컨텍스트 창",
+          "clean_responses": "음성 출력용 응답 정리"
         }
       },
       "mcp_server": {

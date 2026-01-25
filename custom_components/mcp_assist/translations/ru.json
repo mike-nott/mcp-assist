@@ -41,7 +41,8 @@
           "end_words": "Слова завершения разговора",
           "debug_mode": "Режим отладки",
           "ollama_keep_alive": "Поддерживать Ollama активным",
-          "ollama_num_ctx": "Контекстное окно Ollama"
+          "ollama_num_ctx": "Контекстное окно Ollama",
+          "clean_responses": "Очистка ответов для голосового вывода"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Слова завершения разговора",
           "debug_mode": "Режим отладки",
           "ollama_keep_alive": "Поддерживать Ollama активным",
-          "ollama_num_ctx": "Контекстное окно Ollama"
+          "ollama_num_ctx": "Контекстное окно Ollama",
+          "clean_responses": "Очистка ответов для голосового вывода"
         }
       },
       "mcp_server": {

@@ -41,7 +41,8 @@
           "end_words": "Konusmayi Bitirme Kelimeleri",
           "debug_mode": "Hata Ayiklama Modu",
           "ollama_keep_alive": "Ollama'yi Aktif Tut",
-          "ollama_num_ctx": "Ollama Baglam Penceresi"
+          "ollama_num_ctx": "Ollama Baglam Penceresi",
+          "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Konusmayi Bitirme Kelimeleri",
           "debug_mode": "Hata Ayiklama Modu",
           "ollama_keep_alive": "Ollama'yi Aktif Tut",
-          "ollama_num_ctx": "Ollama Baglam Penceresi"
+          "ollama_num_ctx": "Ollama Baglam Penceresi",
+          "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle"
         }
       },
       "mcp_server": {

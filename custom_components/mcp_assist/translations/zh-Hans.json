@@ -41,7 +41,8 @@
           "end_words": "结束对话词语",
           "debug_mode": "调试模式",
           "ollama_keep_alive": "保持Ollama活跃",
-          "ollama_num_ctx": "Ollama上下文窗口"
+          "ollama_num_ctx": "Ollama上下文窗口",
+          "clean_responses": "清理语音输出响应"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "结束对话词语",
           "debug_mode": "调试模式",
           "ollama_keep_alive": "保持Ollama活跃",
-          "ollama_num_ctx": "Ollama上下文窗口"
+          "ollama_num_ctx": "Ollama上下文窗口",
+          "clean_responses": "清理语音输出响应"
         }
       },
       "mcp_server": {

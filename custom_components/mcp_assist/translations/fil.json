@@ -41,7 +41,8 @@
           "end_words": "Mga Salita para Tapusin ang Usapan",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Panatilihing Aktibo ang Ollama",
-          "ollama_num_ctx": "Ollama Context Window"
+          "ollama_num_ctx": "Ollama Context Window",
+          "clean_responses": "Linisin ang mga Tugon para sa Voice Output"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Mga Salita para Tapusin ang Usapan",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Panatilihing Aktibo ang Ollama",
-          "ollama_num_ctx": "Ollama Context Window"
+          "ollama_num_ctx": "Ollama Context Window",
+          "clean_responses": "Linisin ang mga Tugon para sa Voice Output"
         }
       },
       "mcp_server": {

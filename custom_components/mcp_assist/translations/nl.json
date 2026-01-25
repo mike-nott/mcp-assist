@@ -41,7 +41,8 @@
           "end_words": "Gesprek-beeindigingswoorden",
           "debug_mode": "Debugmodus",
           "ollama_keep_alive": "Ollama actief houden",
-          "ollama_num_ctx": "Ollama contextvenster"
+          "ollama_num_ctx": "Ollama contextvenster",
+          "clean_responses": "Antwoorden opschonen voor spraakuitvoer"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Gesprek-beeindigingswoorden",
           "debug_mode": "Debugmodus",
           "ollama_keep_alive": "Ollama actief houden",
-          "ollama_num_ctx": "Ollama contextvenster"
+          "ollama_num_ctx": "Ollama contextvenster",
+          "clean_responses": "Antwoorden opschonen voor spraakuitvoer"
         }
       },
       "mcp_server": {

@@ -41,7 +41,8 @@
           "end_words": "会話終了ワード",
           "debug_mode": "デバッグモード",
           "ollama_keep_alive": "Ollamaを維持",
-          "ollama_num_ctx": "Ollamaコンテキストウィンドウ"
+          "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
+          "clean_responses": "音声出力用にレスポンスを整形"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "会話終了ワード",
           "debug_mode": "デバッグモード",
           "ollama_keep_alive": "Ollamaを維持",
-          "ollama_num_ctx": "Ollamaコンテキストウィンドウ"
+          "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
+          "clean_responses": "音声出力用にレスポンスを整形"
         }
       },
       "mcp_server": {

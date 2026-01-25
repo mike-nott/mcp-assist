@@ -41,7 +41,8 @@
           "end_words": "Slova pro ukonceni konverzace",
           "debug_mode": "Rezim ladeni",
           "ollama_keep_alive": "Udrzovat Ollama aktivni",
-          "ollama_num_ctx": "Kontextove okno Ollama"
+          "ollama_num_ctx": "Kontextove okno Ollama",
+          "clean_responses": "Čisté odpovědi pro hlasový výstup"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Slova pro ukonceni konverzace",
           "debug_mode": "Rezim ladeni",
           "ollama_keep_alive": "Udrzovat Ollama aktivni",
-          "ollama_num_ctx": "Kontextove okno Ollama"
+          "ollama_num_ctx": "Kontextove okno Ollama",
+          "clean_responses": "Čisté odpovědi pro hlasový výstup"
         }
       },
       "mcp_server": {

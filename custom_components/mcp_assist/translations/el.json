@@ -41,7 +41,8 @@
           "end_words": "Λεξεις τερματισμου συνομιλιας",
           "debug_mode": "Λειτουργια αποσφαλματωσης",
           "ollama_keep_alive": "Διατηρηση Ollama ενεργου",
-          "ollama_num_ctx": "Παραθυρο πλαισιου Ollama"
+          "ollama_num_ctx": "Παραθυρο πλαισιου Ollama",
+          "clean_responses": "Καθαρισμός απαντήσεων για φωνητική έξοδο"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Λεξεις τερματισμου συνομιλιας",
           "debug_mode": "Λειτουργια αποσφαλματωσης",
           "ollama_keep_alive": "Διατηρηση Ollama ενεργου",
-          "ollama_num_ctx": "Παραθυρο πλαισιου Ollama"
+          "ollama_num_ctx": "Παραθυρο πλαισιου Ollama",
+          "clean_responses": "Καθαρισμός απαντήσεων για φωνητική έξοδο"
         }
       },
       "mcp_server": {

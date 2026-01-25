@@ -39,6 +39,7 @@
           "response_mode": "Response Mode",
           "follow_up_phrases": "Follow-up Phrases",
           "end_words": "End Conversation Words",
+          "clean_responses": "Clean Responses for Voice Output",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window"
@@ -92,6 +93,7 @@
           "response_mode": "Response Mode",
           "follow_up_phrases": "Follow-up Phrases",
           "end_words": "End Conversation Words",
+          "clean_responses": "Clean Responses for Voice Output",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window"

@@ -41,7 +41,8 @@
           "end_words": "Palavras para encerrar conversa",
           "debug_mode": "Modo de depuracao",
           "ollama_keep_alive": "Manter Ollama ativo",
-          "ollama_num_ctx": "Janela de contexto Ollama"
+          "ollama_num_ctx": "Janela de contexto Ollama",
+          "clean_responses": "Limpar respostas para saída de voz"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Palavras para encerrar conversa",
           "debug_mode": "Modo de depuracao",
           "ollama_keep_alive": "Manter Ollama ativo",
-          "ollama_num_ctx": "Janela de contexto Ollama"
+          "ollama_num_ctx": "Janela de contexto Ollama",
+          "clean_responses": "Limpar respostas para saída de voz"
         }
       },
       "mcp_server": {

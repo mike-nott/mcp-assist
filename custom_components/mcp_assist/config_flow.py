@@ -55,6 +55,7 @@ from .const import (
     CONF_OLLAMA_NUM_CTX,
     CONF_FOLLOW_UP_PHRASES,
     CONF_END_WORDS,
+    CONF_CLEAN_RESPONSES,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -87,6 +88,7 @@ from .const import (
     DEFAULT_OLLAMA_NUM_CTX,
     DEFAULT_FOLLOW_UP_PHRASES,
     DEFAULT_END_WORDS,
+    DEFAULT_CLEAN_RESPONSES,
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
@@ -626,6 +628,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ): TextSelector(
                 TextSelectorConfig(multiline=True)
             ),
+            vol.Optional(CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES): bool,
             vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
         })
 
@@ -980,7 +983,13 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     default=options.get(CONF_END_WORDS, data.get(CONF_END_WORDS, DEFAULT_END_WORDS))
                 ): TextSelector(TextSelectorConfig(multiline=True)),
 
-                # 14/16. Debug Mode
+                # 14/16. Clean Responses
+                vol.Required(
+                    CONF_CLEAN_RESPONSES,
+                    default=options.get(CONF_CLEAN_RESPONSES, data.get(CONF_CLEAN_RESPONSES, DEFAULT_CLEAN_RESPONSES))
+                ): bool,
+
+                # 15/17. Debug Mode
                 vol.Required(
                     CONF_DEBUG_MODE,
                     default=options.get(CONF_DEBUG_MODE, data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE))

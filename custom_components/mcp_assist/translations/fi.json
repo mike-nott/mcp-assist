@@ -41,7 +41,8 @@
           "end_words": "Keskustelun lopetusSanat",
           "debug_mode": "Virheenkorjaustila",
           "ollama_keep_alive": "Pida Ollama aktiivisena",
-          "ollama_num_ctx": "Ollaman konteksti-ikkuna"
+          "ollama_num_ctx": "Ollaman konteksti-ikkuna",
+          "clean_responses": "Puhdista vastaukset äänilähtöä varten"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Keskustelun lopetusSanat",
           "debug_mode": "Virheenkorjaustila",
           "ollama_keep_alive": "Pida Ollama aktiivisena",
-          "ollama_num_ctx": "Ollaman konteksti-ikkuna"
+          "ollama_num_ctx": "Ollaman konteksti-ikkuna",
+          "clean_responses": "Puhdista vastaukset äänilähtöä varten"
         }
       },
       "mcp_server": {

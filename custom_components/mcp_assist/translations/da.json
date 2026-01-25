@@ -41,7 +41,8 @@
           "end_words": "Afslut samtale-ord",
           "debug_mode": "Fejlsoegningstilstand",
           "ollama_keep_alive": "Hold Ollama aktiv",
-          "ollama_num_ctx": "Ollama kontekstvindue"
+          "ollama_num_ctx": "Ollama kontekstvindue",
+          "clean_responses": "Rens svar til stemmeoutput"
         }
       },
       "mcp_server": {
@@ -94,7 +95,8 @@
           "end_words": "Afslut samtale-ord",
           "debug_mode": "Fejlsoegningstilstand",
           "ollama_keep_alive": "Hold Ollama aktiv",
-          "ollama_num_ctx": "Ollama kontekstvindue"
+          "ollama_num_ctx": "Ollama kontekstvindue",
+          "clean_responses": "Rens svar til stemmeoutput"
         }
       },
       "mcp_server": {
