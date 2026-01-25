@@ -600,7 +600,7 @@ Focus on meaningful categories that would help discover relevant entities for us
             _LOGGER.info("LLM gap-filling completed: found %d inferred types", len(inferred))
             return inferred
         except Exception as err:
-            _LOGGER.warning("LLM gap-filling failed: %s. Index will not include inferred types.", err)
+            _LOGGER.debug("LLM gap-filling failed: %s. Index will not include inferred types.", err)
             return {}
         finally:
             # Always clear the flag, even if exception occurred
