@@ -8,6 +8,7 @@ import asyncio
 import fnmatch
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from enum import Enum
 
@@ -692,6 +693,24 @@ class SmartDiscovery:
 
         return formatted
 
+    @staticmethod
+    def _serialize_attributes(attributes: Dict[str, Any]) -> Dict[str, Any]:
+        """Serialize entity attributes, converting datetime objects to ISO strings."""
+        serialized = {}
+        for key, value in attributes.items():
+            if isinstance(value, datetime):
+                serialized[key] = value.isoformat()
+            elif isinstance(value, dict):
+                serialized[key] = EntityDiscovery._serialize_attributes(value)
+            elif isinstance(value, (list, tuple)):
+                serialized[key] = [
+                    item.isoformat() if isinstance(item, datetime) else item
+                    for item in value
+                ]
+            else:
+                serialized[key] = value
+        return serialized
+
     # Legacy methods for backward compatibility
     async def get_entity_details(self, entity_ids: List[str]) -> Dict[str, Any]:
         """Get detailed information about specific entities."""
@@ -734,7 +753,7 @@ class SmartDiscovery:
                 "name": state_obj.name,
                 "domain": state_obj.domain,
                 "state": state_obj.state,
-                "attributes": dict(state_obj.attributes),
+                "attributes": self._serialize_attributes(dict(state_obj.attributes)),
                 "area": area_name,
                 "device": device_name,
                 "last_changed": state_obj.last_changed.isoformat(),
