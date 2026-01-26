@@ -735,7 +735,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=mcp_schema,
             errors=errors,
             description_placeholders={
-                "info": "⚠️ These settings will be shared across ALL profiles"
+                "info": "⚠️ These settings will be shared across ALL profiles. Restart Home Assistant after making changes."
             }
         )
 
@@ -1026,7 +1026,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 if system_entry:
                     self.hass.config_entries.async_update_entry(
                         system_entry,
-                        options={**system_entry.options, **user_input}
+                        data={**system_entry.data, **user_input}
                     )
                     _LOGGER.info("Updated system entry with shared MCP settings")
                 else:
@@ -1112,7 +1112,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             data_schema=mcp_schema,
             errors=errors,
             description_placeholders={
-                "warning": "⚠️ These settings are shared across ALL MCP Assist profiles"
+                "warning": "⚠️ These settings are shared across ALL MCP Assist profiles. Restart Home Assistant after making changes."
             }
         )
 
