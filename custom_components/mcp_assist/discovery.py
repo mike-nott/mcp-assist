@@ -561,7 +561,11 @@ class SmartDiscovery:
 
             # Name pattern filter (wildcard matching)
             if name_pattern:
-                if not fnmatch.fnmatch(entity_id, name_pattern):
+                # Auto-wrap with wildcards if none are present (defensive for LLM usage)
+                pattern = name_pattern
+                if '*' not in pattern and '?' not in pattern:
+                    pattern = f"*{pattern}*"
+                if not fnmatch.fnmatch(entity_id, pattern):
                     continue
 
             # Get area information
