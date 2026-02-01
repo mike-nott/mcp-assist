@@ -152,9 +152,17 @@ class MCPAssistConversationEntity(ConversationEntity):
             entry_type=dr.DeviceEntryType.SERVICE,
         )
 
-        # Set base URL based on server type (static)
+        # Set base URL based on server type
+        # OpenAI now reads from config (like local servers) instead of static constant
         if self.server_type == SERVER_TYPE_OPENAI:
-            self.base_url = OPENAI_BASE_URL
+            # Read URL from config (defaults to official OpenAI URL if not set)
+            # Uses same CONF_LMSTUDIO_URL field as local servers
+            url = self.entry.options.get(
+                CONF_LMSTUDIO_URL,
+                self.entry.data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
+            ).rstrip("/")
+            self.base_url = url
+            _LOGGER.info("🌐 AGENT: Using OpenAI-compatible URL: %s", self.base_url)
         elif self.server_type == SERVER_TYPE_GEMINI:
             self.base_url = GEMINI_BASE_URL
         elif self.server_type == SERVER_TYPE_ANTHROPIC:

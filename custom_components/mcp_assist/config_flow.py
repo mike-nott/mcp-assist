@@ -134,7 +134,11 @@ async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]
         return []
 
 
-async def fetch_models_from_openai(hass: HomeAssistant, api_key: str) -> list[str]:
+async def fetch_models_from_openai(
+    hass: HomeAssistant,
+    api_key: str,
+    base_url: str = OPENAI_BASE_URL
+) -> list[str]:
     """Fetch available models from OpenAI API."""
     _LOGGER.info("🌐 FETCH: Starting OpenAI model fetch")
     try:
@@ -147,7 +151,7 @@ async def fetch_models_from_openai(hass: HomeAssistant, api_key: str) -> list[st
         async with aiohttp.ClientSession(timeout=timeout) as session:
             _LOGGER.info("📡 FETCH: Requesting OpenAI models")
             async with session.get(
-                f"{OPENAI_BASE_URL}/v1/models", headers=headers
+                f"{base_url}/v1/models", headers=headers
             ) as resp:
                 _LOGGER.info("📥 FETCH: OpenAI response status %d", resp.status)
                 if resp.status != 200:
@@ -449,8 +453,19 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
                     }
                 )
+        elif server_type == SERVER_TYPE_OPENAI:
+            # OpenAI - hybrid like Moltbot (URL + API key)
+            # Pre-fill with official OpenAI URL but allow users to edit for custom endpoints
+            server_schema = vol.Schema(
+                {
+                    vol.Required(CONF_LMSTUDIO_URL, default=OPENAI_BASE_URL): str,
+                    vol.Required(CONF_API_KEY): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
+                }
+            )
         else:
-            # Cloud providers (OpenAI, Gemini, Anthropic, OpenRouter) - show API key field
+            # Other cloud providers (Gemini, Anthropic, OpenRouter) - API key only
             server_schema = vol.Schema(
                 {
                     vol.Required(CONF_API_KEY): TextSelector(
@@ -525,8 +540,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         elif server_type == SERVER_TYPE_OPENAI:
             # OpenAI - fetch models from API with authentication
             api_key = self.step2_data.get(CONF_API_KEY, "")
-            _LOGGER.debug("Fetching OpenAI models with API key")
-            models = await fetch_models_from_openai(self.hass, api_key)
+            # Get custom URL from step 2 (uses same CONF_LMSTUDIO_URL field as local servers)
+            base_url = self.step2_data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL).rstrip("/")
+            _LOGGER.debug("Fetching OpenAI models from %s", base_url)
+            models = await fetch_models_from_openai(self.hass, api_key, base_url)
             _LOGGER.debug("Fetched %d OpenAI models: %s", len(models), models)
             # Show error if fetch failed
             if not models:
@@ -1129,8 +1146,20 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = TextSelector(
                     TextSelectorConfig(type=TextSelectorType.PASSWORD)
                 )
+        elif server_type == SERVER_TYPE_OPENAI:
+            # OpenAI - hybrid like Moltbot (URL + API key)
+            server_url = options.get(
+                CONF_LMSTUDIO_URL,
+                data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
+            )
+            schema_dict[vol.Required(CONF_LMSTUDIO_URL, default=server_url)] = str
+
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = TextSelector(
+                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            )
         else:
-            # Cloud providers use API key
+            # Other cloud providers (Gemini, Anthropic, OpenRouter) - API key only
             api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
             schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = TextSelector(
                 TextSelectorConfig(type=TextSelectorType.PASSWORD)
