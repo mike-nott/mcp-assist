@@ -499,7 +499,22 @@ class SmartDiscovery:
                     break
 
         # Limit to prevent excessive results
-        limit = min(limit, MAX_ENTITIES_PER_DISCOVERY)
+        # Read max limit from system entry config, fallback to constant
+        from .const import DOMAIN, CONF_MAX_ENTITIES_PER_DISCOVERY
+        max_limit = MAX_ENTITIES_PER_DISCOVERY  # Default fallback
+
+        # Try to get configured limit from system entry
+        domain_data = self.hass.data.get(DOMAIN, {})
+        system_entry = None
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.source == "system":
+                system_entry = entry
+                break
+
+        if system_entry:
+            max_limit = system_entry.data.get(CONF_MAX_ENTITIES_PER_DISCOVERY, MAX_ENTITIES_PER_DISCOVERY)
+
+        limit = min(limit, max_limit)
 
         # Search through all entities
         for state_obj in self.hass.states.async_all():

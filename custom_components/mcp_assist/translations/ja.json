@@ -54,7 +54,8 @@
           "search_provider": "Web検索",
           "brave_api_key": "Brave Search APIキー",
           "allowed_ips": "追加の許可IP/範囲",
-          "enable_gap_filling": "スマートエンティティインデックスを有効化"
+          "enable_gap_filling": "スマートエンティティインデックスを有効化",
+          "max_entities_per_discovery": "検索あたりの最大エンティティ数 (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Web検索",
           "brave_api_key": "Brave Search APIキー",
           "allowed_ips": "追加の許可IP/範囲",
-          "enable_gap_filling": "スマートエンティティインデックスを有効化"
+          "enable_gap_filling": "スマートエンティティインデックスを有効化",
+          "max_entities_per_discovery": "検索あたりの最大エンティティ数 (20-500)"
         }
       }
     }

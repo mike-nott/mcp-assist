@@ -54,7 +54,8 @@
           "search_provider": "वेब खोज",
           "brave_api_key": "Brave Search API कुंजी",
           "allowed_ips": "अतिरिक्त अनुमत IP/रेंज",
-          "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें"
+          "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें",
+          "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "वेब खोज",
           "brave_api_key": "Brave Search API कुंजी",
           "allowed_ips": "अतिरिक्त अनुमत IP/रेंज",
-          "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें"
+          "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें",
+          "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)"
         }
       }
     }

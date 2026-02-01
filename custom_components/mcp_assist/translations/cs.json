@@ -54,7 +54,8 @@
           "search_provider": "Webove vyhledavani",
           "brave_api_key": "API klic Brave Search",
           "allowed_ips": "Dalsi povolene IP/rozsahy",
-          "enable_gap_filling": "Povolit inteligentni index entit"
+          "enable_gap_filling": "Povolit inteligentni index entit",
+          "max_entities_per_discovery": "Max entit na vyhledavani (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Webove vyhledavani",
           "brave_api_key": "API klic Brave Search",
           "allowed_ips": "Dalsi povolene IP/rozsahy",
-          "enable_gap_filling": "Povolit inteligentni index entit"
+          "enable_gap_filling": "Povolit inteligentni index entit",
+          "max_entities_per_discovery": "Max entit na vyhledavani (20-500)"
         }
       }
     }

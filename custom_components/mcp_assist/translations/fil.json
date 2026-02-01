@@ -54,7 +54,8 @@
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Karagdagang Pinapayagang IP/Saklaw",
-          "enable_gap_filling": "I-enable ang Smart Entity Index"
+          "enable_gap_filling": "I-enable ang Smart Entity Index",
+          "max_entities_per_discovery": "Max na Entity Bawat Paghahanap (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Karagdagang Pinapayagang IP/Saklaw",
-          "enable_gap_filling": "I-enable ang Smart Entity Index"
+          "enable_gap_filling": "I-enable ang Smart Entity Index",
+          "max_entities_per_discovery": "Max na Entity Bawat Paghahanap (20-500)"
         }
       }
     }

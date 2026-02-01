@@ -54,7 +54,8 @@
           "search_provider": "Ricerca web",
           "brave_api_key": "Chiave API Brave Search",
           "allowed_ips": "IP/Intervalli aggiuntivi consentiti",
-          "enable_gap_filling": "Abilita indice intelligente entita"
+          "enable_gap_filling": "Abilita indice intelligente entita",
+          "max_entities_per_discovery": "Max entita per ricerca (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Ricerca web",
           "brave_api_key": "Chiave API Brave Search",
           "allowed_ips": "IP/Intervalli aggiuntivi consentiti",
-          "enable_gap_filling": "Abilita indice intelligente entita"
+          "enable_gap_filling": "Abilita indice intelligente entita",
+          "max_entities_per_discovery": "Max entita per ricerca (20-500)"
         }
       }
     }

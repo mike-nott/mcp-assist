@@ -54,7 +54,8 @@
           "search_provider": "웹 검색",
           "brave_api_key": "Brave Search API 키",
           "allowed_ips": "추가 허용 IP/범위",
-          "enable_gap_filling": "스마트 엔티티 인덱스 활성화"
+          "enable_gap_filling": "스마트 엔티티 인덱스 활성화",
+          "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "웹 검색",
           "brave_api_key": "Brave Search API 키",
           "allowed_ips": "추가 허용 IP/범위",
-          "enable_gap_filling": "스마트 엔티티 인덱스 활성화"
+          "enable_gap_filling": "스마트 엔티티 인덱스 활성화",
+          "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)"
         }
       }
     }

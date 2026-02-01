@@ -54,7 +54,8 @@
           "search_provider": "Verkkohaku",
           "brave_api_key": "Brave Search API-avain",
           "allowed_ips": "Lisat sallitut IP:t/alueet",
-          "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon"
+          "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon",
+          "max_entities_per_discovery": "Max entiteettia per haku (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Verkkohaku",
           "brave_api_key": "Brave Search API-avain",
           "allowed_ips": "Lisat sallitut IP:t/alueet",
-          "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon"
+          "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon",
+          "max_entities_per_discovery": "Max entiteettia per haku (20-500)"
         }
       }
     }

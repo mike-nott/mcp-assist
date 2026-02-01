@@ -88,8 +88,10 @@ MCP_SERVER_NAME = "ha-entity-discovery"
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
 # Entity discovery limits
-MAX_ENTITIES_PER_DISCOVERY = 50
+MAX_ENTITIES_PER_DISCOVERY = 50  # Default, can be overridden in system settings
 MAX_DISCOVERY_RESULTS = 100
+CONF_MAX_ENTITIES_PER_DISCOVERY = "max_entities_per_discovery"
+DEFAULT_MAX_ENTITIES_PER_DISCOVERY = 50
 
 RESPONSE_MODE_INSTRUCTIONS = {
     "none": """## Follow-up Questions

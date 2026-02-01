@@ -54,7 +54,8 @@
           "search_provider": "Web Arama",
           "brave_api_key": "Brave Search API Anahtari",
           "allowed_ips": "Ek Izin Verilen IP'ler/Araliklar",
-          "enable_gap_filling": "Akilli Varlik Indeksini Etkinlestir"
+          "enable_gap_filling": "Akilli Varlik Indeksini Etkinlestir",
+          "max_entities_per_discovery": "Arama Basina Maks Varlik (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Web Arama",
           "brave_api_key": "Brave Search API Anahtari",
           "allowed_ips": "Ek Izin Verilen IP'ler/Araliklar",
-          "enable_gap_filling": "Akilli Varlik Indeksini Etkinlestir"
+          "enable_gap_filling": "Akilli Varlik Indeksini Etkinlestir",
+          "max_entities_per_discovery": "Arama Basina Maks Varlik (20-500)"
         }
       }
     }

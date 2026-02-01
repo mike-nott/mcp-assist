@@ -54,7 +54,8 @@
           "search_provider": "Wyszukiwanie w sieci",
           "brave_api_key": "Klucz API Brave Search",
           "allowed_ips": "Dodatkowe dozwolone adresy IP/zakresy",
-          "enable_gap_filling": "Włącz inteligentny indeks encji"
+          "enable_gap_filling": "Włącz inteligentny indeks encji",
+          "max_entities_per_discovery": "Max encji na wyszukiwanie (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Wyszukiwanie w sieci",
           "brave_api_key": "Klucz API Brave Search",
           "allowed_ips": "Dodatkowe dozwolone adresy IP/zakresy",
-          "enable_gap_filling": "Włącz inteligentny indeks encji"
+          "enable_gap_filling": "Włącz inteligentny indeks encji",
+          "max_entities_per_discovery": "Max encji na wyszukiwanie (20-500)"
         }
       }
     }

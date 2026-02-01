@@ -54,7 +54,8 @@
           "search_provider": "البحث على الويب",
           "brave_api_key": "مفتاح API لـ Brave Search",
           "allowed_ips": "عناوين IP/نطاقات اضافية مسموح بها",
-          "enable_gap_filling": "تمكين فهرس الكيانات الذكي"
+          "enable_gap_filling": "تمكين فهرس الكيانات الذكي",
+          "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "البحث على الويب",
           "brave_api_key": "مفتاح API لـ Brave Search",
           "allowed_ips": "عناوين IP/نطاقات اضافية مسموح بها",
-          "enable_gap_filling": "تمكين فهرس الكيانات الذكي"
+          "enable_gap_filling": "تمكين فهرس الكيانات الذكي",
+          "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)"
         }
       }
     }

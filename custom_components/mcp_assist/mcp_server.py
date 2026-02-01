@@ -675,6 +675,14 @@ class MCPServer:
         """Handle tools/list request."""
         _LOGGER.info("MCP tools/list request received")
 
+        # Get configured max entities limit from system entry
+        from .const import DOMAIN, CONF_MAX_ENTITIES_PER_DISCOVERY, DEFAULT_MAX_ENTITIES_PER_DISCOVERY
+        max_limit = DEFAULT_MAX_ENTITIES_PER_DISCOVERY
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.source == "system":
+                max_limit = entry.data.get(CONF_MAX_ENTITIES_PER_DISCOVERY, DEFAULT_MAX_ENTITIES_PER_DISCOVERY)
+                break
+
         tools = [
             {
                 "name": "discover_entities",
@@ -720,7 +728,7 @@ class MCPServer:
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of entities to return (default: 20, max: 50)",
+                            "description": f"Maximum number of entities to return (default: 20, max: {max_limit})",
                             "default": 20,
                         },
                     },

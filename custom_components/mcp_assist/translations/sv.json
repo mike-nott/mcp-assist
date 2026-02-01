@@ -54,7 +54,8 @@
           "search_provider": "Webbsokning",
           "brave_api_key": "Brave Search API-nyckel",
           "allowed_ips": "Ytterligare tillatna IP/intervall",
-          "enable_gap_filling": "Aktivera smart entitetsindex"
+          "enable_gap_filling": "Aktivera smart entitetsindex",
+          "max_entities_per_discovery": "Max entiteter per sokning (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Webbsokning",
           "brave_api_key": "Brave Search API-nyckel",
           "allowed_ips": "Ytterligare tillatna IP/intervall",
-          "enable_gap_filling": "Aktivera smart entitetsindex"
+          "enable_gap_filling": "Aktivera smart entitetsindex",
+          "max_entities_per_discovery": "Max entiteter per sokning (20-500)"
         }
       }
     }

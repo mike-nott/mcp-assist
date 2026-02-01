@@ -51,6 +51,8 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_GAP_FILLING,
+    CONF_MAX_ENTITIES_PER_DISCOVERY,
+    DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
     CONF_FOLLOW_UP_PHRASES,
@@ -948,6 +950,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING
                 ): bool,
+                vol.Optional(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    default=DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         )
 
@@ -1502,6 +1508,16 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    default=sys_options.get(
+                        CONF_MAX_ENTITIES_PER_DISCOVERY,
+                        sys_data.get(
+                            CONF_MAX_ENTITIES_PER_DISCOVERY,
+                            DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                        ),
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         )
 

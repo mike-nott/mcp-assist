@@ -54,7 +54,8 @@
           "search_provider": "Webzoeken",
           "brave_api_key": "Brave Search API-sleutel",
           "allowed_ips": "Extra toegestane IPs/bereiken",
-          "enable_gap_filling": "Slimme entiteitsindex inschakelen"
+          "enable_gap_filling": "Slimme entiteitsindex inschakelen",
+          "max_entities_per_discovery": "Max entiteiten per zoekopdracht (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Webzoeken",
           "brave_api_key": "Brave Search API-sleutel",
           "allowed_ips": "Extra toegestane IPs/bereiken",
-          "enable_gap_filling": "Slimme entiteitsindex inschakelen"
+          "enable_gap_filling": "Slimme entiteitsindex inschakelen",
+          "max_entities_per_discovery": "Max entiteiten per zoekopdracht (20-500)"
         }
       }
     }

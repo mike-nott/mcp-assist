@@ -54,7 +54,8 @@
           "search_provider": "网络搜索",
           "brave_api_key": "Brave搜索API密钥",
           "allowed_ips": "额外允许的IP/范围",
-          "enable_gap_filling": "启用智能实体索引"
+          "enable_gap_filling": "启用智能实体索引",
+          "max_entities_per_discovery": "每次发现最大实体数 (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "网络搜索",
           "brave_api_key": "Brave搜索API密钥",
           "allowed_ips": "额外允许的IP/范围",
-          "enable_gap_filling": "启用智能实体索引"
+          "enable_gap_filling": "启用智能实体索引",
+          "max_entities_per_discovery": "每次发现最大实体数 (20-500)"
         }
       }
     }

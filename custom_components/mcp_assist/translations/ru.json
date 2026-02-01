@@ -54,7 +54,8 @@
           "search_provider": "Веб-поиск",
           "brave_api_key": "API-ключ Brave Search",
           "allowed_ips": "Дополнительные разрешённые IP/диапазоны",
-          "enable_gap_filling": "Включить умный индекс сущностей"
+          "enable_gap_filling": "Включить умный индекс сущностей",
+          "max_entities_per_discovery": "Макс сущностей на поиск (20-500)"
         }
       }
     },
@@ -109,7 +110,8 @@
           "search_provider": "Веб-поиск",
           "brave_api_key": "API-ключ Brave Search",
           "allowed_ips": "Дополнительные разрешённые IP/диапазоны",
-          "enable_gap_filling": "Включить умный индекс сущностей"
+          "enable_gap_filling": "Включить умный индекс сущностей",
+          "max_entities_per_discovery": "Макс сущностей на поиск (20-500)"
         }
       }
     }
