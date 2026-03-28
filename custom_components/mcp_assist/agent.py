@@ -1527,6 +1527,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                     }
                 )
             else:
+                else:
+                _LOGGER.warning(f"NON-TOOL MSG: role={msg.get('role')} keys={list(msg.keys())} tool_calls={'tool_calls' in msg}")
                 ollama_messages.append(msg)
 
         # Parse keep_alive - can be int (seconds/-1) or string (duration like "5m")
