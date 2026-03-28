@@ -1527,7 +1527,6 @@ class MCPAssistConversationEntity(ConversationEntity):
                     }
                 )
             else:
-                else:
                 _LOGGER.warning(f"NON-TOOL MSG: role={msg.get('role')} keys={list(msg.keys())} tool_calls={'tool_calls' in msg}")
                 ollama_messages.append(msg)
 
