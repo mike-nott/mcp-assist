@@ -1308,13 +1308,13 @@ class MCPAssistConversationEntity(ConversationEntity):
             try:
                 # Parse arguments based on server type
                 if self.server_type == SERVER_TYPE_OLLAMA:
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": content if content is not None else "",
-                        }
+                    # Ollama: Arguments are already parsed objects
+                    arguments = (
+                        arguments_str
+                        if isinstance(arguments_str, dict)
+                        else json.loads(arguments_str)
+                        if arguments_str
+                        else {}
                     )
                 else:
                     # OpenAI: Arguments are JSON strings
@@ -1324,9 +1324,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                 result = await self._call_mcp_tool(tool_name, arguments)
                 content = ""
 
-                # Format result for OpenAI
+                # Format result for LLM
                 if "error" in result:
-                    # Extract error message as plain text so LLM actually reads it
                     error_data = result["error"]
                     if isinstance(error_data, dict):
                         error_msg = error_data.get("message", str(error_data))
@@ -1338,7 +1337,6 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                 # Check if this is the conversation state tool
                 if tool_name == "set_conversation_state" and content:
-                    # Parse the expecting_response value from the result
                     if "conversation_state:true" in content.lower():
                         self._expecting_response = True
                         _LOGGER.debug(
@@ -1379,12 +1377,12 @@ class MCPAssistConversationEntity(ConversationEntity):
                     results.append(
                         {
                             "role": "tool",
+                            "tool_name": tool_name,
                             "tool_call_id": tool_call_id,
                             "content": json.dumps({"error": str(e)}),
                         }
                     )
                 else:
-                    # OpenAI format with tool_call_id
                     results.append(
                         {
                             "role": "tool",
