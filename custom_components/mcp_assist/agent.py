@@ -1508,28 +1508,48 @@ class MCPAssistConversationEntity(ConversationEntity):
         return payload
 
     def _build_ollama_payload(
-        self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        stream: bool = True,
-    ) -> Dict[str, Any]:
-        """Build Ollama native API payload."""
-        # Convert tool messages (Ollama doesn't use tool_call_id)
-        ollama_messages = []
-        for msg in messages:
-            if msg.get("role") == "tool":
-                _LOGGER.warning(f"TOOL MSG KEYS: {list(msg.keys())} tool_name={msg.get('tool_name', 'MISSING')}")
-                ollama_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_name": msg.get("tool_name", ""),
+            self,
+            messages: List[Dict[str, Any]],
+            tools: Optional[List[Dict[str, Any]]] = None,
+            stream: bool = True,
+        ) -> Dict[str, Any]:
+            """Build Ollama native API payload."""
+            # Convert messages to Ollama native format
+            ollama_messages = []
+            for msg in messages:
+                if msg.get("role") == "tool":
+                    # Ollama native format uses tool_name, not tool_call_id
+                    ollama_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": msg.get("tool_name", ""),
+                            "content": msg.get("content", ""),
+                        }
+                    )
+                elif msg.get("role") == "assistant" and "tool_calls" in msg:
+                    # Convert OpenAI-format tool_calls to Ollama native format
+                    ollama_tool_calls = []
+                    for tc in msg["tool_calls"]:
+                        func = tc.get("function", {})
+                        arguments = func.get("arguments", {})
+                        if isinstance(arguments, str):
+                            try:
+                                arguments = json.loads(arguments)
+                            except json.JSONDecodeError:
+                                arguments = {}
+                        ollama_tool_calls.append({
+                            "function": {
+                                "name": func.get("name", ""),
+                                "arguments": arguments,
+                            }
+                        })
+                    ollama_messages.append({
+                        "role": "assistant",
                         "content": msg.get("content", ""),
-                    }
-                )
-            else:
-                if msg.get("role") == "assistant" and "tool_calls" in msg:
-                    _LOGGER.warning(f"ASSISTANT TOOL_CALLS: {json.dumps(msg.get('tool_calls', []))}")
-                ollama_messages.append(msg)
+                        "tool_calls": ollama_tool_calls,
+                    })
+                else:
+                    ollama_messages.append(msg)
 
         # Parse keep_alive - can be int (seconds/-1) or string (duration like "5m")
         keep_alive_value = self.ollama_keep_alive
