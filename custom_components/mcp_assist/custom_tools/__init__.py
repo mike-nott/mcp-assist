@@ -16,7 +16,6 @@ class CustomToolsLoader:
     async def initialize(self):
         """Initialize custom tools based on search provider selection."""
         search_provider = self._get_search_provider()
-        _LOGGER.warning(f"🐺 CustomToolsLoader.initialize() called, search_provider='{search_provider}'")
 
         # Load search tool based on provider
         if search_provider == "brave":
