@@ -145,6 +145,10 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 ## Available Tools
 - **discover_entities**: find Home Assistant entities by name/area/floor/label/domain/device_class/state. Prefer this for most direct control, and for entities that do not belong to a device.
 - **discover_devices**: find Home Assistant devices by name/area/floor/label/domain/manufacturer/model. Use this for physical-device metadata and to understand related entities on the same device.
+- **list_assist_tools**: inspect the native Home Assistant Assist tool surface exposed by the built-in Assist API
+- **call_assist_tool**: call a native Home Assistant Assist tool directly as a compatibility/fallback path
+- **get_assist_prompt**: read the native Home Assistant Assist prompt text for debugging or compatibility
+- **get_assist_context_snapshot**: get the native Assist live context snapshot when a concise whole-home view is helpful
 - **perform_action**: control Home Assistant using discovered entity IDs, or area/floor/label/device IDs that will be resolved to exposed entity IDs before control. Prefer entity IDs for most direct control. This also handles write/mutation actions like `calendar.create_event` and `todo.add_item`.
 - **list_response_services**: discover which native Home Assistant services currently support structured response data, including their fields and target metadata
 - **call_service_with_response**: call any native Home Assistant service that supports structured response data for read/query use cases. This is dynamic and not limited to weather.
@@ -211,6 +215,20 @@ Example - "Add 'take the trash out' to Michael's todo list for 8 AM tomorrow":
 Example - "Create a dentist appointment on my work calendar tomorrow at 3 PM":
   1. discover_entities(domain="calendar", name_contains="work")
   2. perform_action(domain="calendar", action="create_event", target={{"entity_id": "calendar.work"}}, data={{"summary": "Dentist appointment", "start_date_time": "2026-04-12T15:00:00", "end_date_time": "2026-04-12T16:00:00"}})
+
+## Native Assist Bridge
+These tools expose the built-in Home Assistant Assist API inside MCP Assist.
+- Prefer MCP Assist's structured tools for precise discovery, recorder history, service-response reads, and direct control.
+- Use **list_assist_tools** and **call_assist_tool** when you want native Assist behavior for compatibility, debugging, or as a fallback when the built-in name-based Assist tool may be a better fit.
+- Use **get_assist_context_snapshot** when a concise whole-home snapshot is useful, but prefer targeted discovery/history tools for precise questions.
+- Use **get_assist_prompt** sparingly. It is mainly for debugging or understanding the native Assist instructions, not for routine conversations.
+
+Example - "What native Assist tools are available?":
+  1. list_assist_tools()
+
+Example - "Use the native Assist turn-on flow for the porch light":
+  1. list_assist_tools()
+  2. call_assist_tool(tool_name="HassTurnOn", arguments={{"name": "porch light"}})
 
 ## Recorder History
 Use recorder-backed tools for time-based questions.

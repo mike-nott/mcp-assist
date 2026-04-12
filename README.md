@@ -36,6 +36,10 @@ Instead of dumping all entities, MCP Assist:
    - `discover_devices` - Find Home Assistant devices by area, floor, label, domain, name, or alias-aware search when you want physical-device context or related entities on the same device
    - `get_entity_details` - Get current entity state and attributes
    - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
+   - `list_assist_tools` - Inspect the native Home Assistant Assist tool surface exposed by the built-in Assist API
+   - `call_assist_tool` - Call a native Home Assistant Assist tool directly as a compatibility/fallback path
+   - `get_assist_prompt` - Read the native Home Assistant Assist prompt text
+   - `get_assist_context_snapshot` - Get the native Assist live context snapshot
    - `perform_action` - Control devices and perform write actions, usually with entity IDs for direct control, or with area/floor/label/device IDs that resolve to exposed entity IDs first. This includes things like `calendar.create_event` and `todo.add_item`
    - `list_response_services` - Discover which Home Assistant services currently support native structured response data
    - `call_service_with_response` - Call native Home Assistant services that return structured response data for read/query use cases like weather forecasts, calendar event lookups, to-do list item queries, media browsing/search, and other response-capable services exposed by your current HA instance
@@ -52,6 +56,8 @@ Instead of dumping all entities, MCP Assist:
 3. **LLM uses the index for smart queries** - Understands what exists without full context dump
 4. **LLM discovers on-demand** - Only fetches the entities it needs for each request
 5. **Token usage drops** from 12,000+ to ~400 tokens per request
+
+The custom MCP Assist tools remain the primary path for precise Home Assistant work. The native Assist bridge tools are complementary: they let the model inspect or call the built-in Home Assistant Assist tool surface when compatibility, debugging, or native Assist behavior is useful.
 
 ## Token Usage Comparison
 

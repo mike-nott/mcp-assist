@@ -10,12 +10,17 @@ from datetime import date, datetime, time, timedelta
 
 from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
+import voluptuous as vol
+from voluptuous_openapi import convert
 
-from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.components import conversation
+from homeassistant.core import Context, HomeAssistant, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
     entity_registry as er,
+    llm,
     service as service_helper,
 )
 from homeassistant.components.homeassistant import async_should_expose
@@ -23,6 +28,7 @@ from homeassistant.components.recorder import history
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DOMAIN,
     MCP_SERVER_NAME,
     MCP_PROTOCOL_VERSION,
     MAX_ENTITIES_PER_DISCOVERY,
@@ -862,6 +868,60 @@ class MCPServer:
                 },
             },
             {
+                "name": "list_assist_tools",
+                "description": "List the native Home Assistant Assist tools exposed by the built-in Assist LLM API. Use this to inspect the core Assist tool surface or when deciding whether a native Assist tool is a better fit than the custom MCP Assist tools.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "call_assist_tool",
+                "description": "Call a native Home Assistant Assist tool directly, using the built-in Assist LLM API rather than the custom MCP Assist tool surface. Use this as a fallback or compatibility path when the native Assist tool behavior is a better fit.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {
+                            "type": "string",
+                            "description": "The exact native Assist tool name to call, for example 'HassTurnOn' or 'GetLiveContext'. Use list_assist_tools first if you are unsure.",
+                        },
+                        "arguments": {
+                            "type": "object",
+                            "description": "Arguments to pass to the native Assist tool. This should match the schema returned by list_assist_tools for that tool.",
+                            "additionalProperties": True,
+                        },
+                    },
+                    "required": ["tool_name"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "get_assist_prompt",
+                "description": "Get the native Home Assistant Assist prompt text from the built-in Assist LLM API. Use this sparingly for compatibility, debugging, or understanding the core Assist instructions.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "get_assist_context_snapshot",
+                "description": "Get the native Home Assistant Assist live context snapshot, matching the built-in GetLiveContext tool output when available. Use this when a concise whole-home snapshot is helpful.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "perform_action",
                 "description": "Control Home Assistant entities by calling services. Use after discovery to turn on/off lights, set temperatures, open/close covers, create calendar events, manage to-do lists, and other write/mutation actions. Prefer entity_id for most direct control; use device_id when intentionally targeting the physical device as a whole.",
                 "inputSchema": {
@@ -1281,6 +1341,14 @@ class MCPServer:
             return await self.tool_list_domains()
         elif tool_name == "get_index":
             return await self.tool_get_index()
+        elif tool_name == "list_assist_tools":
+            return await self.tool_list_assist_tools(arguments)
+        elif tool_name == "call_assist_tool":
+            return await self.tool_call_assist_tool(arguments)
+        elif tool_name == "get_assist_prompt":
+            return await self.tool_get_assist_prompt(arguments)
+        elif tool_name == "get_assist_context_snapshot":
+            return await self.tool_get_assist_context_snapshot(arguments)
         elif tool_name == "perform_action":
             return await self.tool_perform_action(arguments)
         elif tool_name == "list_response_services":
@@ -1671,8 +1739,6 @@ class MCPServer:
 
     async def tool_get_index(self) -> Dict[str, Any]:
         """Get the pre-generated system structure index."""
-        from .const import DOMAIN
-
         # Get index manager from hass.data
         index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
 
@@ -1691,6 +1757,122 @@ class MCPServer:
 
         # Format as JSON for structured consumption
         return {"content": [{"type": "text", "text": json.dumps(index, indent=2)}]}
+
+    async def tool_list_assist_tools(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """List the native Home Assistant Assist tool surface."""
+        del args
+
+        llm_api = await self._get_assist_api_instance()
+        tools_payload = [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "input_schema": self._format_assist_tool_input_schema(
+                    tool, llm_api.custom_serializer
+                ),
+            }
+            for tool in llm_api.tools
+        ]
+        payload = {
+            "api_id": llm_api.api.id,
+            "api_name": llm_api.api.name,
+            "tool_count": len(tools_payload),
+            "has_live_context_tool": self._assist_api_has_live_context_tool(llm_api),
+            "tools": tools_payload,
+        }
+        header = (
+            f"Found {len(tools_payload)} native Home Assistant Assist tools "
+            f"from the {llm_api.api.name} API."
+        )
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": header + "\n\n" + json.dumps(payload, indent=2, ensure_ascii=False),
+                }
+            ]
+        }
+
+    async def tool_call_assist_tool(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Call a native Home Assistant Assist tool directly."""
+        tool_name = str(args.get("tool_name") or "").strip()
+        if not tool_name:
+            raise ValueError("tool_name is required")
+
+        assist_arguments = args.get("arguments") or {}
+        if not isinstance(assist_arguments, dict):
+            raise ValueError("arguments must be an object")
+
+        llm_api = await self._get_assist_api_instance()
+        tool_response = await self._call_assist_api_tool(
+            llm_api, tool_name, assist_arguments
+        )
+        serialized_response = self._serialize_service_response_value(tool_response)
+
+        text_parts = [f"✅ Called native Assist tool `{tool_name}`."]
+        summary_lines = self._build_assist_tool_response_summary(serialized_response)
+        if summary_lines:
+            text_parts.append("")
+            text_parts.extend(summary_lines)
+        text_parts.append("")
+        text_parts.append("Response:")
+        text_parts.append(json.dumps(serialized_response, indent=2, ensure_ascii=False))
+
+        return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+    async def tool_get_assist_prompt(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get the native Home Assistant Assist prompt text."""
+        del args
+
+        llm_api = await self._get_assist_api_instance()
+        description = f"Default prompt for Home Assistant {llm_api.api.name} API"
+        text = f"{description}\n\n{llm_api.api_prompt}"
+        return {"content": [{"type": "text", "text": text}]}
+
+    async def tool_get_assist_context_snapshot(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Get the native Home Assistant Assist live context snapshot."""
+        del args
+
+        llm_api = await self._get_assist_api_instance()
+        if not self._assist_api_has_live_context_tool(llm_api):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "The native Assist API does not currently expose the "
+                            "`GetLiveContext` tool, so no Assist context snapshot is "
+                            "available right now."
+                        ),
+                    }
+                ]
+            }
+
+        tool_response = await self._call_assist_api_tool(
+            llm_api, "GetLiveContext", {}
+        )
+        if (
+            isinstance(tool_response, dict)
+            and tool_response.get("success") is False
+            and tool_response.get("error")
+        ):
+            raise HomeAssistantError(str(tool_response["error"]))
+        snapshot = tool_response.get("result") if isinstance(tool_response, dict) else None
+        if snapshot is None:
+            snapshot = self._serialize_service_response_value(tool_response)
+        if not isinstance(snapshot, str):
+            snapshot = json.dumps(snapshot, indent=2, ensure_ascii=False)
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Assist context snapshot:\n\n" + snapshot,
+                }
+            ]
+        }
 
     async def tool_list_response_services(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """List dynamically available HA services that support response data."""
@@ -3417,6 +3599,113 @@ class MCPServer:
                 parsed = default
 
         return max(minimum, min(parsed, maximum))
+
+    def _create_assist_llm_context(self) -> llm.LLMContext:
+        """Create an LLM context for the native Home Assistant Assist API."""
+        return llm.LLMContext(
+            platform=DOMAIN,
+            context=Context(),
+            language="*",
+            assistant=conversation.DOMAIN,
+            device_id=None,
+        )
+
+    async def _get_assist_api_instance(self) -> llm.APIInstance:
+        """Get the built-in Home Assistant Assist API instance."""
+        return await llm.async_get_api(
+            self.hass, llm.LLM_API_ASSIST, self._create_assist_llm_context()
+        )
+
+    def _assist_api_has_live_context_tool(self, llm_api: llm.APIInstance) -> bool:
+        """Return whether the Assist API exposes GetLiveContext."""
+        return any(tool.name == "GetLiveContext" for tool in llm_api.tools)
+
+    def _format_assist_tool_input_schema(
+        self,
+        tool: llm.Tool,
+        custom_serializer,
+    ) -> Dict[str, Any]:
+        """Convert an Assist tool schema to JSON schema for inspection."""
+        try:
+            input_schema = convert(
+                tool.parameters, custom_serializer=custom_serializer
+            )
+        except Exception as err:
+            _LOGGER.debug(
+                "Failed to convert native Assist tool schema for %s: %s",
+                tool.name,
+                err,
+            )
+            return {"type": "object", "properties": {}}
+
+        return (
+            input_schema
+            if isinstance(input_schema, dict)
+            else {"type": "object", "properties": {}}
+        )
+
+    async def _call_assist_api_tool(
+        self,
+        llm_api: llm.APIInstance,
+        tool_name: str,
+        arguments: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Call a native Home Assistant Assist tool safely."""
+        tool_input = llm.ToolInput(tool_name=tool_name, tool_args=arguments)
+        _LOGGER.debug(
+            "Calling native Assist tool: %s(%s)",
+            tool_input.tool_name,
+            tool_input.tool_args,
+        )
+
+        try:
+            result = await llm_api.async_call_tool(tool_input)
+        except (HomeAssistantError, vol.Invalid) as err:
+            raise HomeAssistantError(
+                f"Error calling native Assist tool '{tool_name}': {err}"
+            ) from err
+
+        if not isinstance(result, dict):
+            return {"result": self._serialize_service_response_value(result)}
+        return result
+
+    def _build_assist_tool_response_summary(self, response: Any) -> List[str]:
+        """Build a concise summary for a native Assist tool response."""
+        if not isinstance(response, dict):
+            return []
+
+        lines: List[str] = []
+
+        speech = response.get("speech")
+        if isinstance(speech, dict):
+            plain_speech = speech.get("plain")
+            if isinstance(plain_speech, dict) and plain_speech.get("speech"):
+                lines.append("Summary:")
+                lines.append(f"- Speech: {plain_speech['speech']}")
+
+        data = response.get("data")
+        if isinstance(data, dict) and (
+            "success" in data or "failed" in data or "targets" in data
+        ):
+            if not lines:
+                lines.append("Summary:")
+            detail_parts = []
+            if "success" in data:
+                detail_parts.append(f"success={data['success']}")
+            if "failed" in data:
+                detail_parts.append(f"failed={data['failed']}")
+            targets = data.get("targets")
+            if isinstance(targets, list):
+                detail_parts.append(f"targets={len(targets)}")
+            if detail_parts:
+                lines.append("- Result: " + ", ".join(detail_parts))
+
+        response_type = response.get("response_type")
+        if response_type and not lines:
+            lines.append("Summary:")
+            lines.append(f"- Response type: {response_type}")
+
+        return lines
 
     def _build_history_search_windows(self, max_hours: int) -> List[int]:
         """Build progressively larger recorder search windows."""
