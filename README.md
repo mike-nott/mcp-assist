@@ -36,14 +36,14 @@ Instead of dumping all entities, MCP Assist:
    - `discover_devices` - Find Home Assistant devices by area, floor, label, domain, name, or alias-aware search when you want physical-device context or related entities on the same device
    - `get_entity_details` - Get current entity state and attributes
    - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
-   - `perform_action` - Control devices, usually with entity IDs for direct control, or with area/floor/label/device IDs that resolve to exposed entity IDs first
+   - `perform_action` - Control devices and perform write actions, usually with entity IDs for direct control, or with area/floor/label/device IDs that resolve to exposed entity IDs first. This includes things like `calendar.create_event` and `todo.add_item`
    - `list_response_services` - Discover which Home Assistant services currently support native structured response data
-   - `call_service_with_response` - Call native Home Assistant services that return structured response data for read/query use cases like weather forecasts, calendar event lookups, media browsing/search, and other response-capable services exposed by your current HA instance
+   - `call_service_with_response` - Call native Home Assistant services that return structured response data for read/query use cases like weather forecasts, calendar event lookups, to-do list item queries, media browsing/search, and other response-capable services exposed by your current HA instance
    - `get_entity_history` - Query recorder history as a timeline or just the last matching event with `mode="last_event"`
    - `get_last_entity_event` - Compatibility alias for `get_entity_history(mode="last_event")`
    - `analyze_entity_history` - Use recorder history for aggregate questions like counts, current streaks, durations, and numeric summaries over time
    - `get_entity_state_at_time` - Look up what state an entity was in at a specific time
-   - `add` / `subtract` / `multiply` / `divide` / `sqrt` / `power` / `round_number` - Do exact calculator operations through tool calling
+   - `add` / `subtract` / `multiply` / `divide` / `sqrt` / `power` / `round_number` / `average` / `min_value` / `max_value` / `convert_unit` / `evaluate_expression` - Do exact calculator operations, unit conversions, and compound math through tool calling
    - `run_script` - Execute scripts and return response data
    - `run_automation` - Trigger automations manually
    - `list_areas` - List all areas in your home with entity/device counts

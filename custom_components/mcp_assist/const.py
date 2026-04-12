@@ -24,6 +24,8 @@ CONF_MCP_PORT = "mcp_port"
 CONF_AUTO_START = "auto_start"
 CONF_SYSTEM_PROMPT = "system_prompt"
 CONF_TECHNICAL_PROMPT = "technical_prompt"
+CONF_SYSTEM_PROMPT_MODE = "system_prompt_mode"
+CONF_TECHNICAL_PROMPT_MODE = "technical_prompt_mode"
 CONF_CONTROL_HA = "control_home_assistant"
 CONF_RESPONSE_MODE = "response_mode"
 CONF_FOLLOW_UP_MODE = "follow_up_mode"  # Keep for backward compatibility
@@ -63,6 +65,10 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 # No hardcoded model lists - models are fetched dynamically from provider APIs
 DEFAULT_MODEL_NAME = "model"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful Home Assistant voice assistant. Respond naturally and conversationally to user requests."
+PROMPT_MODE_DEFAULT = "default"
+PROMPT_MODE_CUSTOM = "custom"
+DEFAULT_SYSTEM_PROMPT_MODE = PROMPT_MODE_DEFAULT
+DEFAULT_TECHNICAL_PROMPT_MODE = PROMPT_MODE_DEFAULT
 DEFAULT_CONTROL_HA = True
 DEFAULT_RESPONSE_MODE = "default"
 DEFAULT_FOLLOW_UP_MODE = "default"  # Keep for backward compatibility
@@ -139,7 +145,7 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 ## Available Tools
 - **discover_entities**: find Home Assistant entities by name/area/floor/label/domain/device_class/state. Prefer this for most direct control, and for entities that do not belong to a device.
 - **discover_devices**: find Home Assistant devices by name/area/floor/label/domain/manufacturer/model. Use this for physical-device metadata and to understand related entities on the same device.
-- **perform_action**: control Home Assistant using discovered entity IDs, or area/floor/label/device IDs that will be resolved to exposed entity IDs before control. Prefer entity IDs for most direct control.
+- **perform_action**: control Home Assistant using discovered entity IDs, or area/floor/label/device IDs that will be resolved to exposed entity IDs before control. Prefer entity IDs for most direct control. This also handles write/mutation actions like `calendar.create_event` and `todo.add_item`.
 - **list_response_services**: discover which native Home Assistant services currently support structured response data, including their fields and target metadata
 - **call_service_with_response**: call any native Home Assistant service that supports structured response data for read/query use cases. This is dynamic and not limited to weather.
 - **get_entity_details**: check states and full serialized attributes using discovered entity IDs, including area/floor/label/device context
@@ -152,10 +158,12 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 - **run_script**: execute scripts that return data (e.g., camera analysis, calculations)
 - **run_automation**: trigger automations manually
 - **set_conversation_state**: indicate if expecting user response
-- **add/subtract/multiply/divide/sqrt/power/round_number**: always-available calculator tools for exact arithmetic and rounding
+- **add/subtract/multiply/divide/sqrt/power/round_number/average/min_value/max_value**: always-available calculator tools for exact arithmetic and quick numeric summaries
+- **convert_unit**: convert common units exactly, including temperatures like °C ↔ °F plus Home Assistant-style units for speed, pressure, energy, area, illuminance, electrical readings, storage, and data rates
+- **evaluate_expression**: safely evaluate a compound math expression when several arithmetic steps are needed
 - **search**: search the web for current information
 - **read_url**: read and extract content from web pages
-- **IMPORTANT**: call_service is not available. Use **perform_action** for control/mutations and **call_service_with_response** for native response-returning reads. If you are unsure which native response service exists, call **list_response_services** first.
+- **IMPORTANT**: call_service is not available. Use **perform_action** for control/mutations and write operations, and **call_service_with_response** for native response-returning reads. If you are unsure which native response service exists, call **list_response_services** first.
 
 ## Device Control Workflow
 **CRITICAL:** For ANY device control request, you MUST make at least TWO tool calls:
@@ -191,6 +199,18 @@ Trigger automations manually. Check the index for available automations.
 
 Example:
   run_automation(automation_id="alert_letterbox")
+
+## Calendars and To-do Lists
+- Calendars and to-do lists are not read-only. Use **perform_action** for write operations like creating a calendar event or adding/updating/removing a to-do item.
+- Use **call_service_with_response** for read/query operations like `calendar.get_events` or `todo.get_items`.
+
+Example - "Add 'take the trash out' to Michael's todo list for 8 AM tomorrow":
+  1. discover_entities(domain="todo", name_contains="michael")
+  2. perform_action(domain="todo", action="add_item", target={{"entity_id": "todo.michael"}}, data={{"item": "take the trash out", "due_datetime": "2026-04-12T08:00:00"}})
+
+Example - "Create a dentist appointment on my work calendar tomorrow at 3 PM":
+  1. discover_entities(domain="calendar", name_contains="work")
+  2. perform_action(domain="calendar", action="create_event", target={{"entity_id": "calendar.work"}}, data={{"summary": "Dentist appointment", "start_date_time": "2026-04-12T15:00:00", "end_date_time": "2026-04-12T16:00:00"}})
 
 ## Recorder History
 Use recorder-backed tools for time-based questions.
@@ -243,17 +263,24 @@ Example - "What events are on my work calendar today?":
   2. call_service_with_response(domain="calendar", service="get_events", target={{"entity_id": ["calendar.work"]}}, data={{"duration": {{"hours": 24}}}})
   3. Answer using the returned event list.
 
+Example - "What is on my grocery list?":
+  1. discover_entities(domain="todo", name_contains="grocery")
+  2. call_service_with_response(domain="todo", service="get_items", target={{"entity_id": ["todo.grocery"]}}, data={{"status": ["needs_action"]}})
+  3. Answer using the returned item list.
+
 Example - "I'm not sure what native query services exist for media":
   1. list_response_services(domain="media_player")
   2. call_service_with_response(...) using one of the returned services
 
 ## Math (use calculator tools)
-For arithmetic, prefer calculator tools over mental math so results stay exact.
+For arithmetic and unit conversions, prefer calculator tools over mental math so results stay exact.
 
 Example:
   1. multiply(a=247, b=83)
   2. divide(a=10, b=3)
   3. round_number(a=3.3333333333, decimals=2)
+  4. convert_unit(value=22, from_unit="°C", to_unit="°F")
+  5. evaluate_expression(expression="(68 - 32) * 5 / 9")
 
 ## Discovery Strategy
 Use the index below to see what device_classes and domains exist, then query accordingly.

@@ -23,7 +23,9 @@
         "description": "{server_info}",
         "data": {
           "model_name": "Model Name",
+          "system_prompt_mode": "System Prompt Source",
           "system_prompt": "System Prompt",
+          "technical_prompt_mode": "Technical Instructions Source",
           "technical_prompt": "Technical Instructions"
         }
       },
@@ -84,7 +86,9 @@
           "lmstudio_url": "Server URL",
           "api_key": "API Key",
           "model_name": "Model Name",
+          "system_prompt_mode": "System Prompt Source",
           "system_prompt": "System Prompt",
+          "technical_prompt_mode": "Technical Instructions Source",
           "technical_prompt": "Technical Instructions",
           "temperature": "Temperature",
           "max_tokens": "Max Response Tokens",

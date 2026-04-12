@@ -36,6 +36,7 @@ from .const import (
 from .discovery import EntityDiscovery
 from .domain_registry import (
     validate_domain_action,
+    validate_service_parameters,
     get_supported_domains,
     get_domain_info,
     get_domains_by_type,
@@ -862,18 +863,18 @@ class MCPServer:
             },
             {
                 "name": "perform_action",
-                "description": "Control Home Assistant devices by calling services. Use after discovery to turn on/off lights, set temperatures, open/close covers, etc. Prefer entity_id for most direct control; use device_id when intentionally targeting the physical device as a whole.",
+                "description": "Control Home Assistant entities by calling services. Use after discovery to turn on/off lights, set temperatures, open/close covers, create calendar events, manage to-do lists, and other write/mutation actions. Prefer entity_id for most direct control; use device_id when intentionally targeting the physical device as a whole.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
                     "properties": {
                         "domain": {
                             "type": "string",
-                            "description": "The domain of the service to call (e.g., 'light', 'switch', 'climate', 'vacuum', 'media_player', etc.)",
+                            "description": "The domain of the service to call (e.g., 'light', 'switch', 'climate', 'calendar', 'todo', 'vacuum', 'media_player', etc.)",
                         },
                         "action": {
                             "type": "string",
-                            "description": "The service action (e.g., 'turn_on', 'turn_off', 'toggle', 'set_temperature')",
+                            "description": "The service action (e.g., 'turn_on', 'turn_off', 'toggle', 'set_temperature', 'create_event', 'add_item')",
                         },
                         "target": {
                             "type": "object",
@@ -957,18 +958,18 @@ class MCPServer:
             },
             {
                 "name": "call_service_with_response",
-                "description": "Call a Home Assistant service that returns structured response data for read/query use cases. Use this for native service-response reads like weather forecasts, calendar event queries, or media browsing/searching.",
+                "description": "Call a Home Assistant service that returns structured response data for read/query use cases. Use this for native service-response reads like weather forecasts, calendar or to-do queries, or media browsing/searching.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
                     "properties": {
                         "domain": {
                             "type": "string",
-                            "description": "The Home Assistant domain for the response-returning service, for example 'weather', 'calendar', or 'media_player'.",
+                            "description": "The Home Assistant domain for the response-returning service, for example 'weather', 'calendar', 'todo', or 'media_player'.",
                         },
                         "service": {
                             "type": "string",
-                            "description": "The service/action name to call, for example 'get_forecasts', 'get_events', 'browse_media', or 'search_media'.",
+                            "description": "The service/action name to call, for example 'get_forecasts', 'get_events', 'get_items', 'browse_media', or 'search_media'.",
                         },
                         "target": {
                             "type": "object",
@@ -1851,11 +1852,25 @@ class MCPServer:
             _LOGGER.warning(
                 f"❌ Rejecting deprecated color_temp parameter: {data.get('color_temp')}"
             )
-            raise ValueError(
-                "color_temp is deprecated. Use color_temp_kelvin instead. "
-                "Examples: 2700 (warm white), 4000 (neutral white), 6500 (cool white). "
-                "Lower Kelvin values = warmer light, higher Kelvin values = cooler light."
-            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "❌ Error: color_temp is deprecated. Use "
+                            "color_temp_kelvin instead. Examples: 2700 (warm white), "
+                            "4000 (neutral white), 6500 (cool white). Lower Kelvin "
+                            "values = warmer light, higher Kelvin values = cooler light."
+                        ),
+                    }
+                ]
+            }
+
+        valid_params, validation_msg = validate_service_parameters(
+            domain, service, data
+        )
+        if not valid_params:
+            return {"content": [{"type": "text", "text": f"❌ Error: {validation_msg}"}]}
 
         try:
             # Prepare service data

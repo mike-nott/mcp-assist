@@ -589,16 +589,55 @@ DOMAIN_REGISTRY = {
         "description": "Weather information and forecasts",
     },
     "calendar": {
-        "type": TYPE_READ_ONLY,
+        "type": TYPE_CONTROLLABLE,
         "priority": PRIORITY_SPECIALIZED,
-        "services": ["get_events"],
+        "services": ["create_event"],
         "parameters": {
-            "get_events": {
-                "optional": ["start_date_time", "end_date_time", "duration"]
+            "create_event": {
+                "required": ["summary"],
+                "optional": [
+                    "description",
+                    "location",
+                    "start_date",
+                    "end_date",
+                    "start_date_time",
+                    "end_date_time",
+                    "in",
+                ]
             }
         },
         "response_services": ["get_events"],
-        "description": "Read calendar events from one or more calendars",
+        "description": "Read calendar events and create new calendar events",
+    },
+    "todo": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_SPECIALIZED,
+        "services": [
+            "add_item",
+            "update_item",
+            "remove_item",
+            "remove_completed_items",
+        ],
+        "parameters": {
+            "add_item": {
+                "required": ["item"],
+                "optional": ["due_date", "due_datetime", "description"],
+            },
+            "update_item": {
+                "required": ["item"],
+                "optional": [
+                    "rename",
+                    "status",
+                    "due_date",
+                    "due_datetime",
+                    "description",
+                ],
+            },
+            "remove_item": {"required": ["item"]},
+            "remove_completed_items": {"required": []},
+        },
+        "response_services": ["get_items"],
+        "description": "Manage to-do lists and query their items",
     },
     "sun": {
         "type": TYPE_READ_ONLY,
@@ -747,11 +786,21 @@ def map_action_to_service(domain: str, action: str) -> str:
             return "open_cover"
         elif action in ["lower", "drop"]:
             return "close_cover"
+    elif domain == "calendar":
+        if action in ["create", "add", "new", "schedule"]:
+            return "create_event"
     elif domain == "lock":
         if action == "secure":
             return "lock"
         elif action == "unsecure":
             return "unlock"
+    elif domain == "todo":
+        if action in ["create", "add", "new"]:
+            return "add_item"
+        if action in ["delete", "remove"]:
+            return "remove_item"
+        if action in ["clear_completed", "remove_completed", "cleanup"]:
+            return "remove_completed_items"
     elif domain == "vacuum":
         if action == "clean":
             return "start"
@@ -858,6 +907,65 @@ def validate_service_parameters(
             False,
             f"Missing required parameters for {domain}.{service}: {', '.join(missing)}",
         )
+
+    if domain == "calendar" and service == "create_event":
+        has_date_range = "start_date" in provided_params or "end_date" in provided_params
+        has_datetime_range = (
+            "start_date_time" in provided_params or "end_date_time" in provided_params
+        )
+        has_relative_time = "in" in provided_params
+
+        mode_count = sum((has_date_range, has_datetime_range, has_relative_time))
+        if mode_count == 0:
+            return (
+                False,
+                "Missing calendar time fields for calendar.create_event. Provide either "
+                "start_date/end_date, start_date_time/end_date_time, or 'in'.",
+            )
+        if mode_count > 1:
+            return (
+                False,
+                "calendar.create_event accepts only one scheduling mode: either "
+                "start_date/end_date, start_date_time/end_date_time, or 'in'.",
+            )
+        if has_date_range and not {
+            "start_date",
+            "end_date",
+        }.issubset(provided_params):
+            return (
+                False,
+                "calendar.create_event requires both start_date and end_date when using all-day dates.",
+            )
+        if has_datetime_range and not {
+            "start_date_time",
+            "end_date_time",
+        }.issubset(provided_params):
+            return (
+                False,
+                "calendar.create_event requires both start_date_time and end_date_time when using timed events.",
+            )
+
+    if domain == "todo":
+        if "due_date" in provided_params and "due_datetime" in provided_params:
+            return (
+                False,
+                f"{domain}.{service} accepts only one of due_date or due_datetime.",
+            )
+
+        if service == "update_item" and not any(
+            key in provided_params
+            for key in (
+                "rename",
+                "status",
+                "due_date",
+                "due_datetime",
+                "description",
+            )
+        ):
+            return (
+                False,
+                "todo.update_item requires at least one update field such as rename, status, due_date, due_datetime, or description.",
+            )
 
     return True, "Parameters valid"
 

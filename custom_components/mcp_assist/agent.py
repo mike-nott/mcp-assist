@@ -31,6 +31,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
+from .localization import get_language_instruction
 from .const import (
     DOMAIN,
     CONF_PROFILE_NAME,
@@ -39,6 +40,8 @@ from .const import (
     CONF_MCP_PORT,
     CONF_SYSTEM_PROMPT,
     CONF_TECHNICAL_PROMPT,
+    CONF_SYSTEM_PROMPT_MODE,
+    CONF_TECHNICAL_PROMPT_MODE,
     CONF_DEBUG_MODE,
     CONF_MAX_ITERATIONS,
     CONF_MAX_TOKENS,
@@ -61,6 +64,8 @@ from .const import (
     CONF_TIMEOUT,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
+    PROMPT_MODE_DEFAULT,
+    PROMPT_MODE_CUSTOM,
     DEFAULT_DEBUG_MODE,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_MAX_TOKENS,
@@ -957,19 +962,51 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.warning("Error getting current area: %s", e)
             return "Unknown"
 
+    def _get_default_system_prompt(self) -> str:
+        """Get the built-in localized default system prompt."""
+        return (
+            get_language_instruction(self.hass.config.language)
+            or DEFAULT_SYSTEM_PROMPT
+        )
+
+    def _resolve_prompt_setting(
+        self, *, prompt_key: str, mode_key: str, default_prompt: str
+    ) -> str:
+        """Resolve a prompt using Default/Custom mode with backward compatibility."""
+        options = self.entry.options
+        data = self.entry.data
+
+        explicit_mode = options.get(mode_key, data.get(mode_key))
+        stored_prompt = options.get(prompt_key, data.get(prompt_key))
+
+        if explicit_mode == PROMPT_MODE_CUSTOM:
+            return "" if stored_prompt is None else str(stored_prompt)
+
+        if explicit_mode == PROMPT_MODE_DEFAULT:
+            return default_prompt
+
+        if stored_prompt in (None, "", default_prompt):
+            return default_prompt
+
+        return str(stored_prompt)
+
     async def _build_system_prompt_with_context(
         self, user_input: ConversationInput
     ) -> str:
         """Build system prompt with Smart Entity Index."""
         try:
-            # Get base prompts (check options first, then data, then defaults)
-            system_prompt = self.entry.options.get(
-                CONF_SYSTEM_PROMPT,
-                self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
-            )
-            technical_prompt = self.entry.options.get(
-                CONF_TECHNICAL_PROMPT,
-                self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
+            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_MOLTBOT:
+                system_prompt = ""
+            else:
+                system_prompt = self._resolve_prompt_setting(
+                    prompt_key=CONF_SYSTEM_PROMPT,
+                    mode_key=CONF_SYSTEM_PROMPT_MODE,
+                    default_prompt=self._get_default_system_prompt(),
+                )
+            technical_prompt = self._resolve_prompt_setting(
+                prompt_key=CONF_TECHNICAL_PROMPT,
+                mode_key=CONF_TECHNICAL_PROMPT_MODE,
+                default_prompt=DEFAULT_TECHNICAL_PROMPT,
             )
 
             # Format time and date variables
@@ -1041,14 +1078,18 @@ class MCPAssistConversationEntity(ConversationEntity):
     def _build_system_prompt(self) -> str:
         """Build system prompt (legacy sync version - note: cannot include index without async)."""
         try:
-            # Get prompts (check options first, then data, then defaults)
-            system_prompt = self.entry.options.get(
-                CONF_SYSTEM_PROMPT,
-                self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
-            )
-            technical_prompt = self.entry.options.get(
-                CONF_TECHNICAL_PROMPT,
-                self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
+            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_MOLTBOT:
+                system_prompt = ""
+            else:
+                system_prompt = self._resolve_prompt_setting(
+                    prompt_key=CONF_SYSTEM_PROMPT,
+                    mode_key=CONF_SYSTEM_PROMPT_MODE,
+                    default_prompt=self._get_default_system_prompt(),
+                )
+            technical_prompt = self._resolve_prompt_setting(
+                prompt_key=CONF_TECHNICAL_PROMPT,
+                mode_key=CONF_TECHNICAL_PROMPT_MODE,
+                default_prompt=DEFAULT_TECHNICAL_PROMPT,
             )
 
             # Format time and date variables
