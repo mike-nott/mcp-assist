@@ -19,7 +19,6 @@ from custom_components.mcp_assist.const import (
     CONF_SEARCH_PROVIDER,
     CUSTOM_TOOL_MANIFEST_FILENAME,
     CUSTOM_TOOLS_DIRECTORY,
-    LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME,
 )
 from custom_components.mcp_assist.custom_tools import CustomToolsLoader
 
@@ -336,13 +335,13 @@ async def test_external_tool_name_must_be_namespaced(
 
 
 @pytest.mark.asyncio
-async def test_legacy_manifest_filename_is_still_supported(
+async def test_legacy_manifest_filename_is_not_supported(
     hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
 ) -> None:
-    """Older external tool packages using manifest.json should keep loading."""
+    """Only the canonical mcp_tool.json manifest filename should be accepted."""
     _write_external_tool_package(
         tmp_path,
-        manifest_filename=LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME,
+        manifest_filename="manifest.json",
     )
     monkeypatch.setattr(
         hass.config,
@@ -361,6 +360,4 @@ async def test_legacy_manifest_filename_is_still_supported(
     loader = CustomToolsLoader(hass, profile_entry)
     await loader.initialize()
 
-    assert [item["id"] for item in loader.get_loaded_external_tool_info()] == [
-        "sample_tool"
-    ]
+    assert loader.get_loaded_external_tool_info() == []

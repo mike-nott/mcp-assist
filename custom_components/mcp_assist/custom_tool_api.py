@@ -7,7 +7,7 @@ the Home Assistant config directory can import it directly:
 
 Tool-package metadata should live in:
 
-    <home-assistant-config>/mcp-assist-tools/<tool_id>/mcp_assist_tool.json
+    <home-assistant-config>/mcp-assist-tools/<tool_id>/mcp_tool.json
 """
 
 from __future__ import annotations

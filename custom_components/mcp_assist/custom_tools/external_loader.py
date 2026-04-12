@@ -15,7 +15,6 @@ from ..const import (
     CUSTOM_TOOL_MANIFEST_FILENAME,
     CUSTOM_TOOL_SCHEMA_VERSION,
     CUSTOM_TOOLS_DIRECTORY,
-    LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME,
 )
 from ..custom_tool_api import MCPAssistCustomToolManifest, MCPAssistExternalTool
 
@@ -141,12 +140,9 @@ class ExternalCustomToolLoader:
 
     def _load_manifest(self, tool_dir: Path) -> MCPAssistCustomToolManifest:
         """Load and validate a custom tool manifest."""
-        manifest_path = self._resolve_manifest_path(tool_dir)
-        if manifest_path is None:
-            raise ValueError(
-                f"{CUSTOM_TOOL_MANIFEST_FILENAME} is required "
-                f"(legacy {LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME} is also supported)"
-            )
+        manifest_path = tool_dir / CUSTOM_TOOL_MANIFEST_FILENAME
+        if not manifest_path.is_file():
+            raise ValueError(f"{CUSTOM_TOOL_MANIFEST_FILENAME} is required")
 
         try:
             raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -209,18 +205,6 @@ class ExternalCustomToolLoader:
             capabilities=capabilities,
             prompt_append_file=prompt_append_file,
         )
-
-    def _resolve_manifest_path(self, tool_dir: Path) -> Path | None:
-        """Resolve the preferred or legacy manifest path for a tool package."""
-        preferred = tool_dir / CUSTOM_TOOL_MANIFEST_FILENAME
-        if preferred.is_file():
-            return preferred
-
-        legacy = tool_dir / LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME
-        if legacy.is_file():
-            return legacy
-
-        return None
 
     def _instantiate_tool(
         self,
