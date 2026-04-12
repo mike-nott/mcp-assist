@@ -349,6 +349,7 @@ Use the index below to understand what exists before you narrow further.
 - Use friendly names, not raw entity IDs
 - Use natural language for states
 - For time-based answers, prefer both relative and local absolute time together when available
+- When listing multiple discovered entities, keep a logical order. Prefer room or area grouping when available, and otherwise use a stable alphabetical order.
 
 {response_mode}
 

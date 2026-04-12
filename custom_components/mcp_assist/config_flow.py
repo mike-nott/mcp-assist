@@ -177,41 +177,49 @@ def _get_prompt_text_default(
     stored_prompt: Any,
     default_prompt: str = "",
 ) -> str:
-    """Get the current default text for a prompt override field."""
+    """Get the effective prompt text to prefill in the form."""
     if current_values and prompt_key in current_values:
         value = current_values.get(prompt_key)
         return "" if value is None else str(value)
 
     inferred_mode = _infer_prompt_mode(stored_mode, stored_prompt, default_prompt)
     if inferred_mode == PROMPT_MODE_DEFAULT or stored_prompt in (None, ""):
-        return ""
+        return str(default_prompt)
 
     return str(stored_prompt)
 
 
 def _normalize_prompt_inputs(
-    user_input: dict[str, Any], server_type: str
+    user_input: dict[str, Any], server_type: str, default_system_prompt: str
 ) -> dict[str, Any]:
     """Normalize prompt override inputs before storing."""
     normalized = dict(user_input)
 
-    def _normalize_prompt(prompt_key: str, mode_key: str) -> None:
+    def _normalize_prompt(prompt_key: str, mode_key: str, default_prompt: str) -> None:
         raw_value = normalized.get(prompt_key, "")
         text = "" if raw_value is None else str(raw_value)
-        if text.strip():
-            normalized[prompt_key] = text
-            normalized[mode_key] = PROMPT_MODE_CUSTOM
-        else:
+        if not text.strip() or text.strip() == default_prompt.strip():
             normalized.pop(prompt_key, None)
             normalized[mode_key] = PROMPT_MODE_DEFAULT
+        else:
+            normalized[prompt_key] = text
+            normalized[mode_key] = PROMPT_MODE_CUSTOM
 
     if server_type == SERVER_TYPE_MOLTBOT:
         normalized[CONF_SYSTEM_PROMPT_MODE] = PROMPT_MODE_DEFAULT
         normalized.pop(CONF_SYSTEM_PROMPT, None)
     else:
-        _normalize_prompt(CONF_SYSTEM_PROMPT, CONF_SYSTEM_PROMPT_MODE)
+        _normalize_prompt(
+            CONF_SYSTEM_PROMPT,
+            CONF_SYSTEM_PROMPT_MODE,
+            default_system_prompt,
+        )
 
-    _normalize_prompt(CONF_TECHNICAL_PROMPT, CONF_TECHNICAL_PROMPT_MODE)
+    _normalize_prompt(
+        CONF_TECHNICAL_PROMPT,
+        CONF_TECHNICAL_PROMPT_MODE,
+        DEFAULT_TECHNICAL_PROMPT,
+    )
 
     return normalized
 
@@ -235,6 +243,14 @@ def _optional_with_suggested_value(key: str, suggested_value: str | None) -> vol
 TOOLS_SECTION_KEY = "tools"
 DISCOVERY_SECTION_KEY = "discovery"
 SEARCH_SECTION_KEY = "search"
+PROFILE_SECTION_KEY = "profile"
+CONNECTION_SECTION_KEY = "connection"
+MODEL_SECTION_KEY = "model_fields"
+PROMPTS_SECTION_KEY = "prompts"
+CONVERSATION_SECTION_KEY = "conversation"
+PERFORMANCE_SECTION_KEY = "performance"
+PROVIDER_SECTION_KEY = "provider"
+ADVANCED_SECTION_KEY = "advanced_settings"
 ENABLED_TOOLS_FIELD = "enabled_tools"
 TOOL_FAMILY_OPTIONS = [
     TOOL_FAMILY_DEVICE,
@@ -366,27 +382,10 @@ def _build_shared_tools_section(
     return section(
         vol.Schema(
             {
-                vol.Optional(
-                    ENABLED_TOOLS_FIELD,
-                    default=_selected_tool_families(
-                        defaults, TOOL_FAMILY_SHARED_SETTINGS
-                    ),
-                ): _tool_family_selector(),
-            }
-        ),
-        {"collapsed": False},
-    )
-
-
-def _build_shared_search_section(current_values: dict[str, Any] | None) -> section:
-    """Build the shared MCP server search settings section."""
-    return section(
-        vol.Schema(
-            {
                 vol.Required(
                     CONF_SEARCH_PROVIDER,
                     default=_get_form_value(
-                        current_values, CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER
+                        defaults, CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER
                     ),
                 ): SelectSelector(
                     SelectSelectorConfig(
@@ -404,9 +403,15 @@ def _build_shared_search_section(current_values: dict[str, Any] | None) -> secti
                 vol.Optional(
                     CONF_BRAVE_API_KEY,
                     default=_get_form_value(
-                        current_values, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
+                        defaults, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
                     ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+                vol.Optional(
+                    ENABLED_TOOLS_FIELD,
+                    default=_selected_tool_families(
+                        defaults, TOOL_FAMILY_SHARED_SETTINGS
+                    ),
+                ): _tool_family_selector(),
             }
         ),
         {"collapsed": False},
@@ -430,6 +435,75 @@ def _build_shared_discovery_section(defaults: dict[str, Any]) -> section:
         ),
         {"collapsed": False},
     )
+
+
+def _build_profile_identity_section(profile_name: str) -> section:
+    """Build the profile identity section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Required(CONF_PROFILE_NAME, default=profile_name): str,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_connection_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap connection-related fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_model_section(current_model: str, model_field: Any) -> section:
+    """Build the model-selection section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Required(CONF_MODEL_NAME, default=current_model): model_field,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_prompt_section(
+    *,
+    system_prompt_value: str | None = None,
+    technical_prompt_value: str | None,
+    include_system_prompt: bool = True,
+) -> section:
+    """Build the prompt editing section."""
+    schema_items: dict[Any, Any] = {}
+    if include_system_prompt:
+        schema_items[
+            _optional_with_suggested_value(CONF_SYSTEM_PROMPT, system_prompt_value)
+        ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
+    schema_items[
+        _optional_with_suggested_value(
+            CONF_TECHNICAL_PROMPT, technical_prompt_value
+        )
+    ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_conversation_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap conversation-behavior fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_performance_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap performance-related fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_provider_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap provider-specific fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_advanced_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap advanced settings in a collapsed section."""
+    return section(vol.Schema(schema_items), {"collapsed": True})
 
 
 def _needs_prompt_followup(
@@ -835,9 +909,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Get server type to determine model source
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        default_system_prompt = _get_default_system_prompt(self.hass)
 
         if user_input is not None:
-            user_input = _normalize_prompt_inputs(user_input, server_type)
+            user_input = _flatten_section_values(
+                user_input, MODEL_SECTION_KEY, PROMPTS_SECTION_KEY
+            )
+            user_input = _normalize_prompt_inputs(
+                user_input, server_type, default_system_prompt
+            )
             if server_type == SERVER_TYPE_MOLTBOT:
                 user_input[CONF_MODEL_NAME] = "main"
 
@@ -847,7 +927,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         models = []
         current_values = getattr(self, "step3_data", {})
-        default_system_prompt = _get_default_system_prompt(self.hass)
 
         # Moltbot doesn't have /v1/models endpoint - skip model selection
         if server_type == SERVER_TYPE_MOLTBOT:
@@ -859,12 +938,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             model_schema = vol.Schema(
                 {
-                    _optional_with_suggested_value(
-                        CONF_TECHNICAL_PROMPT, technical_prompt_suggestion
-                    ): TextSelector(
-                        TextSelectorConfig(
-                            type=TextSelectorType.TEXT, multiline=True
-                        )
+                    PROMPTS_SECTION_KEY: _build_prompt_section(
+                        include_system_prompt=False,
+                        technical_prompt_value=technical_prompt_suggestion,
                     ),
                 }
             )
@@ -954,16 +1030,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         schema_dict: dict[Any, Any] = {
-            vol.Required(CONF_MODEL_NAME, default=current_model): model_field,
-            _optional_with_suggested_value(
-                CONF_SYSTEM_PROMPT, system_prompt_suggestion
-            ): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-            ),
-            _optional_with_suggested_value(
-                CONF_TECHNICAL_PROMPT, technical_prompt_suggestion
-            ): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+            MODEL_SECTION_KEY: _build_model_section(current_model, model_field),
+            PROMPTS_SECTION_KEY: _build_prompt_section(
+                system_prompt_value=system_prompt_suggestion,
+                technical_prompt_value=technical_prompt_suggestion,
             ),
         }
 
@@ -974,7 +1044,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=model_schema,
             errors=errors,
             description_placeholders={
-                "server_info": "Select a model. Leave System Prompt or Technical Instructions blank to use the built-in defaults from the integration. Models are automatically loaded from your server."
+                "server_info": "Select a model. The prompt fields are prefilled with the current effective prompts so you can review, copy, or edit them directly. If you leave a prompt unchanged, the integration keeps using the built-in version from code. Models are automatically loaded from your server."
             },
         )
 
@@ -988,7 +1058,13 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
-            user_input = _flatten_section_values(user_input, TOOLS_SECTION_KEY)
+            user_input = _flatten_section_values(
+                user_input,
+                CONVERSATION_SECTION_KEY,
+                PERFORMANCE_SECTION_KEY,
+                PROVIDER_SECTION_KEY,
+                TOOLS_SECTION_KEY,
+            )
             user_input = _apply_tool_family_selection(
                 user_input,
                 TOOL_FAMILY_PROFILE_SETTINGS,
@@ -1129,77 +1205,90 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Build schema based on server type
         if server_type == SERVER_TYPE_MOLTBOT:
-            # Moltbot - only show Control HA, Timeout, Clean Responses, Debug
             advanced_schema_dict = {
-                vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
-                vol.Optional(
-                    CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
-                ): bool,
-                vol.Required(CONF_TIMEOUT, default=60): vol.All(
-                    vol.Coerce(int), vol.Range(min=5, max=300)
+                CONVERSATION_SECTION_KEY: _build_conversation_section(
+                    {
+                        vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
+                        vol.Optional(
+                            CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
+                        ): bool,
+                    }
                 ),
-                vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
+                PERFORMANCE_SECTION_KEY: _build_performance_section(
+                    {
+                        vol.Required(CONF_TIMEOUT, default=60): vol.All(
+                            vol.Coerce(int), vol.Range(min=5, max=300)
+                        ),
+                        vol.Required(
+                            CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE
+                        ): bool,
+                    }
+                ),
             }
         else:
-            # Other servers - show all fields
-            advanced_schema_dict = {
+            performance_schema_items: dict[Any, Any] = {
                 vol.Required(CONF_TEMPERATURE, default=default_temp): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=1.0)
                 ),
                 vol.Required(CONF_MAX_TOKENS, default=DEFAULT_MAX_TOKENS): vol.Coerce(
                     int
                 ),
+                vol.Required(CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY): vol.Coerce(
+                    int
+                ),
+                vol.Required(
+                    CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS
+                ): vol.Coerce(int),
+                vol.Required(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
+                    vol.Coerce(int), vol.Range(min=5, max=300)
+                ),
+                vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
+            }
+            conversation_schema_items: dict[Any, Any] = {
+                vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
+                vol.Required(
+                    CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": "none", "label": "None"},
+                            {"value": "default", "label": "Smart"},
+                            {"value": "always", "label": "Always"},
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_FOLLOW_UP_PHRASES,
+                    default=get_follow_up_phrases(self.hass.config.language),
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Optional(
+                    CONF_END_WORDS, default=get_end_words(self.hass.config.language)
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Optional(CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES): bool,
+            }
+            advanced_schema_dict = {
+                CONVERSATION_SECTION_KEY: _build_conversation_section(
+                    conversation_schema_items
+                ),
+                PERFORMANCE_SECTION_KEY: _build_performance_section(
+                    performance_schema_items
+                ),
             }
 
             # Add Ollama-specific fields in correct position (after Max Tokens)
             if server_type == SERVER_TYPE_OLLAMA:
-                advanced_schema_dict[
-                    vol.Optional(CONF_OLLAMA_NUM_CTX, default=DEFAULT_OLLAMA_NUM_CTX)
-                ] = vol.Coerce(int)
-                advanced_schema_dict[
-                    vol.Optional(
-                        CONF_OLLAMA_KEEP_ALIVE, default=DEFAULT_OLLAMA_KEEP_ALIVE
-                    )
-                ] = str
-
-            # Continue with remaining fields
-            advanced_schema_dict.update(
-                {
-                    vol.Required(
-                        CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY
-                    ): vol.Coerce(int),
-                    vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
-                    vol.Required(
-                        CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS
-                    ): vol.Coerce(int),
-                    vol.Required(
-                        CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[
-                                {"value": "none", "label": "None"},
-                                {"value": "default", "label": "Smart"},
-                                {"value": "always", "label": "Always"},
-                            ],
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_FOLLOW_UP_PHRASES,
-                        default=get_follow_up_phrases(self.hass.config.language),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_END_WORDS, default=get_end_words(self.hass.config.language)
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
-                    ): bool,
-                    vol.Required(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
-                        vol.Coerce(int), vol.Range(min=5, max=300)
-                    ),
-                    vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
-                }
-            )
+                advanced_schema_dict[PROVIDER_SECTION_KEY] = _build_provider_section(
+                    {
+                        vol.Optional(
+                            CONF_OLLAMA_NUM_CTX, default=DEFAULT_OLLAMA_NUM_CTX
+                        ): vol.Coerce(int),
+                        vol.Optional(
+                            CONF_OLLAMA_KEEP_ALIVE,
+                            default=DEFAULT_OLLAMA_KEEP_ALIVE,
+                        ): str,
+                    }
+                )
 
         advanced_schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
             getattr(self, "step4_data", {})
@@ -1220,9 +1309,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             description_placeholders = {
                 "advanced_info": (
-                    "Configure temperature, token limits, and other advanced options. "
-                    "The Tools section only affects this profile and can narrow the "
-                    "shared MCP server tool set for smaller models."
+                    "These settings are organized by conversation behavior, performance, "
+                    "provider-specific options, and tools. The Tools section only affects "
+                    "this profile and can narrow the shared MCP server tool set for smaller models."
                 )
             }
 
@@ -1240,7 +1329,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, SEARCH_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
             )
             user_input = _apply_tool_family_selection(
                 user_input, TOOL_FAMILY_SHARED_SETTINGS
@@ -1386,7 +1475,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         current_values, CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
                     ),
                 ): str,
-                SEARCH_SECTION_KEY: _build_shared_search_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
             }
@@ -1455,15 +1543,27 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         errors: dict[str, str] = {}
         server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        default_system_prompt = _get_default_system_prompt(self.hass)
 
         if user_input is not None:
-            user_input = _flatten_section_values(user_input, TOOLS_SECTION_KEY)
+            user_input = _flatten_section_values(
+                user_input,
+                PROFILE_SECTION_KEY,
+                CONNECTION_SECTION_KEY,
+                MODEL_SECTION_KEY,
+                PROMPTS_SECTION_KEY,
+                CONVERSATION_SECTION_KEY,
+                ADVANCED_SECTION_KEY,
+                TOOLS_SECTION_KEY,
+            )
             user_input = _apply_tool_family_selection(
                 user_input,
                 TOOL_FAMILY_PROFILE_SETTINGS,
                 inherit_when_empty=True,
             )
-            user_input = _normalize_prompt_inputs(user_input, server_type)
+            user_input = _normalize_prompt_inputs(
+                user_input, server_type, default_system_prompt
+            )
 
             if not errors:
                 # Support both old and new config keys
@@ -1489,7 +1589,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         options = self.config_entry.options
         data = self.config_entry.data
         current_values = self.profile_options or {}
-        default_system_prompt = _get_default_system_prompt(self.hass)
 
         # Handle backward compatibility
         response_mode_value = options.get(
@@ -1594,23 +1693,25 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             # Show text input as fallback
             model_selector = str
 
-        # Build schema based on server type
-        schema_dict = {
-            # 1. Profile Name
-            vol.Required(
-                CONF_PROFILE_NAME,
-                default=_get_form_value(
+        schema_dict: dict[Any, Any] = {
+            PROFILE_SECTION_KEY: _build_profile_identity_section(
+                _get_form_value(
                     current_values,
                     CONF_PROFILE_NAME,
-                    options.get(CONF_PROFILE_NAME, data.get(CONF_PROFILE_NAME, "Default")),
-                ),
-            ): str,
+                    options.get(
+                        CONF_PROFILE_NAME,
+                        data.get(CONF_PROFILE_NAME, "Default"),
+                    ),
+                )
+            ),
         }
 
         system_prompt_suggestion = _get_prompt_text_default(
             current_values,
             prompt_key=CONF_SYSTEM_PROMPT,
-            stored_mode=options.get(CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)),
+            stored_mode=options.get(
+                CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)
+            ),
             stored_prompt=options.get(CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)),
             default_prompt=default_system_prompt,
         )
@@ -1627,7 +1728,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             default_prompt=DEFAULT_TECHNICAL_PROMPT,
         )
 
-        # 2. Server URL or API Key (based on server type)
+        connection_schema_items: dict[Any, Any] = {}
         if server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
@@ -1638,20 +1739,24 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             server_url = options.get(
                 CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)
             )
-            schema_dict[
+            connection_schema_items[
                 vol.Required(
                     CONF_LMSTUDIO_URL,
-                    default=_get_form_value(current_values, CONF_LMSTUDIO_URL, server_url),
+                    default=_get_form_value(
+                        current_values, CONF_LMSTUDIO_URL, server_url
+                    ),
                 )
             ] = str
 
             # Moltbot also needs bearer token (required)
             if server_type == SERVER_TYPE_MOLTBOT:
                 api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-                schema_dict[
+                connection_schema_items[
                     vol.Required(
                         CONF_API_KEY,
-                        default=_get_form_value(current_values, CONF_API_KEY, api_key),
+                        default=_get_form_value(
+                            current_values, CONF_API_KEY, api_key
+                        ),
                     )
                 ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
         elif server_type == SERVER_TYPE_OPENAI:
@@ -1660,15 +1765,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 CONF_LMSTUDIO_URL,
                 data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
             )
-            schema_dict[
+            connection_schema_items[
                 vol.Required(
                     CONF_LMSTUDIO_URL,
-                    default=_get_form_value(current_values, CONF_LMSTUDIO_URL, server_url),
+                    default=_get_form_value(
+                        current_values, CONF_LMSTUDIO_URL, server_url
+                    ),
                 )
             ] = str
 
             api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-            schema_dict[
+            connection_schema_items[
                 vol.Required(
                     CONF_API_KEY,
                     default=_get_form_value(current_values, CONF_API_KEY, api_key),
@@ -1677,42 +1784,30 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         else:
             # Other cloud providers (Gemini, Anthropic, OpenRouter) - API key only
             api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-            schema_dict[
+            connection_schema_items[
                 vol.Required(
                     CONF_API_KEY,
                     default=_get_form_value(current_values, CONF_API_KEY, api_key),
                 )
             ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
-        # 3. Model Name (skip for Moltbot - hardcoded to "main")
-        if server_type != SERVER_TYPE_MOLTBOT:
-            schema_dict[
-                vol.Required(CONF_MODEL_NAME, default=current_model)
-            ] = model_selector
-
-        # Continue with remaining common fields
-        # 4. System Prompt (skip for Moltbot - it manages its own)
-        if server_type != SERVER_TYPE_MOLTBOT:
-            schema_dict[
-                _optional_with_suggested_value(
-                    CONF_SYSTEM_PROMPT, system_prompt_suggestion
-                )
-            ] = TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-            )
-
-        # 5. Technical Instructions
-        schema_dict[
-            _optional_with_suggested_value(
-                CONF_TECHNICAL_PROMPT, technical_prompt_suggestion
-            )
-        ] = TextSelector(
-            TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+        schema_dict[CONNECTION_SECTION_KEY] = _build_connection_section(
+            connection_schema_items
         )
 
-        # For Moltbot, only show Control HA, Timeout, Clean Responses, and Debug Mode
+        if server_type != SERVER_TYPE_MOLTBOT:
+            schema_dict[MODEL_SECTION_KEY] = _build_model_section(
+                current_model, model_selector
+            )
+
+        schema_dict[PROMPTS_SECTION_KEY] = _build_prompt_section(
+            include_system_prompt=server_type != SERVER_TYPE_MOLTBOT,
+            system_prompt_value=system_prompt_suggestion,
+            technical_prompt_value=technical_prompt_suggestion,
+        )
+
         if server_type == SERVER_TYPE_MOLTBOT:
-            schema_dict.update(
+            schema_dict[CONVERSATION_SECTION_KEY] = _build_conversation_section(
                 {
                     vol.Required(
                         CONF_CONTROL_HA,
@@ -1732,107 +1827,39 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             CONF_CLEAN_RESPONSES,
                             options.get(
                                 CONF_CLEAN_RESPONSES,
-                                data.get(CONF_CLEAN_RESPONSES, DEFAULT_CLEAN_RESPONSES),
+                                data.get(
+                                    CONF_CLEAN_RESPONSES,
+                                    DEFAULT_CLEAN_RESPONSES,
+                                ),
                             ),
                         ),
                     ): bool,
-                    vol.Required(
+                }
+            )
+            advanced_schema_items: dict[Any, Any] = {
+                vol.Required(
+                    CONF_TIMEOUT,
+                    default=_get_form_value(
+                        current_values,
                         CONF_TIMEOUT,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_TIMEOUT,
-                            options.get(CONF_TIMEOUT, data.get(CONF_TIMEOUT, 60)),
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
-                    vol.Required(
+                        options.get(CONF_TIMEOUT, data.get(CONF_TIMEOUT, 60)),
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+                vol.Required(
+                    CONF_DEBUG_MODE,
+                    default=_get_form_value(
+                        current_values,
                         CONF_DEBUG_MODE,
-                        default=_get_form_value(
-                            current_values,
+                        options.get(
                             CONF_DEBUG_MODE,
-                            options.get(
-                                CONF_DEBUG_MODE,
-                                data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
-                            ),
+                            data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
                         ),
-                    ): bool,
-                }
-            )
+                    ),
+                ): bool,
+            }
         else:
-            # Other servers - show all fields
-            schema_dict.update(
+            schema_dict[CONVERSATION_SECTION_KEY] = _build_conversation_section(
                 {
-                    # 6. Temperature
-                    vol.Required(
-                        CONF_TEMPERATURE,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_TEMPERATURE,
-                            options.get(
-                                CONF_TEMPERATURE,
-                                data.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),
-                            ),
-                        ),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
-                    # 7. Max Response Tokens
-                    vol.Required(
-                        CONF_MAX_TOKENS,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_MAX_TOKENS,
-                            options.get(
-                                CONF_MAX_TOKENS,
-                                data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
-                            ),
-                        ),
-                    ): vol.Coerce(int),
-                }
-            )
-
-            # Add Ollama-specific fields in correct position (after Max Tokens)
-            if server_type == SERVER_TYPE_OLLAMA:
-                schema_dict[
-                    vol.Optional(
-                        CONF_OLLAMA_NUM_CTX,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_OLLAMA_NUM_CTX,
-                            options.get(
-                                CONF_OLLAMA_NUM_CTX,
-                                data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX),
-                            ),
-                        ),
-                    )
-                ] = vol.Coerce(int)
-                schema_dict[
-                    vol.Optional(
-                        CONF_OLLAMA_KEEP_ALIVE,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_OLLAMA_KEEP_ALIVE,
-                            options.get(
-                                CONF_OLLAMA_KEEP_ALIVE,
-                                data.get(CONF_OLLAMA_KEEP_ALIVE, DEFAULT_OLLAMA_KEEP_ALIVE),
-                            ),
-                        ),
-                    )
-                ] = str
-
-            # Continue with remaining fields
-            schema_dict.update(
-                {
-                    # 8/10. Max History Messages
-                    vol.Required(
-                        CONF_MAX_HISTORY,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_MAX_HISTORY,
-                            options.get(
-                                CONF_MAX_HISTORY,
-                                data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY),
-                            ),
-                        ),
-                    ): vol.Coerce(int),
-                    # 9/11. Control Home Assistant
                     vol.Required(
                         CONF_CONTROL_HA,
                         default=_get_form_value(
@@ -1844,23 +1871,12 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             ),
                         ),
                     ): bool,
-                    # 10/12. Max Tool Iterations
-                    vol.Required(
-                        CONF_MAX_ITERATIONS,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_MAX_ITERATIONS,
-                            options.get(
-                                CONF_MAX_ITERATIONS,
-                                data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS),
-                            ),
-                        ),
-                    ): vol.Coerce(int),
-                    # 11/13. Response Mode
                     vol.Required(
                         CONF_RESPONSE_MODE,
                         default=_get_form_value(
-                            current_values, CONF_RESPONSE_MODE, response_mode_value
+                            current_values,
+                            CONF_RESPONSE_MODE,
+                            response_mode_value,
                         ),
                     ): SelectSelector(
                         SelectSelectorConfig(
@@ -1872,7 +1888,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
-                    # 12/14. Follow-up Phrases
                     vol.Optional(
                         CONF_FOLLOW_UP_PHRASES,
                         default=_get_form_value(
@@ -1880,11 +1895,13 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             CONF_FOLLOW_UP_PHRASES,
                             options.get(
                                 CONF_FOLLOW_UP_PHRASES,
-                                data.get(CONF_FOLLOW_UP_PHRASES, DEFAULT_FOLLOW_UP_PHRASES),
+                                data.get(
+                                    CONF_FOLLOW_UP_PHRASES,
+                                    DEFAULT_FOLLOW_UP_PHRASES,
+                                ),
                             ),
                         ),
                     ): TextSelector(TextSelectorConfig(multiline=True)),
-                    # 13/15. End Conversation Words
                     vol.Optional(
                         CONF_END_WORDS,
                         default=_get_form_value(
@@ -1896,7 +1913,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             ),
                         ),
                     ): TextSelector(TextSelectorConfig(multiline=True)),
-                    # 14/16. Clean Responses
                     vol.Required(
                         CONF_CLEAN_RESPONSES,
                         default=_get_form_value(
@@ -1904,37 +1920,125 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             CONF_CLEAN_RESPONSES,
                             options.get(
                                 CONF_CLEAN_RESPONSES,
-                                data.get(CONF_CLEAN_RESPONSES, DEFAULT_CLEAN_RESPONSES),
-                            ),
-                        ),
-                    ): bool,
-                    # 15/17. Response Time Out
-                    vol.Required(
-                        CONF_TIMEOUT,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_TIMEOUT,
-                            options.get(CONF_TIMEOUT, data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)),
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
-                    # 16/18. Debug Mode
-                    vol.Required(
-                        CONF_DEBUG_MODE,
-                        default=_get_form_value(
-                            current_values,
-                            CONF_DEBUG_MODE,
-                            options.get(
-                                CONF_DEBUG_MODE,
-                                data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
+                                data.get(
+                                    CONF_CLEAN_RESPONSES,
+                                    DEFAULT_CLEAN_RESPONSES,
+                                ),
                             ),
                         ),
                     ): bool,
                 }
             )
+            advanced_schema_items = {
+                vol.Required(
+                    CONF_TEMPERATURE,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_TEMPERATURE,
+                        options.get(
+                            CONF_TEMPERATURE,
+                            data.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),
+                        ),
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Required(
+                    CONF_MAX_TOKENS,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MAX_TOKENS,
+                        options.get(
+                            CONF_MAX_TOKENS,
+                            data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
+                        ),
+                    ),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_MAX_HISTORY,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MAX_HISTORY,
+                        options.get(
+                            CONF_MAX_HISTORY,
+                            data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY),
+                        ),
+                    ),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_MAX_ITERATIONS,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MAX_ITERATIONS,
+                        options.get(
+                            CONF_MAX_ITERATIONS,
+                            data.get(
+                                CONF_MAX_ITERATIONS,
+                                DEFAULT_MAX_ITERATIONS,
+                            ),
+                        ),
+                    ),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_TIMEOUT,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_TIMEOUT,
+                        options.get(
+                            CONF_TIMEOUT,
+                            data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
+                        ),
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+                vol.Required(
+                    CONF_DEBUG_MODE,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_DEBUG_MODE,
+                        options.get(
+                            CONF_DEBUG_MODE,
+                            data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
+                        ),
+                    ),
+                ): bool,
+            }
+            if server_type == SERVER_TYPE_OLLAMA:
+                advanced_schema_items.update(
+                    {
+                        vol.Optional(
+                            CONF_OLLAMA_NUM_CTX,
+                            default=_get_form_value(
+                                current_values,
+                                CONF_OLLAMA_NUM_CTX,
+                                options.get(
+                                    CONF_OLLAMA_NUM_CTX,
+                                    data.get(
+                                        CONF_OLLAMA_NUM_CTX,
+                                        DEFAULT_OLLAMA_NUM_CTX,
+                                    ),
+                                ),
+                            ),
+                        ): vol.Coerce(int),
+                        vol.Optional(
+                            CONF_OLLAMA_KEEP_ALIVE,
+                            default=_get_form_value(
+                                current_values,
+                                CONF_OLLAMA_KEEP_ALIVE,
+                                options.get(
+                                    CONF_OLLAMA_KEEP_ALIVE,
+                                    data.get(
+                                        CONF_OLLAMA_KEEP_ALIVE,
+                                        DEFAULT_OLLAMA_KEEP_ALIVE,
+                                    ),
+                                ),
+                            ),
+                        ): str,
+                    }
+                )
 
-        # Create the schema from the built dictionary
         schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
             current_values, options, data
+        )
+        schema_dict[ADVANCED_SECTION_KEY] = _build_advanced_section(
+            advanced_schema_items
         )
 
         options_schema = vol.Schema(schema_dict)
@@ -1944,8 +2048,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             description_placeholders = {
                 "server_info": (
                     "Moltbot's model and system prompt are configured on the Moltbot "
-                    "server. Leave Technical Instructions blank to use the built-in "
-                    "default from the integration. The Tools section can still keep "
+                    "server. The technical instructions field is prefilled with the "
+                    "current effective prompt so you can review, copy, or edit it. "
+                    "If you leave it unchanged, the integration keeps using the built-in "
+                    "version from code. The Tools section can still keep "
                     "this profile on a smaller MCP tool set."
                 )
             }
@@ -1953,8 +2059,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             description_placeholders = {
                 "server_info": (
                     "Configure this conversation profile. These settings only affect "
-                    "this profile. Leave System Prompt or Technical Instructions "
-                    "blank to use the built-in defaults from the integration code. "
+                    "this profile. The prompt fields are prefilled with the current "
+                    "effective prompts so you can review, copy, or edit them directly. "
+                    "If you leave a prompt unchanged, the integration keeps using the "
+                    "built-in version from code. "
                     "The Tools section can keep smaller models on a leaner subset of "
                     "the shared MCP server."
                 )
@@ -1974,7 +2082,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, SEARCH_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
             )
             user_input = _apply_tool_family_selection(
                 user_input, TOOL_FAMILY_SHARED_SETTINGS
@@ -2170,7 +2278,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): str,
-                SEARCH_SECTION_KEY: _build_shared_search_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
             }

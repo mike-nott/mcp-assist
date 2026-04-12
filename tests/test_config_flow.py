@@ -8,10 +8,16 @@ import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResultType, section
 
 from custom_components.mcp_assist.config_flow import (
+    ADVANCED_SECTION_KEY,
+    CONVERSATION_SECTION_KEY,
     DISCOVERY_SECTION_KEY,
     ENABLED_TOOLS_FIELD,
     MCPAssistConfigFlow,
-    SEARCH_SECTION_KEY,
+    MCPAssistOptionsFlow,
+    MODEL_SECTION_KEY,
+    PERFORMANCE_SECTION_KEY,
+    PROFILE_SECTION_KEY,
+    PROMPTS_SECTION_KEY,
     TOOLS_SECTION_KEY,
     _apply_tool_family_selection,
     _infer_prompt_mode,
@@ -34,7 +40,7 @@ from custom_components.mcp_assist.const import (
     CONF_SYSTEM_PROMPT_MODE,
     CONF_TECHNICAL_PROMPT,
     CONF_TECHNICAL_PROMPT_MODE,
-    DOMAIN,
+    DEFAULT_TECHNICAL_PROMPT,
     PROMPT_MODE_CUSTOM,
     PROMPT_MODE_DEFAULT,
     SERVER_TYPE_OLLAMA,
@@ -58,6 +64,7 @@ def test_normalize_prompt_inputs_drops_default_prompt_text() -> None:
             CONF_TECHNICAL_PROMPT: "   ",
         },
         server_type="ollama",
+        default_system_prompt="builtin system",
     )
 
     assert CONF_SYSTEM_PROMPT not in normalized
@@ -74,6 +81,7 @@ def test_normalize_prompt_inputs_marks_nonblank_prompts_as_custom() -> None:
             CONF_TECHNICAL_PROMPT: "Always inspect attributes",
         },
         server_type="ollama",
+        default_system_prompt="builtin system",
     )
 
     assert normalized[CONF_SYSTEM_PROMPT] == "Be formal"
@@ -92,11 +100,29 @@ def test_normalize_prompt_inputs_for_moltbot_forces_default_system_prompt() -> N
             CONF_TECHNICAL_PROMPT: "keep this one",
         },
         server_type=SERVER_TYPE_MOLTBOT,
+        default_system_prompt="builtin system",
     )
 
     assert normalized[CONF_SYSTEM_PROMPT_MODE] == PROMPT_MODE_DEFAULT
     assert CONF_SYSTEM_PROMPT not in normalized
     assert normalized[CONF_TECHNICAL_PROMPT] == "keep this one"
+
+
+def test_normalize_prompt_inputs_treats_builtin_prompt_text_as_default() -> None:
+    """Prompt text matching the built-in default should not be stored as custom."""
+    normalized = _normalize_prompt_inputs(
+        {
+            CONF_SYSTEM_PROMPT: "builtin system",
+            CONF_TECHNICAL_PROMPT: DEFAULT_TECHNICAL_PROMPT,
+        },
+        server_type="ollama",
+        default_system_prompt="builtin system",
+    )
+
+    assert CONF_SYSTEM_PROMPT not in normalized
+    assert CONF_TECHNICAL_PROMPT not in normalized
+    assert normalized[CONF_SYSTEM_PROMPT_MODE] == PROMPT_MODE_DEFAULT
+    assert normalized[CONF_TECHNICAL_PROMPT_MODE] == PROMPT_MODE_DEFAULT
 
 
 def test_needs_prompt_followup_when_switching_prompt_visibility() -> None:
@@ -144,18 +170,21 @@ async def test_model_step_always_shows_prompt_fields_without_mode_dropdowns(hass
     ):
         result = await flow.async_step_model()
 
-    schema_keys = {
-        getattr(key, "schema", key) for key in result["data_schema"].schema.keys()
-    }
+    assert MODEL_SECTION_KEY in result["data_schema"].schema
+    assert PROMPTS_SECTION_KEY in result["data_schema"].schema
 
-    assert CONF_SYSTEM_PROMPT in schema_keys
-    assert CONF_TECHNICAL_PROMPT in schema_keys
-    assert CONF_SYSTEM_PROMPT_MODE not in schema_keys
-    assert CONF_TECHNICAL_PROMPT_MODE not in schema_keys
+    prompts_section = result["data_schema"].schema[PROMPTS_SECTION_KEY]
+    assert isinstance(prompts_section, section)
+
+    prompt_keys = {
+        getattr(key, "schema", key) for key in prompts_section.schema.schema.keys()
+    }
+    assert CONF_SYSTEM_PROMPT in prompt_keys
+    assert CONF_TECHNICAL_PROMPT in prompt_keys
 
 
 async def test_model_step_prompt_overrides_are_optional(hass) -> None:
-    """Prompt override fields should be optional so blank means use defaults."""
+    """Prompt fields should be optional and prefilled with the effective prompts."""
     flow = MCPAssistConfigFlow()
     flow.hass = hass
     flow.context = {"source": "user"}
@@ -168,15 +197,16 @@ async def test_model_step_prompt_overrides_are_optional(hass) -> None:
     ):
         result = await flow.async_step_model()
 
+    prompts_section = result["data_schema"].schema[PROMPTS_SECTION_KEY]
     marker_by_key = {
         getattr(marker, "schema", marker): marker
-        for marker in result["data_schema"].schema.keys()
+        for marker in prompts_section.schema.schema.keys()
     }
 
     assert isinstance(marker_by_key[CONF_SYSTEM_PROMPT], vol.Optional)
     assert isinstance(marker_by_key[CONF_TECHNICAL_PROMPT], vol.Optional)
-    assert marker_by_key[CONF_SYSTEM_PROMPT].description in (None, {})
-    assert marker_by_key[CONF_TECHNICAL_PROMPT].description in (None, {})
+    assert marker_by_key[CONF_SYSTEM_PROMPT].description["suggested_value"]
+    assert marker_by_key[CONF_TECHNICAL_PROMPT].description["suggested_value"]
 
 
 def test_apply_tool_family_selection_expands_profile_multiselect() -> None:
@@ -218,7 +248,7 @@ def test_apply_tool_family_selection_expands_shared_multiselect() -> None:
 
 
 async def test_advanced_step_groups_profile_tools_into_multiselect_section(hass) -> None:
-    """Advanced settings should group optional tools into one multiselect section."""
+    """Advanced settings should group behavior, performance, and tools into sections."""
     flow = MCPAssistConfigFlow()
     flow.hass = hass
     flow.context = {"source": "user"}
@@ -226,6 +256,8 @@ async def test_advanced_step_groups_profile_tools_into_multiselect_section(hass)
 
     result = await flow.async_step_advanced()
 
+    assert CONVERSATION_SECTION_KEY in result["data_schema"].schema
+    assert PERFORMANCE_SECTION_KEY in result["data_schema"].schema
     tools_section = result["data_schema"].schema[TOOLS_SECTION_KEY]
     assert isinstance(tools_section, section)
 
@@ -239,28 +271,56 @@ async def test_advanced_step_groups_profile_tools_into_multiselect_section(hass)
 
 
 async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> None:
-    """Shared MCP settings should group search and discovery fields into sections."""
+    """Shared MCP settings should group discovery and tools fields into sections."""
     flow = MCPAssistConfigFlow()
     flow.hass = hass
     flow.context = {"source": "user"}
 
     result = await flow.async_step_mcp_server()
 
-    search_section = result["data_schema"].schema[SEARCH_SECTION_KEY]
     discovery_section = result["data_schema"].schema[DISCOVERY_SECTION_KEY]
+    tools_section = result["data_schema"].schema[TOOLS_SECTION_KEY]
 
-    assert isinstance(search_section, section)
     assert isinstance(discovery_section, section)
+    assert isinstance(tools_section, section)
 
-    search_keys = {
-        getattr(key, "schema", key) for key in search_section.schema.schema.keys()
-    }
     discovery_keys = {
         getattr(key, "schema", key) for key in discovery_section.schema.schema.keys()
     }
+    tool_keys = {
+        getattr(key, "schema", key) for key in tools_section.schema.schema.keys()
+    }
 
-    assert search_keys == {CONF_SEARCH_PROVIDER, CONF_BRAVE_API_KEY}
     assert discovery_keys == {
         CONF_ENABLE_GAP_FILLING,
         CONF_MAX_ENTITIES_PER_DISCOVERY,
     }
+    assert tool_keys == {
+        CONF_SEARCH_PROVIDER,
+        CONF_BRAVE_API_KEY,
+        ENABLED_TOOLS_FIELD,
+    }
+
+
+async def test_options_step_groups_profile_settings_into_sections(
+    hass, profile_entry_factory
+) -> None:
+    """Options flow should organize profile settings into clear sections."""
+    flow = MCPAssistOptionsFlow()
+    flow.hass = hass
+    entry = profile_entry_factory()
+    flow.handler = entry.entry_id
+
+    with patch(
+        "custom_components.mcp_assist.config_flow.fetch_models_from_lmstudio",
+        AsyncMock(return_value=["qwen3"]),
+    ):
+        result = await flow.async_step_init()
+
+    top_level_keys = set(result["data_schema"].schema.keys())
+    assert PROFILE_SECTION_KEY in top_level_keys
+    assert MODEL_SECTION_KEY in top_level_keys
+    assert PROMPTS_SECTION_KEY in top_level_keys
+    assert CONVERSATION_SECTION_KEY in top_level_keys
+    assert ADVANCED_SECTION_KEY in top_level_keys
+    assert TOOLS_SECTION_KEY in top_level_keys

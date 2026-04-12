@@ -1,6 +1,7 @@
 """MCP Server for Home Assistant entity discovery."""
 
 import asyncio
+from collections import defaultdict
 import ipaddress
 import json
 import logging
@@ -1953,52 +1954,144 @@ class MCPServer:
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
         else:
-            # General discovery - simple list
-            text_parts = [f"Found {len(entities)} entities:"]
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": self._format_general_discovery_results(entities),
+                    }
+                ]
+            }
 
-            for entity in entities:
-                detail_parts = [f"State: {entity['state']}"]
-                detail_parts.append(f"Area: {entity.get('area', 'None')}")
-                if entity.get("device"):
-                    detail_parts.append(f"Device: {entity['device']}")
-                if entity.get("floor"):
-                    detail_parts.append(f"Floor: {entity['floor']}")
-                if entity.get("attributes", {}).get("device_class"):
-                    detail_parts.append(
-                        f"Device class: {entity['attributes']['device_class']}"
+    def _format_general_discovery_results(self, entities: List[Dict[str, Any]]) -> str:
+        """Format general discovery results in a stable, readable order."""
+        sorted_entities = sorted(entities, key=self._discovery_entity_sort_key)
+        grouped_entities = self._group_entities_for_display(sorted_entities)
+
+        if len(grouped_entities) > 1:
+            text_parts = [
+                f"Found {len(sorted_entities)} entities across {len(grouped_entities)} groups:"
+            ]
+            for group_name, group_items in grouped_entities:
+                text_parts.append(f"\n{group_name} ({len(group_items)}):")
+                for entity in group_items:
+                    text_parts.append(
+                        f"- {self._format_general_discovery_entity(entity)}"
                     )
-                if entity.get("match_reasons"):
-                    detail_parts.append(
-                        f"Matched on: {', '.join(entity['match_reasons'])}"
-                    )
-                if entity.get("aliases"):
-                    detail_parts.append(f"Aliases: {', '.join(entity['aliases'])}")
-                if entity.get("labels"):
-                    detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
-                if entity.get("forecast_service_supported"):
-                    forecast_types = entity.get("forecast_types") or []
-                    if forecast_types:
-                        detail_parts.append(
-                            f"Forecast service: {', '.join(forecast_types)}"
-                        )
-                    else:
-                        detail_parts.append("Forecast service: supported")
-                if entity.get("forecast_available"):
-                    detail_parts.append(
-                        f"Forecast available: {entity.get('forecast_entries', 0)} entries"
-                    )
-                elif entity.get("attribute_keys"):
-                    preview_keys = entity["attribute_keys"][:6]
-                    detail_parts.append(
-                        "Extra attrs via get_entity_details: "
-                        + ", ".join(preview_keys)
-                        + ("..." if len(entity["attribute_keys"]) > len(preview_keys) else "")
-                    )
-                text_parts.append(
-                    f"- {entity['entity_id']}: {entity['name']} ({', '.join(detail_parts)})"
+            return "\n".join(text_parts)
+
+        text_parts = [f"Found {len(sorted_entities)} entities:"]
+        for entity in sorted_entities:
+            text_parts.append(f"- {self._format_general_discovery_entity(entity)}")
+        return "\n".join(text_parts)
+
+    def _discovery_entity_sort_key(
+        self, entity: Dict[str, Any]
+    ) -> Tuple[int, str, str, str]:
+        """Return a stable display sort key for discovered entities."""
+        area = str(entity.get("area") or "").strip().casefold()
+        floor = str(entity.get("floor") or "").strip().casefold()
+        name = str(
+            entity.get("name")
+            or entity.get("attributes", {}).get("friendly_name")
+            or entity.get("entity_id")
+            or ""
+        ).strip().casefold()
+        entity_id = str(entity.get("entity_id") or "").strip().casefold()
+        ungrouped = 1 if not area and not floor else 0
+        return (ungrouped, area or floor, name, entity_id)
+
+    def _group_entities_for_display(
+        self, entities: List[Dict[str, Any]]
+    ) -> List[Tuple[str, List[Dict[str, Any]]]]:
+        """Group entities by room when available for more natural summaries."""
+        floors = {
+            str(entity.get("floor") or "").strip()
+            for entity in entities
+            if str(entity.get("floor") or "").strip()
+        }
+        show_floor_context = len(floors) > 1
+        groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+        for entity in entities:
+            group_name = self._discovery_group_name(
+                entity, show_floor_context=show_floor_context
+            )
+            groups[group_name].append(entity)
+
+        return sorted(
+            groups.items(),
+            key=lambda item: self._discovery_group_sort_key(item[0]),
+        )
+
+    def _discovery_group_name(
+        self, entity: Dict[str, Any], *, show_floor_context: bool
+    ) -> str:
+        """Build a display label for a discovery group."""
+        area = str(entity.get("area") or "").strip()
+        floor = str(entity.get("floor") or "").strip()
+
+        if area:
+            if floor and show_floor_context:
+                return f"{area} ({floor})"
+            return area
+
+        if floor:
+            return f"No area ({floor})"
+
+        return "No area"
+
+    def _discovery_group_sort_key(self, group_name: str) -> Tuple[int, str]:
+        """Sort named groups alphabetically and keep no-area buckets last."""
+        normalized = group_name.casefold()
+        is_no_area = 1 if normalized.startswith("no area") else 0
+        return (is_no_area, normalized)
+
+    def _format_general_discovery_entity(self, entity: Dict[str, Any]) -> str:
+        """Format a single discovery result line."""
+        detail_parts = [f"State: {entity['state']}"]
+        if entity.get("device"):
+            detail_parts.append(f"Device: {entity['device']}")
+        if entity.get("floor") and not entity.get("area"):
+            detail_parts.append(f"Floor: {entity['floor']}")
+        if entity.get("attributes", {}).get("device_class"):
+            detail_parts.append(
+                f"Device class: {entity['attributes']['device_class']}"
+            )
+        if entity.get("match_reasons"):
+            detail_parts.append(
+                f"Matched on: {', '.join(entity['match_reasons'])}"
+            )
+        if entity.get("aliases"):
+            detail_parts.append(f"Aliases: {', '.join(entity['aliases'])}")
+        if entity.get("labels"):
+            detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
+        if entity.get("forecast_service_supported"):
+            forecast_types = entity.get("forecast_types") or []
+            if forecast_types:
+                detail_parts.append(
+                    f"Forecast service: {', '.join(forecast_types)}"
                 )
+            else:
+                detail_parts.append("Forecast service: supported")
+        if entity.get("forecast_available"):
+            detail_parts.append(
+                f"Forecast available: {entity.get('forecast_entries', 0)} entries"
+            )
+        elif entity.get("attribute_keys"):
+            preview_keys = entity["attribute_keys"][:6]
+            detail_parts.append(
+                "Extra attrs via get_entity_details: "
+                + ", ".join(preview_keys)
+                + (
+                    "..."
+                    if len(entity["attribute_keys"]) > len(preview_keys)
+                    else ""
+                )
+            )
 
-            return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+        display_name = entity.get("name") or entity.get("entity_id")
+        return f"{display_name} ({entity['entity_id']}): {', '.join(detail_parts)}"
 
     async def tool_get_entity_details(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Get detailed information about specific entities."""

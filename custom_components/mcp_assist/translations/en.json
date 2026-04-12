@@ -7,6 +7,10 @@
         "data": {
           "profile_name": "Profile Name",
           "server_type": "Server Type"
+        },
+        "data_description": {
+          "profile_name": "A friendly name for this conversation profile.",
+          "server_type": "Choose which provider or inference server this profile uses."
         }
       },
       "server": {
@@ -16,6 +20,11 @@
           "lmstudio_url": "Server URL",
           "api_key": "API Key",
           "mcp_port": "MCP Server Port"
+        },
+        "data_description": {
+          "lmstudio_url": "The base URL for the local or OpenAI-compatible server used by this profile.",
+          "api_key": "The API key or bearer token required by this provider.",
+          "mcp_port": "The local port used by the shared MCP server."
         }
       },
       "model": {
@@ -24,14 +33,38 @@
         "data": {
           "model_name": "Model Name",
           "system_prompt_mode": "System Prompt Source",
-          "system_prompt": "System Prompt Override",
+          "system_prompt": "System Prompt",
           "technical_prompt_mode": "Technical Instructions Source",
-          "technical_prompt": "Technical Instructions Override"
+          "technical_prompt": "Technical Instructions"
         },
         "data_description": {
           "model_name": "The LLM model this profile should use.",
-          "system_prompt": "Optional. Leave blank to use the built-in system prompt from the integration code.",
-          "technical_prompt": "Optional. Leave blank to use the built-in technical instructions from the integration code."
+          "system_prompt": "Prefilled with the current effective system prompt. Edit it to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code.",
+          "technical_prompt": "Prefilled with the current effective technical instructions. Edit them to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code."
+        },
+        "sections": {
+          "model_fields": {
+            "name": "Model",
+            "description": "Choose the model this profile should use.",
+            "data": {
+              "model_name": "Model Name"
+            },
+            "data_description": {
+              "model_name": "The LLM model this profile should use."
+            }
+          },
+          "prompts": {
+            "name": "Prompts",
+            "description": "Review the current effective prompts, copy them, or edit them for this profile.",
+            "data": {
+              "system_prompt": "System Prompt",
+              "technical_prompt": "Technical Instructions"
+            },
+            "data_description": {
+              "system_prompt": "Prefilled with the current effective system prompt. Edit it to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code.",
+              "technical_prompt": "Prefilled with the current effective technical instructions. Edit them to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code."
+            }
+          }
         }
       },
       "advanced": {
@@ -53,6 +86,56 @@
           "clean_responses": "Clean Responses for Voice Output"
         },
         "sections": {
+          "conversation": {
+            "name": "Conversation",
+            "description": "Behavior, follow-up handling, and voice-output settings for this profile.",
+            "data": {
+              "control_home_assistant": "Control Home Assistant",
+              "response_mode": "Response Mode",
+              "follow_up_phrases": "Follow-up Phrases",
+              "end_words": "End Conversation Words",
+              "clean_responses": "Clean Responses for Voice Output"
+            },
+            "data_description": {
+              "control_home_assistant": "Allow this profile to execute Home Assistant actions instead of only answering questions.",
+              "response_mode": "Controls whether the assistant ends immediately or asks natural follow-up questions when appropriate.",
+              "follow_up_phrases": "Comma-separated phrases used to detect follow-up style responses.",
+              "end_words": "Comma-separated words or phrases that should end the conversation.",
+              "clean_responses": "Trim unnecessary formatting or filler to keep spoken responses cleaner."
+            }
+          },
+          "performance": {
+            "name": "Performance",
+            "description": "Model-response limits, execution limits, timeout, and debugging.",
+            "data": {
+              "temperature": "Temperature",
+              "max_tokens": "Max Response Tokens",
+              "max_history": "Max History Messages",
+              "max_iterations": "Max Tool Iterations",
+              "timeout": "Response Time Out",
+              "debug_mode": "Debug Mode"
+            },
+            "data_description": {
+              "temperature": "Controls response randomness. Lower values are more deterministic.",
+              "max_tokens": "Caps how many tokens the model may generate in one response.",
+              "max_history": "How many prior conversation messages to keep in context.",
+              "max_iterations": "Caps how many tool-calling turns the assistant may use for one request.",
+              "timeout": "How long to wait for a provider response before timing out.",
+              "debug_mode": "Enable more detailed logging for troubleshooting."
+            }
+          },
+          "provider": {
+            "name": "Provider",
+            "description": "Provider-specific settings shown only when they apply.",
+            "data": {
+              "ollama_keep_alive": "Ollama Keep Alive",
+              "ollama_num_ctx": "Ollama Context Window"
+            },
+            "data_description": {
+              "ollama_keep_alive": "How long Ollama should keep the selected model loaded in memory.",
+              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default."
+            }
+          },
           "tools": {
             "name": "Tools",
             "description": "Optional per-profile tool filtering.",
@@ -103,11 +186,15 @@
           },
           "tools": {
             "name": "Tools",
-            "description": "Choose which optional tool families the shared MCP server exposes.",
+            "description": "Configure optional tool capabilities exposed by the shared MCP server, including web search.",
             "data": {
+              "search_provider": "Web Search",
+              "brave_api_key": "Brave Search API Key",
               "enabled_tools": "Available Tool Families"
             },
             "data_description": {
+              "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
+              "brave_api_key": "Required only when Brave Search is selected.",
               "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
             }
           }
@@ -141,9 +228,9 @@
           "api_key": "API Key",
           "model_name": "Model Name",
           "system_prompt_mode": "System Prompt Source",
-          "system_prompt": "System Prompt Override",
+          "system_prompt": "System Prompt",
           "technical_prompt_mode": "Technical Instructions Source",
-          "technical_prompt": "Technical Instructions Override",
+          "technical_prompt": "Technical Instructions",
           "temperature": "Temperature",
           "max_tokens": "Max Response Tokens",
           "max_history": "Max History Messages",
@@ -160,10 +247,96 @@
         },
         "data_description": {
           "model_name": "The LLM model this profile should use.",
-          "system_prompt": "Optional. Leave blank to use the built-in system prompt from the integration code.",
-          "technical_prompt": "Optional. Leave blank to use the built-in technical instructions from the integration code."
+          "system_prompt": "Prefilled with the current effective system prompt. Edit it to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code.",
+          "technical_prompt": "Prefilled with the current effective technical instructions. Edit them to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code."
         },
         "sections": {
+          "profile": {
+            "name": "Profile",
+            "description": "Basic identity settings for this conversation profile.",
+            "data": {
+              "profile_name": "Profile Name"
+            },
+            "data_description": {
+              "profile_name": "A friendly name for this conversation profile."
+            }
+          },
+          "connection": {
+            "name": "Connection",
+            "description": "How this profile connects to its model provider.",
+            "data": {
+              "lmstudio_url": "Server URL",
+              "api_key": "API Key"
+            },
+            "data_description": {
+              "lmstudio_url": "The base URL for the local or OpenAI-compatible server used by this profile.",
+              "api_key": "The API key or bearer token required by this provider."
+            }
+          },
+          "model_fields": {
+            "name": "Model",
+            "description": "Choose the model this profile should use.",
+            "data": {
+              "model_name": "Model Name"
+            },
+            "data_description": {
+              "model_name": "The LLM model this profile should use."
+            }
+          },
+          "prompts": {
+            "name": "Prompts",
+            "description": "Review the current effective prompts, copy them, or edit them for this profile.",
+            "data": {
+              "system_prompt": "System Prompt",
+              "technical_prompt": "Technical Instructions"
+            },
+            "data_description": {
+              "system_prompt": "Prefilled with the current effective system prompt. Edit it to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code.",
+              "technical_prompt": "Prefilled with the current effective technical instructions. Edit them to customize this profile. If left unchanged, the integration keeps using the built-in prompt from code."
+            }
+          },
+          "conversation": {
+            "name": "Conversation",
+            "description": "Behavior, follow-up handling, and voice-output settings for this profile.",
+            "data": {
+              "control_home_assistant": "Control Home Assistant",
+              "response_mode": "Response Mode",
+              "follow_up_phrases": "Follow-up Phrases",
+              "end_words": "End Conversation Words",
+              "clean_responses": "Clean Responses for Voice Output"
+            },
+            "data_description": {
+              "control_home_assistant": "Allow this profile to execute Home Assistant actions instead of only answering questions.",
+              "response_mode": "Controls whether the assistant ends immediately or asks natural follow-up questions when appropriate.",
+              "follow_up_phrases": "Comma-separated phrases used to detect follow-up style responses.",
+              "end_words": "Comma-separated words or phrases that should end the conversation.",
+              "clean_responses": "Trim unnecessary formatting or filler to keep spoken responses cleaner."
+            }
+          },
+          "advanced_settings": {
+            "name": "Advanced",
+            "description": "Expert tuning for model behavior, limits, provider-specific options, timeout, and debugging.",
+            "data": {
+              "temperature": "Temperature",
+              "max_tokens": "Max Response Tokens",
+              "max_history": "Max History Messages",
+              "max_iterations": "Max Tool Iterations",
+              "timeout": "Response Time Out",
+              "debug_mode": "Debug Mode",
+              "ollama_keep_alive": "Ollama Keep Alive",
+              "ollama_num_ctx": "Ollama Context Window"
+            },
+            "data_description": {
+              "temperature": "Controls response randomness. Lower values are more deterministic.",
+              "max_tokens": "Caps how many tokens the model may generate in one response.",
+              "max_history": "How many prior conversation messages to keep in context.",
+              "max_iterations": "Caps how many tool-calling turns the assistant may use for one request.",
+              "timeout": "How long to wait for a provider response before timing out.",
+              "debug_mode": "Enable more detailed logging for troubleshooting.",
+              "ollama_keep_alive": "How long Ollama should keep the selected model loaded in memory.",
+              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default."
+            }
+          },
           "tools": {
             "name": "Tools",
             "description": "Optional per-profile tool filtering.",
@@ -214,11 +387,15 @@
           },
           "tools": {
             "name": "Tools",
-            "description": "Choose which optional tool families the shared MCP server exposes.",
+            "description": "Configure optional tool capabilities exposed by the shared MCP server, including web search.",
             "data": {
+              "search_provider": "Web Search",
+              "brave_api_key": "Brave Search API Key",
               "enabled_tools": "Available Tool Families"
             },
             "data_description": {
+              "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
+              "brave_api_key": "Required only when Brave Search is selected.",
               "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
             }
           }

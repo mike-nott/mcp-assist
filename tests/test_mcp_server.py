@@ -154,3 +154,89 @@ async def test_list_domains_hides_disabled_music_assistant_domain(
 
     assert "light: 1 entities" in text
     assert "music_assistant" not in text
+
+
+def test_general_discovery_results_group_by_area_and_sort_names(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """General discovery output should be grouped by area and sorted predictably."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    text = server._format_general_discovery_results(
+        [
+            {
+                "entity_id": "light.primary_bedroom_bedside_right",
+                "name": "Primary Bedroom Bedside Lamp: Right",
+                "state": "on",
+                "area": "Primary Bedroom",
+                "floor": "Downstairs",
+            },
+            {
+                "entity_id": "light.office_desk_strip",
+                "name": "Office Desk Light Strip",
+                "state": "on",
+                "area": "Office",
+                "floor": "Downstairs",
+            },
+            {
+                "entity_id": "light.primary_bedroom_bedside_left",
+                "name": "Primary Bedroom Bedside Lamp: Left",
+                "state": "on",
+                "area": "Primary Bedroom",
+                "floor": "Downstairs",
+            },
+            {
+                "entity_id": "light.office_cans",
+                "name": "Office Cans",
+                "state": "on",
+                "area": "Office",
+                "floor": "Downstairs",
+            },
+            {
+                "entity_id": "light.primary_bathroom_vanity",
+                "name": "Primary Bathroom Vanity",
+                "state": "on",
+                "area": "Primary Bathroom",
+                "floor": "Downstairs",
+            },
+        ]
+    )
+
+    assert "Found 5 entities across 3 groups:" in text
+    assert text.index("Office (2):") < text.index("Primary Bathroom (1):")
+    assert text.index("Primary Bathroom (1):") < text.index("Primary Bedroom (2):")
+    assert text.index("Office Cans") < text.index("Office Desk Light Strip")
+    assert text.index("Primary Bedroom Bedside Lamp: Left") < text.index(
+        "Primary Bedroom Bedside Lamp: Right"
+    )
+
+
+def test_general_discovery_results_keep_no_area_bucket_last(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Ungrouped entities should appear after named rooms."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    text = server._format_general_discovery_results(
+        [
+            {
+                "entity_id": "light.loft_lamp",
+                "name": "Loft Lamp",
+                "state": "on",
+                "floor": "Upstairs",
+            },
+            {
+                "entity_id": "light.kitchen_pendants",
+                "name": "Kitchen Pendants",
+                "state": "on",
+                "area": "Kitchen",
+                "floor": "Downstairs",
+            },
+        ]
+    )
+
+    assert text.index("Kitchen (Downstairs) (1):") < text.index(
+        "No area (Upstairs) (1):"
+    )
