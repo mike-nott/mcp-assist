@@ -6,16 +6,17 @@ import json
 import logging
 from typing import Any, Dict, List
 from urllib.parse import urlparse
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 
 from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
     entity_registry as er,
+    service as service_helper,
 )
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import history
@@ -928,6 +929,108 @@ class MCPServer:
                 },
             },
             {
+                "name": "list_response_services",
+                "description": "List Home Assistant services that currently support native response data. Use this when you need to discover which read/query-style services can be called with call_service_with_response.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "Optional domain filter, for example 'weather', 'calendar', or 'media_player'.",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Optional text filter matching domain, service, name, or description.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of services to return (default: 50, max: 200).",
+                            "default": 50,
+                            "minimum": 1,
+                            "maximum": 200,
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "call_service_with_response",
+                "description": "Call a Home Assistant service that returns structured response data for read/query use cases. Use this for native service-response reads like weather forecasts, calendar event queries, or media browsing/searching.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "The Home Assistant domain for the response-returning service, for example 'weather', 'calendar', or 'media_player'.",
+                        },
+                        "service": {
+                            "type": "string",
+                            "description": "The service/action name to call, for example 'get_forecasts', 'get_events', 'browse_media', or 'search_media'.",
+                        },
+                        "target": {
+                            "type": "object",
+                            "description": "Optional target entities or selector IDs such as areas, floors, labels, or devices. Selectors are resolved to exposed entity IDs, and may be narrowed using the service's target metadata when available.",
+                            "properties": {
+                                "entity_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single entity ID or list of entity IDs.",
+                                },
+                                "area_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single area ID or list of area IDs.",
+                                },
+                                "floor_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single floor ID or list of floor IDs.",
+                                },
+                                "label_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single label ID or list of label IDs.",
+                                },
+                                "device_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single device ID or list of device IDs.",
+                                },
+                            },
+                            "minProperties": 1,
+                            "additionalProperties": False,
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Additional service data for the response-returning service. Required fields are validated from Home Assistant's native service descriptions when available.",
+                            "additionalProperties": True,
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Timeout in seconds (default: 60, max: 300).",
+                            "default": 60,
+                            "minimum": 1,
+                            "maximum": 300,
+                        },
+                    },
+                    "required": ["domain", "service"],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "set_conversation_state",
                 "description": "Indicate whether you expect a response from the user after your message",
                 "inputSchema": {
@@ -1179,6 +1282,10 @@ class MCPServer:
             return await self.tool_get_index()
         elif tool_name == "perform_action":
             return await self.tool_perform_action(arguments)
+        elif tool_name == "list_response_services":
+            return await self.tool_list_response_services(arguments)
+        elif tool_name == "call_service_with_response":
+            return await self.tool_call_service_with_response(arguments)
         elif tool_name == "set_conversation_state":
             return await self.tool_set_conversation_state(arguments)
         elif tool_name == "run_script":
@@ -1436,6 +1543,14 @@ class MCPServer:
                     detail_parts.append(f"Aliases: {', '.join(entity['aliases'])}")
                 if entity.get("labels"):
                     detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
+                if entity.get("forecast_service_supported"):
+                    forecast_types = entity.get("forecast_types") or []
+                    if forecast_types:
+                        detail_parts.append(
+                            f"Forecast service: {', '.join(forecast_types)}"
+                        )
+                    else:
+                        detail_parts.append("Forecast service: supported")
                 if entity.get("forecast_available"):
                     detail_parts.append(
                         f"Forecast available: {entity.get('forecast_entries', 0)} entries"
@@ -1576,6 +1691,82 @@ class MCPServer:
         # Format as JSON for structured consumption
         return {"content": [{"type": "text", "text": json.dumps(index, indent=2)}]}
 
+    async def tool_list_response_services(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """List dynamically available HA services that support response data."""
+        domain_filter = str(args.get("domain") or "").strip().casefold()
+        query = str(args.get("query") or "").strip().casefold()
+        limit = self._coerce_int_arg(
+            args.get("limit"), default=50, minimum=1, maximum=200
+        )
+
+        catalog = await self._get_response_service_catalog()
+        rows: List[tuple[str, str, Dict[str, Any]]] = []
+
+        for domain, services in catalog.items():
+            if domain_filter and domain.casefold() != domain_filter:
+                continue
+
+            for service_name, description in services.items():
+                haystacks = [
+                    domain,
+                    service_name,
+                    str(description.get("name") or ""),
+                    str(description.get("description") or ""),
+                ]
+                if query and not any(query in text.casefold() for text in haystacks):
+                    continue
+
+                rows.append((domain, service_name, description))
+
+        rows.sort(key=lambda item: (item[0], item[1]))
+        rows = rows[:limit]
+
+        if not rows:
+            filters = []
+            if domain_filter:
+                filters.append(f"domain='{domain_filter}'")
+            if query:
+                filters.append(f"query='{query}'")
+            filter_text = f" for {', '.join(filters)}" if filters else ""
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"No response-capable services found{filter_text}.",
+                    }
+                ]
+            }
+
+        text_parts = [
+            f"Found {len(rows)} response-capable Home Assistant services:"
+        ]
+        for domain, service_name, description in rows:
+            detail_parts = [
+                f"response: {description.get('supports_response', 'optional')}"
+            ]
+            target_domains = self._extract_service_target_domains(description)
+            if target_domains:
+                detail_parts.append(f"target domains: {', '.join(target_domains)}")
+            required_fields = self._get_required_service_fields(description)
+            if required_fields:
+                detail_parts.append(f"required: {', '.join(required_fields)}")
+            field_names = self._get_service_field_names(description)
+            if field_names:
+                preview_fields = field_names[:6]
+                detail_parts.append(
+                    "fields: "
+                    + ", ".join(preview_fields)
+                    + ("..." if len(field_names) > len(preview_fields) else "")
+                )
+            if description.get("description"):
+                detail_parts.append(str(description["description"]))
+
+            text_parts.append(
+                f"- {domain}.{service_name} ({'; '.join(detail_parts)})"
+            )
+
+        return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
     async def tool_perform_action(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Perform an action on Home Assistant entities with progress notifications."""
         domain = args.get("domain")
@@ -1604,6 +1795,26 @@ class MCPServer:
                 ]
             }
 
+        if not isinstance(target, dict):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: 'target' must be an object with entity_id, area_id, floor_id, label_id, or device_id.",
+                    }
+                ]
+            }
+
+        if not isinstance(data, dict):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: 'data' must be an object of service parameters.",
+                    }
+                ]
+            }
+
         _LOGGER.info(f"🎯 Performing action: {domain}.{action} on {target}")
 
         # Notify start
@@ -1626,6 +1837,9 @@ class MCPServer:
         # Resolve target (convert areas to entity_ids if needed)
         try:
             resolved_target = await self.resolve_target(target)
+            resolved_target = self._restrict_resolved_target_to_domain(
+                resolved_target, domain
+            )
             _LOGGER.debug(f"Resolved target: {resolved_target}")
         except Exception as err:
             error_msg = f"Failed to resolve target: {err}"
@@ -1694,6 +1908,154 @@ class MCPServer:
             _LOGGER.exception(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
 
+    async def tool_call_service_with_response(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Call a native HA service that returns structured response data."""
+        domain = str(args.get("domain") or "").strip().lower()
+        service = str(args.get("service") or "").strip().lower()
+        target = args.get("target")
+        data = args.get("data", {}) or {}
+        timeout = self._coerce_int_arg(
+            args.get("timeout"), default=60, minimum=1, maximum=300
+        )
+
+        if not domain:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: Missing required parameter 'domain'.",
+                    }
+                ]
+            }
+
+        if not service:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: Missing required parameter 'service'.",
+                    }
+                ]
+            }
+
+        if target is None:
+            target = {}
+        elif not isinstance(target, dict):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: 'target' must be an object with entity_id, area_id, floor_id, label_id, or device_id.",
+                    }
+                ]
+            }
+
+        if not isinstance(data, dict):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: 'data' must be an object of service parameters.",
+                    }
+                ]
+            }
+
+        _LOGGER.info(
+            "📖 Calling response service: %s.%s on %s with data %s",
+            domain,
+            service,
+            target,
+            data,
+        )
+
+        service_description, validation_error = await self._get_response_service_info(
+            domain, service
+        )
+        if validation_error:
+            return {
+                "content": [
+                    {"type": "text", "text": f"❌ Error: {validation_error}"}
+                ]
+            }
+
+        prepared_data = self._prepare_response_service_data(domain, service, data)
+        valid_params, validation_msg = self._validate_response_service_parameters(
+            service_description, prepared_data
+        )
+        if not valid_params:
+            return {
+                "content": [{"type": "text", "text": f"❌ Error: {validation_msg}"}]
+            }
+
+        self.publish_progress(
+            "tool_start",
+            f"Calling response service: {domain}.{service}",
+            tool="call_service_with_response",
+            domain=domain,
+            service=service,
+        )
+
+        resolved_target = {}
+        try:
+            if target:
+                resolved_target = await self.resolve_target(target)
+                resolved_target = self._restrict_resolved_target_for_service(
+                    resolved_target,
+                    service_description=service_description,
+                )
+        except Exception as err:
+            error_msg = f"Failed to resolve target: {err}"
+            _LOGGER.error(error_msg)
+            return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        try:
+            service_data = {**resolved_target, **prepared_data}
+            response = await asyncio.wait_for(
+                self.hass.services.async_call(
+                    domain=domain,
+                    service=service,
+                    service_data=service_data,
+                    blocking=True,
+                    return_response=True,
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            error_msg = (
+                f"Service-response call timed out after {timeout} seconds: "
+                f"{domain}.{service}"
+            )
+            _LOGGER.error("❌ %s", error_msg)
+            return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+        except Exception as err:
+            error_msg = f"Service-response call failed: {err}"
+            _LOGGER.exception("❌ %s", error_msg)
+            return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        self.publish_progress(
+            "tool_complete",
+            f"Response service completed: {domain}.{service}",
+            tool="call_service_with_response",
+            success=True,
+        )
+
+        serialized_response = self._serialize_service_response_value(response)
+        result_text = self._format_service_response_result(
+            domain,
+            service,
+            resolved_target,
+            serialized_response,
+        )
+        result: Dict[str, Any] = {
+            "content": [{"type": "text", "text": result_text}]
+        }
+        if serialized_response is not None:
+            result["response"] = serialized_response
+
+        return result
+
     async def tool_set_conversation_state(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Set whether the assistant expects a user response."""
         expecting_response = args.get("expecting_response", False)
@@ -1756,11 +2118,14 @@ class MCPServer:
             result_text = f"✅ Script {full_script_id} completed successfully"
 
             # If the script returned response variables, include them
-            if response:
-                result_text += f"\n\nResponse:\n{json.dumps(response, indent=2)}"
+            if response is not None:
+                serialized_response = self._serialize_service_response_value(response)
+                result_text += (
+                    f"\n\nResponse:\n{json.dumps(serialized_response, indent=2)}"
+                )
                 return {
                     "content": [{"type": "text", "text": result_text}],
-                    "response": response,
+                    "response": serialized_response,
                 }
             else:
                 result_text += "\n\nNo response variables returned (script may not have response_variable defined)"
@@ -3103,6 +3468,349 @@ class MCPServer:
         else:
             _LOGGER.warning(f"Service validation failed: {result}")
             raise ValueError(result)  # Returns error message
+
+    def _prepare_response_service_data(
+        self, domain: str, service: str, data: Dict[str, Any] | None
+    ) -> Dict[str, Any]:
+        """Normalize service-response data and fill safe defaults."""
+        prepared = dict(data or {})
+
+        if (
+            domain == "weather"
+            and service in {"get_forecast", "get_forecasts"}
+            and not prepared.get("type")
+        ):
+            prepared["type"] = "daily"
+
+        return prepared
+
+    async def _get_response_service_catalog(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        """Build a catalog of HA services that support response data."""
+        descriptions = await service_helper.async_get_all_descriptions(self.hass)
+        catalog: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+        for domain, services in self.hass.services.async_services().items():
+            for service_name in services:
+                supports_response = self.hass.services.supports_response(
+                    domain, service_name
+                )
+                if supports_response == SupportsResponse.NONE:
+                    continue
+
+                description = dict(descriptions.get(domain, {}).get(service_name, {}))
+                description["supports_response"] = (
+                    "optional"
+                    if supports_response == SupportsResponse.OPTIONAL
+                    else "only"
+                )
+                catalog.setdefault(domain, {})[service_name] = description
+
+        return catalog
+
+    async def _get_response_service_info(
+        self, domain: str, service: str
+    ) -> tuple[Dict[str, Any], str | None]:
+        """Get dynamic metadata for a response-capable HA service."""
+        if not self.hass.services.has_service(domain, service):
+            domain_info = get_domain_info(domain)
+            if domain_info is None:
+                return {}, (
+                    f"Domain '{domain}' is not registered in Home Assistant right now. "
+                    "Use list_response_services() to inspect available response-capable services."
+                )
+            return {}, (
+                f"Service '{domain}.{service}' is not registered in Home Assistant right now. "
+                "Use list_response_services() to inspect available response-capable services."
+            )
+
+        supports_response = self.hass.services.supports_response(domain, service)
+        if supports_response == SupportsResponse.NONE:
+            return {}, (
+                f"Service '{domain}.{service}' does not support native response data. "
+                "Use list_response_services() to find services that do."
+            )
+
+        catalog = await self._get_response_service_catalog()
+        description = dict(catalog.get(domain, {}).get(service, {}))
+        description["supports_response"] = (
+            "optional"
+            if supports_response == SupportsResponse.OPTIONAL
+            else "only"
+        )
+        return description, None
+
+    def _validate_response_service_parameters(
+        self, description: Dict[str, Any], provided_params: Dict[str, Any]
+    ) -> tuple[bool, str]:
+        """Validate required service parameters from HA's native service description."""
+        required_fields = self._get_required_service_fields(description)
+        missing = [field for field in required_fields if field not in provided_params]
+        if missing:
+            return (
+                False,
+                "Missing required parameters: " + ", ".join(missing),
+            )
+
+        return True, "Parameters valid"
+
+    def _get_required_service_fields(self, description: Dict[str, Any]) -> List[str]:
+        """Extract required field names from a service description."""
+        fields = description.get("fields", {})
+        if not isinstance(fields, dict):
+            return []
+
+        required_fields = []
+        for field_name, metadata in fields.items():
+            if isinstance(metadata, dict) and metadata.get("required") is True:
+                required_fields.append(str(field_name))
+
+        return sorted(required_fields)
+
+    def _get_service_field_names(self, description: Dict[str, Any]) -> List[str]:
+        """Extract service field names from a service description."""
+        fields = description.get("fields", {})
+        if not isinstance(fields, dict):
+            return []
+
+        return sorted(str(field_name) for field_name in fields.keys())
+
+    def _extract_service_target_domains(
+        self, description: Dict[str, Any]
+    ) -> List[str]:
+        """Extract allowed target entity domains from a service description."""
+        target = description.get("target")
+        if not isinstance(target, dict):
+            return []
+
+        entity_target = target.get("entity")
+        if not isinstance(entity_target, dict):
+            return []
+
+        domain_value = entity_target.get("domain")
+        if domain_value is None:
+            return []
+        if isinstance(domain_value, str):
+            return [domain_value]
+        if isinstance(domain_value, (list, tuple, set)):
+            return [str(item) for item in domain_value if item]
+        return [str(domain_value)]
+
+    def _restrict_resolved_target_for_service(
+        self,
+        resolved_target: Dict[str, Any],
+        *,
+        default_domain: str | None = None,
+        service_description: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Restrict resolved entity targets using known service target metadata."""
+        allowed_domains = []
+        if service_description:
+            allowed_domains = self._extract_service_target_domains(service_description)
+        if not allowed_domains and default_domain:
+            allowed_domains = [default_domain]
+
+        entity_ids = self._normalize_target_values(resolved_target.get("entity_id"))
+        if not allowed_domains:
+            resolved_domains = {entity_id.split(".", 1)[0] for entity_id in entity_ids}
+            if len(resolved_domains) > 1:
+                raise ValueError(
+                    "Resolved target spans multiple domains, and this service does not "
+                    "publish target-domain metadata. Use explicit entity_id values from discovery."
+                )
+            return {"entity_id": entity_ids}
+
+        filtered_entity_ids = [
+            entity_id
+            for entity_id in entity_ids
+            if entity_id.split(".", 1)[0] in allowed_domains
+        ]
+
+        if not filtered_entity_ids:
+            raise ValueError(
+                "Resolved target did not include any exposed entities accepted by this service."
+            )
+
+        return {"entity_id": filtered_entity_ids}
+
+    def _restrict_resolved_target_to_domain(
+        self, resolved_target: Dict[str, Any], domain: str
+    ) -> Dict[str, Any]:
+        """Restrict resolved entity targets to the requested domain."""
+        return self._restrict_resolved_target_for_service(
+            resolved_target, default_domain=domain
+        )
+
+    def _serialize_service_response_value(self, value: Any) -> Any:
+        """Serialize HA service response data to JSON-safe values."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, (datetime, date, time)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {
+                str(key): self._serialize_service_response_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [self._serialize_service_response_value(item) for item in value]
+        if isinstance(value, bytes):
+            try:
+                return value.decode("utf-8")
+            except UnicodeDecodeError:
+                return value.hex()
+        return str(value)
+
+    def _format_service_response_result(
+        self,
+        domain: str,
+        service: str,
+        resolved_target: Dict[str, Any],
+        response: Any,
+    ) -> str:
+        """Format a response-returning service call for the LLM."""
+        entity_ids = self._normalize_target_values(resolved_target.get("entity_id"))
+        if entity_ids:
+            target_count = len(entity_ids)
+            target_label = "entity" if target_count == 1 else "entities"
+            header = (
+                f"✅ Retrieved response from {domain}.{service} for "
+                f"{target_count} target {target_label}."
+            )
+        else:
+            header = f"✅ Retrieved response from {domain}.{service}."
+
+        text_parts = [header]
+
+        summary_lines = self._build_service_response_summary(domain, service, response)
+        if summary_lines:
+            text_parts.append("")
+            text_parts.extend(summary_lines)
+
+        if response is None:
+            text_parts.append("")
+            text_parts.append("No response data was returned.")
+        else:
+            text_parts.append("")
+            text_parts.append("Response:")
+            text_parts.append(json.dumps(response, indent=2))
+
+        return "\n".join(text_parts)
+
+    def _build_service_response_summary(
+        self, domain: str, service: str, response: Any
+    ) -> List[str]:
+        """Build a concise summary for structured service responses."""
+        if domain == "weather" and service in {"get_forecast", "get_forecasts"}:
+            return self._summarize_weather_response(response)
+        if domain == "calendar" and service == "get_events":
+            return self._summarize_calendar_response(response)
+
+        if isinstance(response, dict):
+            return [f"Summary: {len(response)} top-level response entries."]
+        if isinstance(response, list):
+            return [f"Summary: {len(response)} response items."]
+        return []
+
+    def _summarize_weather_response(self, response: Any) -> List[str]:
+        """Summarize weather forecast response data."""
+        if not isinstance(response, dict):
+            return []
+
+        lines = ["Summary:"]
+        for entity_id, payload in response.items():
+            forecast = payload.get("forecast") if isinstance(payload, dict) else None
+            if not isinstance(forecast, list):
+                lines.append(f"- {entity_id}: no forecast entries returned")
+                continue
+
+            detail_parts = [f"{len(forecast)} forecast entries"]
+            if forecast:
+                first_forecast = forecast[0] if isinstance(forecast[0], dict) else {}
+                preview_parts = []
+                preview_time = self._format_service_response_datetime(
+                    first_forecast.get("datetime")
+                )
+                if preview_time:
+                    preview_parts.append(preview_time)
+                if first_forecast.get("condition"):
+                    preview_parts.append(str(first_forecast["condition"]))
+                high_temp = first_forecast.get("temperature")
+                low_temp = first_forecast.get("templow")
+                if high_temp is not None and low_temp is not None:
+                    preview_parts.append(f"{high_temp}/{low_temp}")
+                elif high_temp is not None:
+                    preview_parts.append(str(high_temp))
+                if preview_parts:
+                    detail_parts.append("first: " + ", ".join(preview_parts))
+
+            lines.append(f"- {entity_id}: {'; '.join(detail_parts)}")
+
+        return lines if len(lines) > 1 else []
+
+    def _summarize_calendar_response(self, response: Any) -> List[str]:
+        """Summarize calendar event response data."""
+        if not isinstance(response, dict):
+            return []
+
+        lines = ["Summary:"]
+        for entity_id, payload in response.items():
+            events = payload.get("events") if isinstance(payload, dict) else None
+            if not isinstance(events, list):
+                lines.append(f"- {entity_id}: no events returned")
+                continue
+
+            detail_parts = [f"{len(events)} events"]
+            if events:
+                first_event = events[0] if isinstance(events[0], dict) else {}
+                event_summary = first_event.get("summary") or first_event.get("title")
+                event_start = self._extract_calendar_event_start(first_event)
+                preview_parts = []
+                if event_summary:
+                    preview_parts.append(str(event_summary))
+                if event_start:
+                    preview_parts.append(event_start)
+                if preview_parts:
+                    detail_parts.append("next: " + " at ".join(preview_parts[:2]))
+
+            lines.append(f"- {entity_id}: {'; '.join(detail_parts)}")
+
+        return lines if len(lines) > 1 else []
+
+    def _extract_calendar_event_start(self, event: Dict[str, Any]) -> str | None:
+        """Extract and format the start time from a calendar event payload."""
+        if not isinstance(event, dict):
+            return None
+
+        start_value = event.get("start")
+        if isinstance(start_value, dict):
+            start_value = (
+                start_value.get("dateTime")
+                or start_value.get("datetime")
+                or start_value.get("date")
+            )
+
+        return self._format_service_response_datetime(start_value)
+
+    def _format_service_response_datetime(self, value: Any) -> str | None:
+        """Format a service-response date/time value in local time when possible."""
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, date):
+            return value.isoformat()
+        else:
+            parsed = dt_util.parse_datetime(str(value))
+            if parsed is None:
+                return str(value)
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(
+                tzinfo=getattr(dt_util, "DEFAULT_TIME_ZONE", dt_util.now().tzinfo)
+            )
+
+        return self._format_absolute_time(dt_util.as_utc(parsed))
 
     async def resolve_target(self, target: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve target selectors to exposed entity IDs."""

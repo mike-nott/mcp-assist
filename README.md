@@ -37,6 +37,8 @@ Instead of dumping all entities, MCP Assist:
    - `get_entity_details` - Get current entity state and attributes
    - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
    - `perform_action` - Control devices, usually with entity IDs for direct control, or with area/floor/label/device IDs that resolve to exposed entity IDs first
+   - `list_response_services` - Discover which Home Assistant services currently support native structured response data
+   - `call_service_with_response` - Call native Home Assistant services that return structured response data for read/query use cases like weather forecasts, calendar event lookups, media browsing/search, and other response-capable services exposed by your current HA instance
    - `get_entity_history` - Query recorder history as a timeline or just the last matching event with `mode="last_event"`
    - `get_last_entity_event` - Compatibility alias for `get_entity_history(mode="last_event")`
    - `analyze_entity_history` - Use recorder history for aggregate questions like counts, current streaks, durations, and numeric summaries over time
@@ -199,7 +201,7 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 - "Search for the latest Home Assistant updates"
 - "What time does the store close?"
 
-For Home Assistant weather entities, the assistant should first use local entity data via `discover_entities(domain="weather")` and `get_entity_details(...)`. Rich attributes like `forecast` are available through entity details; web search is only a fallback when no suitable local forecast data exists.
+For Home Assistant weather entities, the assistant should first use the native service-response path via `discover_entities(domain="weather")` and `call_service_with_response(domain="weather", service="get_forecasts", ...)`. More generally, response-capable Home Assistant services should be discovered dynamically with `list_response_services(...)` instead of being hardcoded. `get_entity_details(...)` is still useful for current conditions and forecast-attribute fallback, but web search should only be used when no suitable local weather entity or local forecast data is available.
 
 ## Configuration Options
 

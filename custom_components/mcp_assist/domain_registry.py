@@ -240,6 +240,7 @@ DOMAIN_REGISTRY = {
                 ],
             },
         },
+        "response_services": ["browse_media", "search_media"],
         "description": "Control media players and streaming devices",
     },
     "vacuum": {
@@ -584,7 +585,20 @@ DOMAIN_REGISTRY = {
             "get_forecast": {"required": ["type"]},
             "get_forecasts": {"required": ["type"]},
         },
+        "response_services": ["get_forecast", "get_forecasts"],
         "description": "Weather information and forecasts",
+    },
+    "calendar": {
+        "type": TYPE_READ_ONLY,
+        "priority": PRIORITY_SPECIALIZED,
+        "services": ["get_events"],
+        "parameters": {
+            "get_events": {
+                "optional": ["start_date_time", "end_date_time", "duration"]
+            }
+        },
+        "response_services": ["get_events"],
+        "description": "Read calendar events from one or more calendars",
     },
     "sun": {
         "type": TYPE_READ_ONLY,
@@ -848,6 +862,55 @@ def validate_service_parameters(
     return True, "Parameters valid"
 
 
+def get_response_services(domain: str) -> List[str]:
+    """Get response-returning services for a domain."""
+    domain_info = get_domain_info(domain)
+    if not domain_info:
+        return []
+
+    response_services = domain_info.get("response_services")
+    if response_services is not None:
+        return list(response_services)
+
+    if domain_info.get("type") == TYPE_READ_ONLY:
+        return list(domain_info.get("services", []))
+
+    return []
+
+
+def validate_response_service(domain: str, service: str) -> Tuple[bool, str]:
+    """Validate if a service is supported for response-returning reads."""
+    domain_info = get_domain_info(domain)
+
+    if not domain_info:
+        similar = [d for d in DOMAIN_REGISTRY.keys() if domain in d or d in domain]
+        if similar:
+            return (
+                False,
+                f"Domain '{domain}' not supported. Did you mean: {', '.join(similar[:3])}?",
+            )
+        return (
+            False,
+            f"Domain '{domain}' not supported. Use 'list_domains' to see available domains.",
+        )
+
+    available_services = get_response_services(domain)
+    if service in available_services:
+        return True, service
+
+    if available_services:
+        return (
+            False,
+            f"Service '{service}' is not supported for response reads on {domain}. "
+            f"Available: {', '.join(available_services[:5])}",
+        )
+
+    return (
+        False,
+        f"Domain '{domain}' has no supported response-returning read services.",
+    )
+
+
 def get_domains_by_type(domain_type: str) -> List[str]:
     """Get all domains of a specific type.
 
@@ -892,9 +955,11 @@ __all__ = [
     "get_domain_info",
     "get_supported_domains",
     "validate_domain_action",
+    "validate_response_service",
     "map_action_to_service",
     "get_service_parameters",
     "validate_service_parameters",
+    "get_response_services",
     "get_domains_by_type",
     "get_domain_statistics",
     "PRIORITY_ESSENTIAL",

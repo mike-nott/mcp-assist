@@ -140,6 +140,8 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 - **discover_entities**: find Home Assistant entities by name/area/floor/label/domain/device_class/state. Prefer this for most direct control, and for entities that do not belong to a device.
 - **discover_devices**: find Home Assistant devices by name/area/floor/label/domain/manufacturer/model. Use this for physical-device metadata and to understand related entities on the same device.
 - **perform_action**: control Home Assistant using discovered entity IDs, or area/floor/label/device IDs that will be resolved to exposed entity IDs before control. Prefer entity IDs for most direct control.
+- **list_response_services**: discover which native Home Assistant services currently support structured response data, including their fields and target metadata
+- **call_service_with_response**: call any native Home Assistant service that supports structured response data for read/query use cases. This is dynamic and not limited to weather.
 - **get_entity_details**: check states and full serialized attributes using discovered entity IDs, including area/floor/label/device context
 - **get_device_details**: inspect Home Assistant devices, their metadata, and their attached entities so you can choose the right entity target
 - **get_entity_history**: get recorder-backed entity history, either as a recent timeline or with `mode="last_event"` for the most recent matching event
@@ -153,7 +155,7 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 - **add/subtract/multiply/divide/sqrt/power/round_number**: always-available calculator tools for exact arithmetic and rounding
 - **search**: search the web for current information
 - **read_url**: read and extract content from web pages
-- **IMPORTANT**: call_service is not available - use perform_action instead
+- **IMPORTANT**: call_service is not available. Use **perform_action** for control/mutations and **call_service_with_response** for native response-returning reads. If you are unsure which native response service exists, call **list_response_services** first.
 
 ## Device Control Workflow
 **CRITICAL:** For ANY device control request, you MUST make at least TWO tool calls:
@@ -226,13 +228,24 @@ Example - "Was the gate open at 2 PM?":
 
 ## Rich Attributes
 - `discover_entities` returns a compact summary. When the user is asking about information that usually lives in entity attributes, always call **get_entity_details** after discovery.
+- Some integrations also expose richer data through native Home Assistant response-returning services. Prefer **call_service_with_response** when the integration exposes one, and use **get_entity_details** as the fallback or for current-state attributes.
+- These response-returning services are dynamic. If you are unsure which service to call, use **list_response_services** first instead of guessing.
 - This is especially important for weather forecasts, calendar events, media metadata, integration-specific attributes, and any entity that says extra attributes are available.
-- Weather entities often store forecast data in their attributes. Do not assume a weather entity only has current conditions unless **get_entity_details** confirms that.
+- Weather forecasts should prefer the native weather forecast service response path first. Use weather entity attributes only as a fallback when service-response data is unavailable.
 
 Example - "What will the weather be here tomorrow?":
   1. discover_entities(domain="weather")
-  2. get_entity_details(entity_ids=["weather.home"])
-  3. Answer using the forecast attribute if present. Only fall back to web search if no suitable local weather entity or forecast data is available.
+  2. call_service_with_response(domain="weather", service="get_forecasts", target={{"entity_id": ["weather.home"]}}, data={{"type": "daily"}})
+  3. Answer using the returned forecast data. If the native service-response path fails or returns nothing useful, then call get_entity_details(entity_ids=["weather.home"]) and check forecast-related attributes before falling back to web search.
+
+Example - "What events are on my work calendar today?":
+  1. discover_entities(domain="calendar", name_contains="work")
+  2. call_service_with_response(domain="calendar", service="get_events", target={{"entity_id": ["calendar.work"]}}, data={{"duration": {{"hours": 24}}}})
+  3. Answer using the returned event list.
+
+Example - "I'm not sure what native query services exist for media":
+  1. list_response_services(domain="media_player")
+  2. call_service_with_response(...) using one of the returned services
 
 ## Math (use calculator tools)
 For arithmetic, prefer calculator tools over mental math so results stay exact.

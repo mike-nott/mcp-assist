@@ -27,6 +27,11 @@ try:
 except ImportError:  # pragma: no cover - older Home Assistant versions
     lr = None
 
+try:
+    from homeassistant.components.weather import WeatherEntityFeature
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    WeatherEntityFeature = None
+
 from .const import MAX_ENTITIES_PER_DISCOVERY
 
 _LOGGER = logging.getLogger(__name__)
@@ -477,6 +482,30 @@ class SmartDiscovery:
             }
 
         return context
+
+    def _get_weather_forecast_types(self, state_obj: Any) -> List[str]:
+        """Return supported weather forecast types based on supported_features."""
+        if state_obj is None or state_obj.domain != "weather":
+            return []
+        if WeatherEntityFeature is None:
+            forecast = state_obj.attributes.get("forecast")
+            return ["daily"] if isinstance(forecast, (list, tuple)) else []
+
+        supported_features = int(state_obj.attributes.get("supported_features", 0) or 0)
+        forecast_types: List[str] = []
+        if supported_features & WeatherEntityFeature.FORECAST_DAILY:
+            forecast_types.append("daily")
+        if supported_features & WeatherEntityFeature.FORECAST_HOURLY:
+            forecast_types.append("hourly")
+        if supported_features & WeatherEntityFeature.FORECAST_TWICE_DAILY:
+            forecast_types.append("twice_daily")
+
+        if not forecast_types:
+            forecast = state_obj.attributes.get("forecast")
+            if isinstance(forecast, (list, tuple)):
+                forecast_types.append("daily")
+
+        return forecast_types
 
     def _entity_matches_search_term(
         self,
@@ -1437,6 +1466,10 @@ class SmartDiscovery:
 
             if state_obj.domain == "weather":
                 forecast = state_obj.attributes.get("forecast")
+                forecast_types = self._get_weather_forecast_types(state_obj)
+                if forecast_types:
+                    entity_info["forecast_service_supported"] = True
+                    entity_info["forecast_types"] = forecast_types
                 if isinstance(forecast, (list, tuple)):
                     entity_info["forecast_available"] = True
                     entity_info["forecast_entries"] = len(forecast)
@@ -1570,6 +1603,12 @@ class SmartDiscovery:
                 "last_changed": state_obj.last_changed.isoformat(),
                 "last_updated": state_obj.last_updated.isoformat(),
             }
+
+            if state_obj.domain == "weather":
+                forecast_types = self._get_weather_forecast_types(state_obj)
+                if forecast_types:
+                    entity_details["forecast_service_supported"] = True
+                    entity_details["forecast_types"] = forecast_types
 
             if entity_entry:
                 entity_details.update({
