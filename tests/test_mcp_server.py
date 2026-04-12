@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 from aiohttp import ClientSession
 import pytest
+from pytest_socket import disable_socket, enable_socket
 
 from custom_components.mcp_assist.const import (
     CONF_ALLOWED_IPS,
@@ -47,6 +48,7 @@ async def test_server_start_serves_health_endpoint(
     system_entry_factory()
     server = MCPServer(hass, 0, profile_entry_factory())
 
+    enable_socket()
     await server.start()
     try:
         assert server.site is not None
@@ -64,6 +66,7 @@ async def test_server_start_serves_health_endpoint(
         assert payload["tools_available"] > 0
     finally:
         await server.stop()
+        disable_socket()
 
 
 def test_tool_enablement_follows_shared_settings(
