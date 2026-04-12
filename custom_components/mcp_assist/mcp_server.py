@@ -51,11 +51,16 @@ from .const import (
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SEARCH_PROVIDER,
@@ -63,10 +68,15 @@ from .const import (
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_ITEMS,
     TOOL_FAMILY_SHARED_SETTINGS,
     get_optional_tool_family,
 )
@@ -80,6 +90,7 @@ from .domain_registry import (
     TYPE_CONTROLLABLE,
     TYPE_READ_ONLY,
 )
+from .memory_manager import MemoryManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,6 +111,7 @@ class MCPServer:
         self.progress_queues = set()  # Track progress SSE clients
         self._cached_tools_list: dict[str, Any] | None = None
         self._cached_tools_signature: tuple[Any, ...] | None = None
+        self.memory_manager = MemoryManager(hass)
 
         # Extract allowed IPs from LM Studio URL
         self.allowed_ips = ["127.0.0.1", "::1"]  # Always allow localhost
@@ -203,6 +215,15 @@ class MCPServer:
             )
         )
 
+    def _external_custom_tools_enabled(self) -> bool:
+        """Return whether user-defined external custom tool packages are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+            )
+        )
+
     def _weather_forecast_tool_enabled(self) -> bool:
         """Return whether weather forecast MCP helpers are enabled."""
         return bool(
@@ -251,6 +272,52 @@ class MCPServer:
                 CONF_ENABLE_CALCULATOR_TOOLS,
                 DEFAULT_ENABLE_CALCULATOR_TOOLS,
             )
+        )
+
+    def _memory_tools_enabled(self) -> bool:
+        """Return whether persisted memory tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_MEMORY_TOOLS,
+                DEFAULT_ENABLE_MEMORY_TOOLS,
+            )
+        )
+
+    def _memory_default_ttl_days(self) -> int:
+        """Return the default TTL for new memories."""
+        configured_max = self._memory_max_ttl_days()
+        return self._coerce_int_arg(
+            self._get_shared_setting(
+                CONF_MEMORY_DEFAULT_TTL_DAYS,
+                DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+            ),
+            default=DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+            minimum=1,
+            maximum=configured_max,
+        )
+
+    def _memory_max_ttl_days(self) -> int:
+        """Return the maximum TTL allowed for memories."""
+        return self._coerce_int_arg(
+            self._get_shared_setting(
+                CONF_MEMORY_MAX_TTL_DAYS,
+                DEFAULT_MEMORY_MAX_TTL_DAYS,
+            ),
+            default=DEFAULT_MEMORY_MAX_TTL_DAYS,
+            minimum=1,
+            maximum=3650,
+        )
+
+    def _memory_max_items(self) -> int:
+        """Return the maximum number of memories to keep."""
+        return self._coerce_int_arg(
+            self._get_shared_setting(
+                CONF_MEMORY_MAX_ITEMS,
+                DEFAULT_MEMORY_MAX_ITEMS,
+            ),
+            default=DEFAULT_MEMORY_MAX_ITEMS,
+            minimum=10,
+            maximum=5000,
         )
 
     def _unit_conversion_tools_enabled(self) -> bool:
@@ -325,10 +392,12 @@ class MCPServer:
             self._response_service_tools_enabled(),
             self._weather_forecast_tool_enabled(),
             self._recorder_tools_enabled(),
+            self._memory_tools_enabled(),
             self._calculator_tools_enabled(),
             self._unit_conversion_tools_enabled(),
             self._device_tools_enabled(),
             self._music_assistant_support_enabled(),
+            self._external_custom_tools_enabled(),
             custom_tool_names,
         )
 
@@ -367,11 +436,24 @@ class MCPServer:
                 self.custom_tools = CustomToolsLoader(self.hass, self.entry)
                 await self.custom_tools.initialize()
                 _LOGGER.info(
-                    "✅ Custom tools initialized (search provider: %s)",
+                    "✅ Custom tools initialized (search provider: %s, external enabled: %s)",
                     search_provider,
+                    self._external_custom_tools_enabled(),
                 )
             except Exception as e:
                 _LOGGER.error(f"Failed to initialize custom tools: {e}")
+
+            if self._memory_tools_enabled():
+                try:
+                    await self.memory_manager.async_initialize()
+                    _LOGGER.info(
+                        "✅ Memory tools initialized (default ttl: %s days, max ttl: %s days, max items: %s)",
+                        self._memory_default_ttl_days(),
+                        self._memory_max_ttl_days(),
+                        self._memory_max_items(),
+                    )
+                except Exception as err:
+                    _LOGGER.error("Failed to initialize memory tools: %s", err)
 
             _LOGGER.info(
                 "✅ MCP server started successfully on http://0.0.0.0:%d", self.port
@@ -413,6 +495,10 @@ class MCPServer:
             await self.site.stop()
         if self.runner:
             await self.runner.cleanup()
+        if self.custom_tools:
+            await self.custom_tools.shutdown()
+        if self.memory_manager:
+            await self.memory_manager.async_shutdown()
 
     def _is_ip_allowed(self, client_ip: str) -> bool:
         """Check if client IP is in the allowed list.
@@ -491,6 +577,13 @@ class MCPServer:
             "tools_available": len(await self._get_tools_list()),
             "timestamp": dt_util.now().isoformat(),
         }
+        if self.custom_tools:
+            health_info["external_custom_tools_enabled"] = (
+                self._external_custom_tools_enabled()
+            )
+            health_info["external_custom_tools_loaded"] = (
+                self.custom_tools.get_loaded_external_tool_info()
+            )
         return web.json_response(health_info)
 
     async def handle_progress_stream(self, request: web.Request) -> web.StreamResponse:
@@ -1790,6 +1883,88 @@ class MCPServer:
                     "additionalProperties": False,
                 },
             },
+            {
+                "name": "remember_memory",
+                "description": "Store a short fact, preference, or instruction for later recall. Use this only when the user explicitly asks you to remember something. Memories persist across conversations and automatically expire after a TTL.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "memory": {
+                            "type": "string",
+                            "description": "The fact, preference, or instruction to store.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Optional short category such as 'preference', 'household', or 'schedule'.",
+                        },
+                        "ttl_days": {
+                            "type": "integer",
+                            "description": "Optional retention time in days. If omitted, the shared default TTL is used and capped by the shared maximum TTL.",
+                            "minimum": 1,
+                            "maximum": 3650,
+                        },
+                    },
+                    "required": ["memory"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "recall_memories",
+                "description": "Search active stored memories by query or category, or list recent memories when no query is given. Use this for requests like 'what do you remember about my coffee preference?'",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Optional search text to match against stored memory text.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Optional category filter.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of memories to return (default: 5).",
+                            "minimum": 1,
+                            "maximum": 50,
+                            "default": 5,
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "forget_memory",
+                "description": "Delete one stored memory by id or by query/category match. Use this when the user asks you to forget or update something previously remembered.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "memory_id": {
+                            "type": "string",
+                            "description": "Specific memory id to delete.",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search text to find a memory to delete when the id is not known.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Optional category filter when deleting by query.",
+                        },
+                        "forget_all_matches": {
+                            "type": "boolean",
+                            "description": "Delete every matching memory instead of only the best match.",
+                            "default": False,
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
             ]
         )
 
@@ -1876,6 +2051,12 @@ class MCPServer:
             return await self.tool_analyze_entity_history(arguments)
         elif tool_name == "get_entity_state_at_time":
             return await self.tool_get_entity_state_at_time(arguments)
+        elif tool_name == "remember_memory":
+            return await self.tool_remember_memory(arguments)
+        elif tool_name == "recall_memories":
+            return await self.tool_recall_memories(arguments)
+        elif tool_name == "forget_memory":
+            return await self.tool_forget_memory(arguments)
         else:
             # Check if it's a custom tool
             if self.custom_tools and self.custom_tools.is_custom_tool(tool_name):
@@ -4669,6 +4850,217 @@ class MCPServer:
                     ),
                 }
             ]
+        }
+
+    async def tool_remember_memory(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Store a persisted memory with TTL."""
+        memory_text = " ".join(str(args.get("memory") or "").split()).strip()
+        if not memory_text:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Memory text is required.",
+                    }
+                ],
+                "isError": True,
+            }
+
+        ttl_days = args.get("ttl_days")
+        category = args.get("category")
+        self.publish_progress(
+            "tool_start",
+            "Storing memory",
+            tool="remember_memory",
+        )
+
+        try:
+            stored = await self.memory_manager.remember(
+                memory_text,
+                default_ttl_days=self._memory_default_ttl_days(),
+                max_ttl_days=self._memory_max_ttl_days(),
+                ttl_days=None if ttl_days is None else self._coerce_int_arg(
+                    ttl_days,
+                    default=self._memory_default_ttl_days(),
+                    minimum=1,
+                    maximum=self._memory_max_ttl_days(),
+                ),
+                category=category,
+                max_items=self._memory_max_items(),
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to store memory: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to store memory: {err}"}],
+                "isError": True,
+            }
+
+        self.publish_progress(
+            "tool_complete",
+            "Memory stored",
+            tool="remember_memory",
+            memory_id=stored["id"],
+        )
+
+        expires_at = dt_util.parse_datetime(stored["expires_at"])
+        expires_text = (
+            self._format_relative_absolute_time(expires_at)
+            if expires_at is not None
+            else "later"
+        )
+        category_text = (
+            f" Category: {stored['category']}."
+            if stored.get("category")
+            else ""
+        )
+        prune_text = (
+            f" {stored['pruned_count']} old memories were pruned to stay within the configured limit."
+            if stored.get("pruned_count")
+            else ""
+        )
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Stored memory [{stored['id']}].{category_text} "
+                        f"It expires {expires_text}.{prune_text}"
+                    ),
+                }
+            ],
+            "memory": stored,
+        }
+
+    async def tool_recall_memories(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Recall stored memories by query or category."""
+        limit = self._coerce_int_arg(
+            args.get("limit"),
+            default=5,
+            minimum=1,
+            maximum=50,
+        )
+        query = args.get("query")
+        category = args.get("category")
+
+        self.publish_progress(
+            "tool_start",
+            "Searching stored memories",
+            tool="recall_memories",
+        )
+
+        try:
+            result = await self.memory_manager.recall(
+                query=None if query is None else str(query),
+                category=None if category is None else str(category),
+                limit=limit,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to recall memories: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to recall memories: {err}"}],
+                "isError": True,
+            }
+
+        items = result["items"]
+        self.publish_progress(
+            "tool_complete",
+            "Memory recall complete",
+            tool="recall_memories",
+            count=result["returned_count"],
+            total=result["total_found"],
+        )
+
+        if not items:
+            return {
+                "content": [{"type": "text", "text": "No active memories matched."}],
+                "memories": [],
+                "result_count": 0,
+            }
+
+        header = (
+            f"Found {result['returned_count']} of {result['total_found']} active memories:"
+            if result["remaining_count"] > 0
+            else f"Found {result['returned_count']} active memories:"
+        )
+        lines = [header]
+        for memory in items:
+            expires_at = dt_util.parse_datetime(str(memory.get("expires_at") or ""))
+            expires_text = (
+                self._format_relative_absolute_time(expires_at)
+                if expires_at is not None
+                else "later"
+            )
+            category_text = (
+                f" [{memory['category']}]" if memory.get("category") else ""
+            )
+            lines.append(
+                f"- {memory['id']}{category_text}: {memory['text']} (expires {expires_text})"
+            )
+        if result["remaining_count"] > 0:
+            lines.append(f"{result['remaining_count']} more memories matched but were not shown.")
+
+        return {
+            "content": [{"type": "text", "text": "\n".join(lines)}],
+            "memories": items,
+            "result_count": result["total_found"],
+        }
+
+    async def tool_forget_memory(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete stored memories by id or query."""
+        memory_id = args.get("memory_id")
+        query = args.get("query")
+        category = args.get("category")
+        forget_all_matches = bool(args.get("forget_all_matches", False))
+
+        self.publish_progress(
+            "tool_start",
+            "Deleting stored memory",
+            tool="forget_memory",
+        )
+
+        try:
+            result = await self.memory_manager.forget(
+                memory_id=None if memory_id is None else str(memory_id),
+                query=None if query is None else str(query),
+                category=None if category is None else str(category),
+                delete_all_matches=forget_all_matches,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to forget memory: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to forget memory: {err}"}],
+                "isError": True,
+            }
+
+        self.publish_progress(
+            "tool_complete",
+            "Memory deletion complete",
+            tool="forget_memory",
+            deleted=result["deleted_count"],
+        )
+
+        if result["deleted_count"] == 0:
+            return {
+                "content": [{"type": "text", "text": "No matching memories were deleted."}],
+                "deleted_count": 0,
+                "deleted": [],
+            }
+
+        deleted = result["deleted"]
+        lines = [f"Deleted {result['deleted_count']} memory item(s):"]
+        for memory in deleted[:10]:
+            category_text = (
+                f" [{memory['category']}]" if memory.get("category") else ""
+            )
+            lines.append(f"- {memory['id']}{category_text}: {memory['text']}")
+        if len(deleted) > 10:
+            lines.append(f"{len(deleted) - 10} additional deleted memories were omitted.")
+
+        return {
+            "content": [{"type": "text", "text": "\n".join(lines)}],
+            "deleted_count": result["deleted_count"],
+            "deleted": deleted,
         }
 
     def _extract_history_states(

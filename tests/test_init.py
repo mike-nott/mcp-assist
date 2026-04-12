@@ -20,7 +20,9 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
@@ -29,6 +31,9 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
     CONF_MCP_PORT,
     CONF_PROFILE_NAME,
     CONF_SEARCH_PROVIDER,
@@ -93,10 +98,15 @@ async def test_ensure_system_entry_copies_shared_settings_from_first_profile(
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
             CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
+            CONF_ENABLE_MEMORY_TOOLS: True,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
             CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
             CONF_ENABLE_DEVICE_TOOLS: False,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
             CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: True,
+            CONF_MEMORY_DEFAULT_TTL_DAYS: 14,
+            CONF_MEMORY_MAX_TTL_DAYS: 90,
+            CONF_MEMORY_MAX_ITEMS: 250,
         },
     )
 
@@ -118,7 +128,12 @@ async def test_ensure_system_entry_copies_shared_settings_from_first_profile(
     assert system_entry.data[CONF_ENABLE_DEVICE_TOOLS] is False
     assert system_entry.data[CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT] is True
     assert system_entry.data[CONF_ENABLE_WEATHER_FORECAST_TOOL] is False
+    assert system_entry.data[CONF_ENABLE_MEMORY_TOOLS] is True
     assert system_entry.data[CONF_ENABLE_UNIT_CONVERSION_TOOLS] is True
+    assert system_entry.data[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS] is True
+    assert system_entry.data[CONF_MEMORY_DEFAULT_TTL_DAYS] == 14
+    assert system_entry.data[CONF_MEMORY_MAX_TTL_DAYS] == 90
+    assert system_entry.data[CONF_MEMORY_MAX_ITEMS] == 250
 
 
 @pytest.mark.asyncio
@@ -137,7 +152,12 @@ async def test_ensure_system_entry_uses_defaults_without_profiles(hass) -> None:
     assert CONF_INCLUDE_HOME_LOCATION in system_entry.data
     assert system_entry.data[CONF_ENABLE_DEVICE_TOOLS] == DEFAULT_ENABLE_DEVICE_TOOLS
     assert CONF_ENABLE_WEATHER_FORECAST_TOOL in system_entry.data
+    assert CONF_ENABLE_MEMORY_TOOLS in system_entry.data
     assert CONF_ENABLE_UNIT_CONVERSION_TOOLS in system_entry.data
+    assert CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS in system_entry.data
+    assert CONF_MEMORY_DEFAULT_TTL_DAYS in system_entry.data
+    assert CONF_MEMORY_MAX_TTL_DAYS in system_entry.data
+    assert CONF_MEMORY_MAX_ITEMS in system_entry.data
 
 
 @pytest.mark.asyncio

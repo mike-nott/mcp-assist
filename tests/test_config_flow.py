@@ -15,12 +15,14 @@ from custom_components.mcp_assist.config_flow import (
     DISABLE_ASSIST_BRIDGE_FIELD,
     DISABLE_CALCULATOR_FIELD,
     DISABLE_DEVICE_FIELD,
+    DISABLE_MEMORY_FIELD,
     DISABLE_MUSIC_ASSISTANT_FIELD,
     DISABLE_RECORDER_FIELD,
     DISABLE_RESPONSE_SERVICE_FIELD,
     DISABLE_UNIT_CONVERSION_FIELD,
     DISABLE_WEB_SEARCH_FIELD,
     DISABLE_WEATHER_FORECAST_FIELD,
+    MEMORY_SECTION_KEY,
     MCPAssistConfigFlow,
     MCPAssistOptionsFlow,
     MODEL_SECTION_KEY,
@@ -39,9 +41,11 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEB_SEARCH,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
@@ -49,6 +53,9 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
     CONF_MCP_PORT,
     CONF_LMSTUDIO_URL,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
@@ -275,6 +282,7 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
         DISABLE_ASSIST_BRIDGE_FIELD,
         DISABLE_CALCULATOR_FIELD,
         DISABLE_DEVICE_FIELD,
+        DISABLE_MEMORY_FIELD,
         DISABLE_MUSIC_ASSISTANT_FIELD,
         DISABLE_RECORDER_FIELD,
         DISABLE_RESPONSE_SERVICE_FIELD,
@@ -295,10 +303,12 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
 
     context_section = result["data_schema"].schema[CONTEXT_SECTION_KEY]
     discovery_section = result["data_schema"].schema[DISCOVERY_SECTION_KEY]
+    memory_section = result["data_schema"].schema[MEMORY_SECTION_KEY]
     tools_section = result["data_schema"].schema[TOOLS_SECTION_KEY]
 
     assert isinstance(context_section, section)
     assert isinstance(discovery_section, section)
+    assert isinstance(memory_section, section)
     assert isinstance(tools_section, section)
 
     context_keys = {
@@ -306,6 +316,9 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     discovery_keys = {
         getattr(key, "schema", key) for key in discovery_section.schema.schema.keys()
+    }
+    memory_keys = {
+        getattr(key, "schema", key) for key in memory_section.schema.schema.keys()
     }
     tool_keys = [
         getattr(key, "schema", key) for key in tools_section.schema.schema.keys()
@@ -319,10 +332,17 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
         CONF_ENABLE_GAP_FILLING,
         CONF_MAX_ENTITIES_PER_DISCOVERY,
     }
+    assert memory_keys == {
+        CONF_MEMORY_DEFAULT_TTL_DAYS,
+        CONF_MEMORY_MAX_TTL_DAYS,
+        CONF_MEMORY_MAX_ITEMS,
+    }
     assert tool_keys == [
         CONF_ENABLE_ASSIST_BRIDGE,
         CONF_ENABLE_CALCULATOR_TOOLS,
+        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
         CONF_ENABLE_DEVICE_TOOLS,
+        CONF_ENABLE_MEMORY_TOOLS,
         CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
         CONF_ENABLE_RECORDER_TOOLS,
         CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
@@ -332,6 +352,12 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
         CONF_SEARCH_PROVIDER,
         CONF_BRAVE_API_KEY,
     ]
+    tool_markers = {
+        getattr(marker, "schema", marker): marker
+        for marker in tools_section.schema.schema.keys()
+    }
+    external_default = tool_markers[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS].default
+    assert external_default() is False if callable(external_default) else external_default is False
 
 
 async def test_options_step_groups_profile_settings_into_sections(

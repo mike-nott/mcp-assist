@@ -48,6 +48,7 @@ from .const import (
     CONF_MAX_ITERATIONS,
     CONF_DEBUG_MODE,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
     CONF_INCLUDE_CURRENT_USER,
@@ -59,10 +60,14 @@ from .const import (
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
     CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
@@ -111,10 +116,15 @@ from .const import (
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
     DEFAULT_FOLLOW_UP_PHRASES,
@@ -125,6 +135,7 @@ from .const import (
     TOOL_FAMILY_CALCULATOR,
     TOOL_FAMILY_DEVICE,
     TOOL_FAMILY_MUSIC_ASSISTANT,
+    TOOL_FAMILY_MEMORY,
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
@@ -257,6 +268,7 @@ def _optional_with_suggested_value(key: str, suggested_value: str | None) -> vol
 TOOLS_SECTION_KEY = "tools"
 DISCOVERY_SECTION_KEY = "discovery"
 CONTEXT_SECTION_KEY = "context"
+MEMORY_SECTION_KEY = "memory"
 PROFILE_SECTION_KEY = "profile"
 CONNECTION_SECTION_KEY = "connection"
 MODEL_SECTION_KEY = "model_fields"
@@ -268,6 +280,7 @@ ADVANCED_SECTION_KEY = "advanced_settings"
 DISABLE_ASSIST_BRIDGE_FIELD = "disable_assist_bridge"
 DISABLE_CALCULATOR_FIELD = "disable_calculator"
 DISABLE_DEVICE_FIELD = "disable_device"
+DISABLE_MEMORY_FIELD = "disable_memory"
 DISABLE_MUSIC_ASSISTANT_FIELD = "disable_music_assistant"
 DISABLE_RECORDER_FIELD = "disable_recorder"
 DISABLE_RESPONSE_SERVICE_FIELD = "disable_response_service"
@@ -279,6 +292,7 @@ TOOL_FAMILY_ALPHABETICAL = [
     TOOL_FAMILY_ASSIST_BRIDGE,
     TOOL_FAMILY_CALCULATOR,
     TOOL_FAMILY_DEVICE,
+    TOOL_FAMILY_MEMORY,
     TOOL_FAMILY_MUSIC_ASSISTANT,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
@@ -291,6 +305,7 @@ PROFILE_DISABLE_FIELD_BY_FAMILY = {
     TOOL_FAMILY_ASSIST_BRIDGE: DISABLE_ASSIST_BRIDGE_FIELD,
     TOOL_FAMILY_CALCULATOR: DISABLE_CALCULATOR_FIELD,
     TOOL_FAMILY_DEVICE: DISABLE_DEVICE_FIELD,
+    TOOL_FAMILY_MEMORY: DISABLE_MEMORY_FIELD,
     TOOL_FAMILY_MUSIC_ASSISTANT: DISABLE_MUSIC_ASSISTANT_FIELD,
     TOOL_FAMILY_RECORDER: DISABLE_RECORDER_FIELD,
     TOOL_FAMILY_RESPONSE_SERVICE: DISABLE_RESPONSE_SERVICE_FIELD,
@@ -389,6 +404,26 @@ def _normalize_shared_tool_inputs(user_input: dict[str, Any]) -> dict[str, Any]:
     else:
         normalized[CONF_SEARCH_PROVIDER] = search_provider
 
+    memory_max_ttl = normalized.get(
+        CONF_MEMORY_MAX_TTL_DAYS,
+        DEFAULT_MEMORY_MAX_TTL_DAYS,
+    )
+    try:
+        memory_max_ttl = max(1, int(memory_max_ttl))
+    except (TypeError, ValueError):
+        memory_max_ttl = DEFAULT_MEMORY_MAX_TTL_DAYS
+    normalized[CONF_MEMORY_MAX_TTL_DAYS] = memory_max_ttl
+
+    memory_default_ttl = normalized.get(
+        CONF_MEMORY_DEFAULT_TTL_DAYS,
+        DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    )
+    try:
+        memory_default_ttl = int(memory_default_ttl)
+    except (TypeError, ValueError):
+        memory_default_ttl = DEFAULT_MEMORY_DEFAULT_TTL_DAYS
+    normalized[CONF_MEMORY_DEFAULT_TTL_DAYS] = max(1, min(memory_default_ttl, memory_max_ttl))
+
     return normalized
 
 
@@ -430,6 +465,17 @@ def _build_shared_tools_section(
                 default=_get_form_value(defaults, setting_key, default),
             )
         ] = bool
+        if family == TOOL_FAMILY_CALCULATOR:
+            shared_tool_fields[
+                vol.Optional(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    default=_get_form_value(
+                        defaults,
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    ),
+                )
+            ] = bool
 
     return section(
         vol.Schema(
@@ -496,6 +542,29 @@ def _build_shared_context_section(defaults: dict[str, Any]) -> section:
                     CONF_INCLUDE_HOME_LOCATION,
                     default=defaults[CONF_INCLUDE_HOME_LOCATION],
                 ): bool,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_memory_section(defaults: dict[str, Any]) -> section:
+    """Build shared persisted-memory settings."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MEMORY_DEFAULT_TTL_DAYS,
+                    default=defaults[CONF_MEMORY_DEFAULT_TTL_DAYS],
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                vol.Optional(
+                    CONF_MEMORY_MAX_TTL_DAYS,
+                    default=defaults[CONF_MEMORY_MAX_TTL_DAYS],
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                vol.Optional(
+                    CONF_MEMORY_MAX_ITEMS,
+                    default=defaults[CONF_MEMORY_MAX_ITEMS],
+                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=5000)),
             }
         ),
         {"collapsed": False},
@@ -1410,7 +1479,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, CONTEXT_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input,
+                CONTEXT_SECTION_KEY,
+                DISCOVERY_SECTION_KEY,
+                MEMORY_SECTION_KEY,
+                TOOLS_SECTION_KEY,
             )
             user_input = _normalize_shared_tool_inputs(user_input)
             current_values = user_input
@@ -1545,6 +1618,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ENABLE_RECORDER_TOOLS,
                 DEFAULT_ENABLE_RECORDER_TOOLS,
             ),
+            CONF_ENABLE_MEMORY_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_MEMORY_TOOLS,
+                DEFAULT_ENABLE_MEMORY_TOOLS,
+            ),
             CONF_ENABLE_CALCULATOR_TOOLS: _get_form_value(
                 current_values,
                 CONF_ENABLE_CALCULATOR_TOOLS,
@@ -1569,6 +1647,26 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
                 DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
             ),
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+            ),
+            CONF_MEMORY_DEFAULT_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_DEFAULT_TTL_DAYS,
+                DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+            ),
+            CONF_MEMORY_MAX_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_TTL_DAYS,
+                DEFAULT_MEMORY_MAX_TTL_DAYS,
+            ),
+            CONF_MEMORY_MAX_ITEMS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_ITEMS,
+                DEFAULT_MEMORY_MAX_ITEMS,
+            ),
         }
 
         # Build schema for MCP server settings
@@ -1588,6 +1686,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): str,
                 CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
+                MEMORY_SECTION_KEY: _build_shared_memory_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
             }
         )
@@ -2190,7 +2289,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, CONTEXT_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input,
+                CONTEXT_SECTION_KEY,
+                DISCOVERY_SECTION_KEY,
+                MEMORY_SECTION_KEY,
+                TOOLS_SECTION_KEY,
             )
             user_input = _normalize_shared_tool_inputs(user_input)
             current_values = user_input
@@ -2362,6 +2465,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ),
             ),
+            CONF_ENABLE_MEMORY_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_MEMORY_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_MEMORY_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_MEMORY_TOOLS,
+                        DEFAULT_ENABLE_MEMORY_TOOLS,
+                    ),
+                ),
+            ),
             CONF_ENABLE_CALCULATOR_TOOLS: _get_form_value(
                 current_values,
                 CONF_ENABLE_CALCULATOR_TOOLS,
@@ -2411,6 +2525,50 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ),
             ),
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_MEMORY_DEFAULT_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_DEFAULT_TTL_DAYS,
+                sys_options.get(
+                    CONF_MEMORY_DEFAULT_TTL_DAYS,
+                    sys_data.get(
+                        CONF_MEMORY_DEFAULT_TTL_DAYS,
+                        DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+                    ),
+                ),
+            ),
+            CONF_MEMORY_MAX_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_TTL_DAYS,
+                sys_options.get(
+                    CONF_MEMORY_MAX_TTL_DAYS,
+                    sys_data.get(
+                        CONF_MEMORY_MAX_TTL_DAYS,
+                        DEFAULT_MEMORY_MAX_TTL_DAYS,
+                    ),
+                ),
+            ),
+            CONF_MEMORY_MAX_ITEMS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_ITEMS,
+                sys_options.get(
+                    CONF_MEMORY_MAX_ITEMS,
+                    sys_data.get(
+                        CONF_MEMORY_MAX_ITEMS,
+                        DEFAULT_MEMORY_MAX_ITEMS,
+                    ),
+                ),
+            ),
             CONF_MAX_ENTITIES_PER_DISCOVERY: _get_form_value(
                 current_values,
                 CONF_MAX_ENTITIES_PER_DISCOVERY,
@@ -2451,6 +2609,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 ): str,
                 CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
+                MEMORY_SECTION_KEY: _build_shared_memory_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
             }
         )

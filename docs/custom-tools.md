@@ -1,0 +1,244 @@
+# External Custom Tools for MCP Assist
+
+MCP Assist can load additional MCP tool packages from your Home Assistant config directory.
+
+This is intended for advanced users who want to:
+
+- expose integration-specific read helpers
+- add custom component behavior
+- bundle local house-specific helper logic
+- extend MCP Assist without forking the integration
+
+It also keeps user extensions out of the HACS-managed integration directory, which is the recommended upgrade-safe pattern for Home Assistant customizations.
+
+## Safety Model
+
+External custom tools are intentionally **safe by default**:
+
+- Disabled by default in the shared MCP server settings
+- Loaded only from `<home-assistant-config>/mcp-assist-tools`
+- Skipped when invalid instead of crashing the MCP server
+- Cannot override built-in MCP Assist tool names
+- Must use namespaced tool names
+- Cannot load from symlinked package directories
+- Cannot reference entrypoint modules or prompt files outside the package directory
+
+Important: once enabled, these packages run as Python code inside Home Assistant. Only install or write packages you trust.
+
+## How to Enable
+
+1. Create one or more tool packages under `<home-assistant-config>/mcp-assist-tools`
+2. In MCP Assist shared MCP server settings, enable **Custom Tools**
+3. Reload the integration or restart Home Assistant
+
+When enabled, MCP Assist will:
+
+- discover valid packages at startup
+- expose their MCP tools alongside built-in tools
+- append short tool-specific prompt guidance when provided
+
+## Directory Layout
+
+Each tool package lives in its own folder:
+
+```text
+<home-assistant-config>/
+  mcp-assist-tools/
+    my_tool/
+      manifest.json
+      tool.py
+      prompt.md
+```
+
+Rules:
+
+- The package folder name must match the manifest `id`
+- Hidden folders and `__*` folders are ignored
+- Symlinked package folders are rejected
+
+## Manifest Format
+
+Each package must contain a `manifest.json`.
+
+Current schema:
+
+```json
+{
+  "schema_version": 1,
+  "id": "my_tool",
+  "name": "My Tool",
+  "description": "Short description of what this package adds.",
+  "version": "1.0.0",
+  "entrypoint": "tool:MyTool",
+  "capabilities": [
+    "Optional short capability summary shown to the model"
+  ],
+  "prompt_append_file": "prompt.md"
+}
+```
+
+### Manifest Fields
+
+- `schema_version`
+  - Required
+  - Must currently be `1`
+- `id`
+  - Required
+  - Lowercase letters, numbers, and underscores only
+  - Must match the package folder name
+- `name`
+  - Required
+  - Human-readable package name
+- `description`
+  - Required
+  - Human-readable package description
+- `version`
+  - Required
+  - Free-form version string
+- `entrypoint`
+  - Required
+  - Must be in `module:ClassName` format
+- `capabilities`
+  - Optional
+  - List of short strings describing what the package can do
+- `prompt_append_file`
+  - Optional
+  - Relative file path inside the package
+  - Used to append compact technical guidance for the model
+
+## Python API
+
+Custom tools should import the stable MCP Assist tool API:
+
+```python
+from custom_components.mcp_assist.custom_tool_api import MCPAssistExternalTool
+```
+
+The entrypoint class must subclass `MCPAssistExternalTool`.
+
+### Required methods
+
+- `get_tool_definitions(self) -> list[dict[str, Any]]`
+- `handle_call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]`
+
+### Optional hooks
+
+- `initialize(self) -> None`
+- `async_shutdown(self) -> None`
+- `get_prompt_instructions(self) -> str`
+
+## Tool Definition Rules
+
+Each tool definition must:
+
+- be an MCP tool definition object
+- include `name`
+- include `description`
+- include `inputSchema`
+
+Tool names must:
+
+- contain only letters, numbers, `_`, or `-`
+- be namespaced with the manifest id
+- start with `<id>_`
+
+Example:
+
+- valid: `my_tool_status`
+- invalid: `status`
+- invalid: `discover_entities`
+
+MCP Assist rejects tool-name collisions with built-in tools or other external packages.
+
+## Prompt Guidance
+
+External tools can teach the model how to use them in two ways:
+
+1. Static text file via `prompt_append_file`
+2. Dynamic text from `get_prompt_instructions()`
+
+These appendices should be:
+
+- short
+- procedural
+- tool-usage focused
+
+They should not:
+
+- restate the entire system prompt
+- include long examples unless absolutely necessary
+- dump large environment-specific data
+
+MCP Assist automatically truncates overly long external prompt additions to keep context usage small.
+
+## Return Format
+
+`handle_call()` should return standard MCP tool results, for example:
+
+```python
+return {
+    "content": [
+        {"type": "text", "text": "Kitchen scene is active."}
+    ],
+    "isError": False,
+}
+```
+
+For errors, prefer returning a normal tool error result instead of raising when the failure is expected:
+
+```python
+return {
+    "content": [
+        {"type": "text", "text": "Scene is not available right now."}
+    ],
+    "isError": True,
+}
+```
+
+## Best Practices
+
+Follow these guidelines to keep packages portable and maintainable:
+
+- Prefer small, narrow tools over one huge catch-all tool
+- Use Home Assistant APIs and current state instead of hardcoded assumptions
+- Keep tool names stable
+- Keep prompt additions concise
+- Use async-safe Home Assistant patterns
+- Avoid blocking I/O in tool calls
+- Avoid installing or expecting third-party Python dependencies
+- Do not assume a specific entity ID, area name, floor name, or user
+- Return structured, factual results and let the model phrase them naturally
+
+## Example Package
+
+A working example lives here:
+
+- [docs/examples/mcp-assist-tools/sample_tool/manifest.json](examples/mcp-assist-tools/sample_tool/manifest.json)
+- [docs/examples/mcp-assist-tools/sample_tool/tool.py](examples/mcp-assist-tools/sample_tool/tool.py)
+- [docs/examples/mcp-assist-tools/sample_tool/prompt.md](examples/mcp-assist-tools/sample_tool/prompt.md)
+
+## Troubleshooting
+
+### My custom tools do not appear
+
+Check:
+
+- **Custom Tools** is enabled in shared MCP server settings
+- the package lives under `<home-assistant-config>/mcp-assist-tools/<tool_id>/`
+- the folder name matches the manifest `id`
+- the manifest uses `schema_version: 1`
+- the tool names are properly prefixed with `<tool_id>_`
+- Home Assistant logs for `Failed to load external custom tool package`
+
+### My tool package loads but the model never uses it
+
+Check:
+
+- the tool description is clear and action-oriented
+- the package adds concise prompt guidance
+- the tool is narrow enough for the model to choose confidently
+- the tool name and description match the user intent it should handle
+
+### Can packages add profile-specific settings?
+
+Not today. External custom tools are shared MCP server extensions. If you need per-profile behavior, handle that inside the tool logic based on Home Assistant state or add future package-level configuration support in a backward-compatible way.

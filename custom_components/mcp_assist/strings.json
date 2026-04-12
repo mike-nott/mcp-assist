@@ -143,6 +143,7 @@
               "disable_assist_bridge": "Disable Assist Bridge",
               "disable_calculator": "Disable Calculator",
               "disable_device": "Disable Device Tools",
+              "disable_memory": "Disable Memory",
               "disable_music_assistant": "Disable Music Assistant",
               "disable_recorder": "Disable Recorder History",
               "disable_response_service": "Disable Response Service Reads",
@@ -154,6 +155,7 @@
               "disable_assist_bridge": "Prevents this profile from using Home Assistant's native Assist tools, prompt, and context snapshot.",
               "disable_calculator": "Prevents this profile from using math and expression-evaluation tools.",
               "disable_device": "Prevents this profile from discovering physical devices and device details.",
+              "disable_memory": "Prevents this profile from storing, recalling, or forgetting shared persisted memories.",
               "disable_music_assistant": "Prevents this profile from using Music Assistant search, queue, library, and playback tools.",
               "disable_recorder": "Prevents this profile from using recorder-backed history, count, duration, and point-in-time tools.",
               "disable_response_service": "Prevents this profile from using Home Assistant services that return structured data, such as calendar and forecast reads.",
@@ -200,13 +202,29 @@
               "max_entities_per_discovery": "Caps how many entities a single discovery call may return."
             }
           },
+          "memory": {
+            "name": "Memory",
+            "description": "Configure how long shared persisted memories are kept when the Memory tool is enabled.",
+            "data": {
+              "memory_default_ttl_days": "Default Memory TTL (Days)",
+              "memory_max_ttl_days": "Max Memory TTL (Days)",
+              "memory_max_items": "Max Stored Memories"
+            },
+            "data_description": {
+              "memory_default_ttl_days": "Default number of days a new memory is kept when the tool call does not provide ttl_days.",
+              "memory_max_ttl_days": "Maximum number of days any stored memory may be retained.",
+              "memory_max_items": "Upper bound on active stored memories. Oldest memories are pruned first when this limit is exceeded."
+            }
+          },
           "tools": {
             "name": "Tools",
             "description": "Enable or disable optional tool capabilities exposed by the shared MCP server.",
             "data": {
               "enable_assist_bridge": "Assist Bridge",
               "enable_calculator_tools": "Calculator",
+              "enable_external_custom_tools": "Custom Tools",
               "enable_device_tools": "Device Tools",
+              "enable_memory_tools": "Memory",
               "enable_music_assistant_support": "Music Assistant",
               "enable_recorder_tools": "Recorder History",
               "enable_response_service_tools": "Response Service Reads",
@@ -219,7 +237,9 @@
             "data_description": {
               "enable_assist_bridge": "Expose Home Assistant's native Assist tools, prompt, and context snapshot.",
               "enable_calculator_tools": "Expose math and expression-evaluation tools.",
+              "enable_external_custom_tools": "Load additional local tool packages from the Home Assistant config directory under mcp-assist-tools. Disabled by default. Only enable trusted packages because they run as Python code inside Home Assistant and may add MCP tools plus short prompt guidance.",
               "enable_device_tools": "Expose physical-device discovery and device detail tools.",
+              "enable_memory_tools": "Expose shared persisted memory tools so the assistant can remember, recall, and forget user-approved facts and preferences with TTL-based expiry.",
               "enable_music_assistant_support": "Expose Music Assistant search, queue, library, and playback tools.",
               "enable_recorder_tools": "Expose recorder-backed history, analysis, and point-in-time tools.",
               "enable_response_service_tools": "Expose Home Assistant services that return structured data, such as calendar and forecast reads.",
@@ -376,6 +396,7 @@
               "disable_assist_bridge": "Disable Assist Bridge",
               "disable_calculator": "Disable Calculator",
               "disable_device": "Disable Device Tools",
+              "disable_memory": "Disable Memory",
               "disable_music_assistant": "Disable Music Assistant",
               "disable_recorder": "Disable Recorder History",
               "disable_response_service": "Disable Response Service Reads",
@@ -388,6 +409,7 @@
               "disable_calculator": "Prevents this profile from using math and expression-evaluation tools.",
               "disable_unit_conversion": "Prevents this profile from using exact unit-conversion tools such as °C to °F, distance, storage, and data-rate conversions.",
               "disable_device": "Prevents this profile from discovering physical devices and device details.",
+              "disable_memory": "Prevents this profile from storing, recalling, or forgetting shared persisted memories.",
               "disable_music_assistant": "Prevents this profile from using Music Assistant search, queue, library, and playback tools.",
               "disable_recorder": "Prevents this profile from using recorder-backed history, count, duration, and point-in-time tools.",
               "disable_response_service": "Prevents this profile from using Home Assistant services that return structured data, such as calendar and forecast reads.",
@@ -433,13 +455,29 @@
               "max_entities_per_discovery": "Caps how many entities a single discovery call may return."
             }
           },
+          "memory": {
+            "name": "Memory",
+            "description": "Configure how long shared persisted memories are kept when the Memory tool is enabled.",
+            "data": {
+              "memory_default_ttl_days": "Default Memory TTL (Days)",
+              "memory_max_ttl_days": "Max Memory TTL (Days)",
+              "memory_max_items": "Max Stored Memories"
+            },
+            "data_description": {
+              "memory_default_ttl_days": "Default number of days a new memory is kept when the tool call does not provide ttl_days.",
+              "memory_max_ttl_days": "Maximum number of days any stored memory may be retained.",
+              "memory_max_items": "Upper bound on active stored memories. Oldest memories are pruned first when this limit is exceeded."
+            }
+          },
           "tools": {
             "name": "Tools",
             "description": "Enable or disable optional tool capabilities exposed by the shared MCP server.",
             "data": {
               "enable_assist_bridge": "Assist Bridge",
               "enable_calculator_tools": "Calculator",
+              "enable_external_custom_tools": "Custom Tools",
               "enable_device_tools": "Device Tools",
+              "enable_memory_tools": "Memory",
               "enable_music_assistant_support": "Music Assistant",
               "enable_recorder_tools": "Recorder History",
               "enable_response_service_tools": "Response Service Reads",
@@ -452,8 +490,10 @@
             "data_description": {
               "enable_assist_bridge": "Expose Home Assistant's native Assist tools, prompt, and context snapshot.",
               "enable_calculator_tools": "Expose math and expression-evaluation tools.",
+              "enable_external_custom_tools": "Load additional local tool packages from the Home Assistant config directory under mcp-assist-tools. Disabled by default. Only enable trusted packages because they run as Python code inside Home Assistant and may add MCP tools plus short prompt guidance.",
               "enable_unit_conversion_tools": "Expose exact unit-conversion tools such as °C to °F, distance, storage, and data-rate conversions.",
               "enable_device_tools": "Expose physical-device discovery and device detail tools.",
+              "enable_memory_tools": "Expose shared persisted memory tools so the assistant can remember, recall, and forget user-approved facts and preferences with TTL-based expiry.",
               "enable_music_assistant_support": "Expose Music Assistant search, queue, library, and playback tools.",
               "enable_recorder_tools": "Expose recorder-backed history, analysis, and point-in-time tools.",
               "enable_response_service_tools": "Expose Home Assistant services that return structured data, such as calendar and forecast reads.",

@@ -16,6 +16,7 @@ from .const import (
     CONF_TECHNICAL_PROMPT,
     CONF_PROFILE_NAME,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
     CONF_INCLUDE_CURRENT_USER,
@@ -27,10 +28,14 @@ from .const import (
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_INCLUDE_CURRENT_USER,
@@ -42,10 +47,15 @@ from .const import (
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_ITEMS,
 )
 from .mcp_server import MCPServer
 from .index_manager import IndexManager
@@ -185,6 +195,12 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                         CONF_ENABLE_RECORDER_TOOLS, DEFAULT_ENABLE_RECORDER_TOOLS
                     ),
                 ),
+                CONF_ENABLE_MEMORY_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_MEMORY_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_MEMORY_TOOLS, DEFAULT_ENABLE_MEMORY_TOOLS
+                    ),
+                ),
                 CONF_ENABLE_CALCULATOR_TOOLS: first_profile.options.get(
                     CONF_ENABLE_CALCULATOR_TOOLS,
                     first_profile.data.get(
@@ -219,6 +235,34 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                         DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
                     ),
                 ),
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    ),
+                ),
+                CONF_MEMORY_DEFAULT_TTL_DAYS: first_profile.options.get(
+                    CONF_MEMORY_DEFAULT_TTL_DAYS,
+                    first_profile.data.get(
+                        CONF_MEMORY_DEFAULT_TTL_DAYS,
+                        DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+                    ),
+                ),
+                CONF_MEMORY_MAX_TTL_DAYS: first_profile.options.get(
+                    CONF_MEMORY_MAX_TTL_DAYS,
+                    first_profile.data.get(
+                        CONF_MEMORY_MAX_TTL_DAYS,
+                        DEFAULT_MEMORY_MAX_TTL_DAYS,
+                    ),
+                ),
+                CONF_MEMORY_MAX_ITEMS: first_profile.options.get(
+                    CONF_MEMORY_MAX_ITEMS,
+                    first_profile.data.get(
+                        CONF_MEMORY_MAX_ITEMS,
+                        DEFAULT_MEMORY_MAX_ITEMS,
+                    ),
+                ),
             }
         else:
             # No profiles exist yet (shouldn't happen in normal flow), use defaults
@@ -236,10 +280,15 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_ENABLE_RESPONSE_SERVICE_TOOLS: DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
                 CONF_ENABLE_WEATHER_FORECAST_TOOL: DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
                 CONF_ENABLE_RECORDER_TOOLS: DEFAULT_ENABLE_RECORDER_TOOLS,
+                CONF_ENABLE_MEMORY_TOOLS: DEFAULT_ENABLE_MEMORY_TOOLS,
                 CONF_ENABLE_CALCULATOR_TOOLS: DEFAULT_ENABLE_CALCULATOR_TOOLS,
                 CONF_ENABLE_UNIT_CONVERSION_TOOLS: DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
                 CONF_ENABLE_DEVICE_TOOLS: DEFAULT_ENABLE_DEVICE_TOOLS,
                 CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                CONF_MEMORY_DEFAULT_TTL_DAYS: DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+                CONF_MEMORY_MAX_TTL_DAYS: DEFAULT_MEMORY_MAX_TTL_DAYS,
+                CONF_MEMORY_MAX_ITEMS: DEFAULT_MEMORY_MAX_ITEMS,
             }
 
         # Create system entry with extracted/default settings

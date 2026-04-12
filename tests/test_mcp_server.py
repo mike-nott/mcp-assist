@@ -18,6 +18,7 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
@@ -85,6 +86,7 @@ def test_tool_enablement_follows_shared_settings(
             CONF_ENABLE_ASSIST_BRIDGE: False,
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
+            CONF_ENABLE_MEMORY_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
             CONF_ENABLE_UNIT_CONVERSION_TOOLS: False,
             CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: False,
@@ -98,6 +100,7 @@ def test_tool_enablement_follows_shared_settings(
     assert server._is_tool_enabled("call_service_with_response") is False
     assert server._is_tool_enabled("get_weather_forecast") is False
     assert server._is_tool_enabled("analyze_entity_history") is False
+    assert server._is_tool_enabled("remember_memory") is False
     assert server._is_tool_enabled("add") is False
     assert server._is_tool_enabled("convert_unit") is False
     assert server._is_tool_enabled("play_music_assistant") is False
@@ -149,6 +152,7 @@ async def test_handle_tools_list_filters_disabled_tool_families(
             CONF_ENABLE_ASSIST_BRIDGE: False,
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
+            CONF_ENABLE_MEMORY_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
             CONF_ENABLE_UNIT_CONVERSION_TOOLS: False,
             CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: False,
@@ -172,6 +176,7 @@ async def test_handle_tools_list_filters_disabled_tool_families(
     assert "call_service_with_response" not in tool_names
     assert "get_weather_forecast" not in tool_names
     assert "get_entity_history" not in tool_names
+    assert "remember_memory" not in tool_names
     assert "play_music_assistant" not in tool_names
     assert "add" not in tool_names
     assert "convert_unit" not in tool_names
@@ -189,6 +194,7 @@ async def test_default_tool_list_stays_streamlined(
     tool_names = {tool["name"] for tool in result["tools"]}
 
     assert "get_entity_history" in tool_names
+    assert "remember_memory" not in tool_names
     assert "get_last_entity_event" not in tool_names
     assert "list_assist_tools" not in tool_names
 
@@ -227,6 +233,29 @@ async def test_handle_tool_call_rejects_disabled_tools(
 
     with pytest.raises(ValueError, match="disabled"):
         await server.handle_tool_call({"name": "discover_devices", "arguments": {}})
+
+
+@pytest.mark.asyncio
+async def test_memory_tools_store_recall_and_forget(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Memory tools should store, search, and delete persisted memories."""
+    system_entry_factory(data={CONF_ENABLE_MEMORY_TOOLS: True})
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    await server.memory_manager.async_initialize()
+
+    remembered = await server.tool_remember_memory(
+        {"memory": "Front door code is changing next week", "category": "household"}
+    )
+    recalled = await server.tool_recall_memories({"query": "front door code"})
+    memory_id = recalled["memories"][0]["id"]
+    forgotten = await server.tool_forget_memory({"memory_id": memory_id})
+    recalled_again = await server.tool_recall_memories({"query": "front door code"})
+
+    assert "Stored memory" in remembered["content"][0]["text"]
+    assert recalled["result_count"] == 1
+    assert forgotten["deleted_count"] == 1
+    assert recalled_again["result_count"] == 0
 
 
 @pytest.mark.asyncio

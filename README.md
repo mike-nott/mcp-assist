@@ -12,7 +12,9 @@ A Home Assistant conversation agent that uses MCP (Model Context Protocol) for e
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
 - ✅ **Calculator Tools**: Built-in arithmetic tools for exact math through tool calling
+- ✅ **Memory Tools**: Optional persisted memory with TTL-based expiry for explicit “remember this” workflows
 - ✅ **Web Search Tools**: Optional DuckDuckGo or Brave Search integration for current information
+- ✅ **External Custom Tools**: Optional user-defined tool packages loaded from your Home Assistant config folder
 - ✅ **Works with 1000+ Entities**: Efficient even with large Home Assistant installations
 - ✅ **Multi-Profile Support**: Run multiple conversation agents with different models
 
@@ -154,7 +156,7 @@ If you leave the prompt text effectively unchanged, MCP Assist continues using t
 - MCP Server Port: Port for the shared MCP server (default: 8090)
 - Additional Allowed IPs/Ranges: Optional allowlist for external MCP clients
 - Discovery: Smart Entity Index and Max Entities Per Discovery
-- Tools: Web Search Provider, Brave Search API Key, Weather Forecast Tool toggle, and shared optional tool families
+- Tools: Shared optional tool families, including web search, weather forecast, and optional external custom tools
 
 ### 3. Set as Voice Assistant
 
@@ -212,6 +214,14 @@ If you leave the prompt text effectively unchanged, MCP Assist continues using t
 - "How long has the basement door deadbolt been locked?"
 - "What will the weather be here tomorrow?"
 
+### Memory Examples
+- "Remember that I prefer the bedroom thermostat at 68 degrees."
+- "Remember for 14 days that the dog gets medicine with dinner."
+- "What do you remember about my coffee preferences?"
+- "Forget that reminder about the spare key."
+
+Persisted memory is stored by Home Assistant through MCP Assist's own shared storage with TTL-based expiry and pruning controls.
+
 ### Web Search (if enabled)
 - "Search for the latest Home Assistant updates"
 - "What time does the store close?"
@@ -226,9 +236,21 @@ To answer questions like "What is the weather forecast for tomorrow?" from Home 
 - The weather integration must support one or more forecast types such as `daily`, `twice_daily`, or `hourly`.
 - If you use entity exposure controls, expose the weather entity to the conversation assistant.
 - If you have multiple weather entities, use room/floor/label context or a specific entity to disambiguate.
-- In shared MCP server settings, keep **Weather Forecast Tool** enabled if you want the assistant to answer weather questions through Home Assistant.
+- In shared MCP server settings, keep the **Weather Forecast** tool enabled if you want the assistant to answer weather questions through Home Assistant.
 
 MCP Assist does not assume every Home Assistant setup supports daily forecasts. It automatically falls back to a supported forecast type and summarizes that result.
+
+### External Custom Tools
+
+You can optionally load additional MCP tools from your Home Assistant config directory:
+
+- Folder: `<home-assistant-config>/mcp-assist-tools`
+- Shared setting: enable **Custom Tools** in the MCP server **Tools** section
+- Default: disabled
+
+These packages can add MCP tools plus short technical-instruction appendices so the model knows when to use them. They are intended for advanced local extensions such as custom component behavior, integration-specific queries, or site-specific helper tools.
+
+See [docs/custom-tools.md](docs/custom-tools.md) for the full package spec, safety model, manifest format, and a working example.
 
 ## Configuration Options
 
@@ -265,8 +287,11 @@ MCP Assist does not assume every Home Assistant setup supports daily forecasts. 
 - **Additional Allowed IPs/Ranges**: Whitelist Docker containers (e.g., `172.30.0.0/16`) or specific IPs for external MCP clients like Claude Code add-on
 - **Enable Smart Entity Index**: Context-aware entity discovery with automatic gap-filling for uncommon devices (default: enabled)
 - **Max Entities Per Discovery**: Cap how many entities a single discovery call may return
-- **Weather Forecast Tool**: Enables the dedicated Home Assistant weather forecast endpoint. Disable this if you do not want weather questions handled through the MCP server.
-- **Tools**: Shared optional capabilities exposed by the MCP server, including web search and optional tool families
+- **Memory**: Shared defaults for persisted memory retention
+  - **Default Memory TTL**: How long new memories are kept if the tool call does not provide a TTL
+  - **Max Memory TTL**: Upper bound on how long any memory may be retained
+  - **Max Stored Memories**: Oldest memories are pruned first when the limit is exceeded
+- **Tools**: Shared optional capabilities exposed by the MCP server, including weather forecast, web search, and opt-in external custom tools
 
 ### Web Search
 - Configured in the shared **Tools** section of the MCP server settings
@@ -294,6 +319,7 @@ MCP Assist has two types of settings:
 - Smart entity index settings
 - Max entities per discovery
 - Shared optional tool families exposed by the MCP server
+- Shared memory retention defaults for the optional Memory tool
 
 When you change shared settings in one profile's options, they apply to all profiles. This is intentional since all profiles share the same MCP server.
 
@@ -419,7 +445,9 @@ One of MCP Assist's features is **dynamic model switching** - you can change mod
 - Check that entities are exposed (Settings → Voice Assistants → Expose)
 - Look for MCP server errors in logs
 - Ensure Max Tool Iterations isn't set too low
-- For local forecasts, confirm a `weather.` entity exists, is exposed, and the shared **Weather Forecast Tool** is enabled
+- For local forecasts, confirm a `weather.` entity exists, is exposed, and the shared **Weather Forecast** tool is enabled
+- For persisted memory, confirm the shared **Memory** tool is enabled and remember that stored memories are shared across MCP Assist profiles
+- For external custom tools, confirm the shared **Custom Tools** toggle is enabled and your package lives under `<home-assistant-config>/mcp-assist-tools/<tool_id>/`
 
 ## Entity Exposure
 

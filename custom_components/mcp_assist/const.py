@@ -35,6 +35,7 @@ CONF_MAX_HISTORY = "max_history"
 CONF_MAX_ITERATIONS = "max_iterations"
 CONF_DEBUG_MODE = "debug_mode"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
+CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS = "enable_external_custom_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
 CONF_INCLUDE_CURRENT_USER = "include_current_user"
@@ -46,15 +47,20 @@ CONF_ENABLE_ASSIST_BRIDGE = "enable_assist_bridge"
 CONF_ENABLE_RESPONSE_SERVICE_TOOLS = "enable_response_service_tools"
 CONF_ENABLE_WEATHER_FORECAST_TOOL = "enable_weather_forecast_tool"
 CONF_ENABLE_RECORDER_TOOLS = "enable_recorder_tools"
+CONF_ENABLE_MEMORY_TOOLS = "enable_memory_tools"
 CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
 CONF_ENABLE_UNIT_CONVERSION_TOOLS = "enable_unit_conversion_tools"
 CONF_ENABLE_DEVICE_TOOLS = "enable_device_tools"
 CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT = "enable_music_assistant_support"
+CONF_MEMORY_DEFAULT_TTL_DAYS = "memory_default_ttl_days"
+CONF_MEMORY_MAX_TTL_DAYS = "memory_max_ttl_days"
+CONF_MEMORY_MAX_ITEMS = "memory_max_items"
 CONF_PROFILE_ENABLE_WEB_SEARCH = "profile_enable_web_search"
 CONF_PROFILE_ENABLE_ASSIST_BRIDGE = "profile_enable_assist_bridge"
 CONF_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = "profile_enable_response_service_tools"
 CONF_PROFILE_ENABLE_WEATHER_FORECAST_TOOL = "profile_enable_weather_forecast_tool"
 CONF_PROFILE_ENABLE_RECORDER_TOOLS = "profile_enable_recorder_tools"
+CONF_PROFILE_ENABLE_MEMORY_TOOLS = "profile_enable_memory_tools"
 CONF_PROFILE_ENABLE_CALCULATOR_TOOLS = "profile_enable_calculator_tools"
 CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS = "profile_enable_unit_conversion_tools"
 CONF_PROFILE_ENABLE_DEVICE_TOOLS = "profile_enable_device_tools"
@@ -101,6 +107,7 @@ DEFAULT_MAX_HISTORY = 10
 DEFAULT_MAX_ITERATIONS = 10
 DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
+DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_ALLOWED_IPS = ""
 DEFAULT_INCLUDE_CURRENT_USER = True
@@ -112,15 +119,20 @@ DEFAULT_ENABLE_ASSIST_BRIDGE = False
 DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS = True
 DEFAULT_ENABLE_WEATHER_FORECAST_TOOL = True
 DEFAULT_ENABLE_RECORDER_TOOLS = True
+DEFAULT_ENABLE_MEMORY_TOOLS = False
 DEFAULT_ENABLE_CALCULATOR_TOOLS = False
 DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS = False
 DEFAULT_ENABLE_DEVICE_TOOLS = True
 DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT = False
+DEFAULT_MEMORY_DEFAULT_TTL_DAYS = 30
+DEFAULT_MEMORY_MAX_TTL_DAYS = 365
+DEFAULT_MEMORY_MAX_ITEMS = 500
 DEFAULT_PROFILE_ENABLE_WEB_SEARCH = True
 DEFAULT_PROFILE_ENABLE_ASSIST_BRIDGE = True
 DEFAULT_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = True
 DEFAULT_PROFILE_ENABLE_WEATHER_FORECAST_TOOL = True
 DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS = True
+DEFAULT_PROFILE_ENABLE_MEMORY_TOOLS = True
 DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS = True
 DEFAULT_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS = True
 DEFAULT_PROFILE_ENABLE_DEVICE_TOOLS = True
@@ -138,11 +150,15 @@ DEFAULT_END_WORDS = (
 DEFAULT_CLEAN_RESPONSES = False
 DEFAULT_TIMEOUT = 30
 
+CUSTOM_TOOLS_DIRECTORY = "mcp-assist-tools"
+CUSTOM_TOOL_SCHEMA_VERSION = 1
+
 TOOL_FAMILY_DEVICE = "device"
 TOOL_FAMILY_ASSIST_BRIDGE = "assist_bridge"
 TOOL_FAMILY_RESPONSE_SERVICE = "response_service"
 TOOL_FAMILY_WEATHER_FORECAST = "weather_forecast"
 TOOL_FAMILY_RECORDER = "recorder"
+TOOL_FAMILY_MEMORY = "memory"
 TOOL_FAMILY_CALCULATOR = "calculator"
 TOOL_FAMILY_UNIT_CONVERSION = "unit_conversion"
 TOOL_FAMILY_MUSIC_ASSISTANT = "music_assistant"
@@ -171,6 +187,13 @@ OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
             "get_last_entity_event",
             "analyze_entity_history",
             "get_entity_state_at_time",
+        }
+    ),
+    TOOL_FAMILY_MEMORY: frozenset(
+        {
+            "remember_memory",
+            "recall_memories",
+            "forget_memory",
         }
     ),
     TOOL_FAMILY_CALCULATOR: frozenset(
@@ -225,6 +248,10 @@ TOOL_FAMILY_SHARED_SETTINGS = {
         CONF_ENABLE_RECORDER_TOOLS,
         DEFAULT_ENABLE_RECORDER_TOOLS,
     ),
+    TOOL_FAMILY_MEMORY: (
+        CONF_ENABLE_MEMORY_TOOLS,
+        DEFAULT_ENABLE_MEMORY_TOOLS,
+    ),
     TOOL_FAMILY_WEATHER_FORECAST: (
         CONF_ENABLE_WEATHER_FORECAST_TOOL,
         DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
@@ -267,6 +294,10 @@ TOOL_FAMILY_PROFILE_SETTINGS = {
     TOOL_FAMILY_RECORDER: (
         CONF_PROFILE_ENABLE_RECORDER_TOOLS,
         DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS,
+    ),
+    TOOL_FAMILY_MEMORY: (
+        CONF_PROFILE_ENABLE_MEMORY_TOOLS,
+        DEFAULT_PROFILE_ENABLE_MEMORY_TOOLS,
     ),
     TOOL_FAMILY_CALCULATOR: (
         CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
@@ -369,6 +400,14 @@ Recorder tools are enabled.
 - Use analyze_entity_history for counts, durations, streaks, and numeric summaries.
 - Use get_entity_state_at_time for point-in-time questions.
 - Choose the entity domain that matches the question, such as lock for locked or contact/opening for open.
+"""
+
+MEMORY_TECHNICAL_INSTRUCTIONS = """
+Memory tools are enabled.
+- Use remember_memory only when the user explicitly asks you to remember something or confirms a preference should be stored.
+- Use recall_memories for questions about previously stored facts or preferences.
+- Use forget_memory when the user asks you to remove or update stored memory.
+- Prefer a specific ttl_days only when the user gives a duration; otherwise let the server default apply.
 """
 
 ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS = """

@@ -112,6 +112,24 @@ def test_profile_tool_filtering_hides_disabled_optional_tools(
     assert "list_assist_tools" not in tool_names
 
 
+def test_optional_technical_instructions_include_external_custom_tool_guidance(
+    hass, profile_entry_factory
+) -> None:
+    """Loaded external custom tools should be able to extend prompt guidance."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
+        custom_tools=SimpleNamespace(
+            get_external_prompt_instructions=lambda: "## External Custom Tools\nUse sample_tool_status when asked for custom status."
+        )
+    )
+
+    instructions = agent._build_optional_technical_instructions("Kitchen")
+
+    assert "External Custom Tools" in instructions
+    assert "sample_tool_status" in instructions
+
+
 @pytest.mark.asyncio
 async def test_profile_disabled_tool_is_rejected_before_mcp_call(
     hass, profile_entry_factory, system_entry_factory

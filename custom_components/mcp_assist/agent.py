@@ -92,6 +92,7 @@ from .const import (
     DEVICE_TECHNICAL_INSTRUCTIONS,
     RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS,
     RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS,
+    MEMORY_TECHNICAL_INSTRUCTIONS,
     ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS,
     CALCULATOR_TECHNICAL_INSTRUCTIONS,
     UNIT_CONVERSION_TECHNICAL_INSTRUCTIONS,
@@ -438,6 +439,11 @@ class MCPAssistConversationEntity(ConversationEntity):
         return self._is_optional_tool_family_enabled("recorder")
 
     @property
+    def memory_tools_enabled(self) -> bool:
+        """Get effective persisted memory tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("memory")
+
+    @property
     def calculator_tools_enabled(self) -> bool:
         """Get effective calculator tool setting for this profile."""
         return self._is_optional_tool_family_enabled("calculator")
@@ -490,6 +496,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "- Recorder history analysis tools are disabled. Do not call analyze_entity_history or get_entity_state_at_time."
             )
 
+        if not self.memory_tools_enabled:
+            lines.append(
+                "- Memory tools are disabled. Do not call remember_memory, recall_memories, or forget_memory."
+            )
+
         if not self.calculator_tools_enabled:
             lines.append(
                 "- Calculator tools are disabled. Do not call arithmetic or expression-evaluation tools."
@@ -518,6 +529,9 @@ class MCPAssistConversationEntity(ConversationEntity):
         if self.recorder_tools_enabled:
             sections.append(RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS.strip())
 
+        if self.memory_tools_enabled:
+            sections.append(MEMORY_TECHNICAL_INSTRUCTIONS.strip())
+
         if self.assist_bridge_enabled:
             sections.append(ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS.strip())
 
@@ -534,7 +548,28 @@ class MCPAssistConversationEntity(ConversationEntity):
                 ).strip()
             )
 
+        external_custom_tool_instructions = (
+            self._get_external_custom_tool_instructions()
+        )
+        if external_custom_tool_instructions:
+            sections.append(external_custom_tool_instructions)
+
         return "\n\n".join(section for section in sections if section)
+
+    def _get_external_custom_tool_instructions(self) -> str:
+        """Return prompt additions from loaded external custom tool packages."""
+        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+        custom_tools = getattr(server, "custom_tools", None) if server else None
+        if custom_tools is None:
+            return ""
+
+        try:
+            return str(custom_tools.get_external_prompt_instructions() or "").strip()
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read external custom tool prompt instructions: %s", err
+            )
+            return ""
 
     @staticmethod
     def _compact_text(text: str, *, max_len: int = 160) -> str:
@@ -647,6 +682,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.native_response_service_tools_enabled,
             self.weather_forecast_tools_enabled,
             self.recorder_tools_enabled,
+            self.memory_tools_enabled,
             self.calculator_tools_enabled,
             self.unit_conversion_tools_enabled,
             self.device_tools_enabled,
