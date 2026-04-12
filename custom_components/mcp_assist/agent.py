@@ -44,6 +44,7 @@ from .const import (
     CONF_TEMPERATURE,
     CONF_FOLLOW_UP_MODE,
     CONF_RESPONSE_MODE,
+    CONF_MAX_HISTORY,
     CONF_SERVER_TYPE,
     CONF_API_KEY,
     CONF_CONTROL_HA,
@@ -64,6 +65,7 @@ from .const import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
     DEFAULT_RESPONSE_MODE,
+    DEFAULT_MAX_HISTORY,
     DEFAULT_MCP_PORT,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
@@ -300,6 +302,13 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
     @property
+    def max_history(self) -> int:
+        """Get max history messages/turns (dynamic)."""
+        return self.entry.options.get(
+            CONF_MAX_HISTORY, self.entry.data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY)
+        )
+
+    @property
     def max_tokens(self) -> int:
         """Get max tokens (dynamic)."""
         return self.entry.options.get(
@@ -448,6 +457,106 @@ class MCPAssistConversationEntity(ConversationEntity):
             )
 
         return "\n\n".join(section for section in sections if section)
+
+    @staticmethod
+    def _compact_text(text: str, *, max_len: int = 160) -> str:
+        """Compact instructional text for lower token usage."""
+        normalized = " ".join(str(text).split()).strip()
+        if not normalized:
+            return ""
+
+        for separator in (". ", "\n", "; "):
+            if separator in normalized:
+                normalized = normalized.split(separator, 1)[0].strip()
+                break
+
+        if len(normalized) <= max_len:
+            return normalized
+
+        truncated = normalized[: max_len - 1].rstrip()
+        last_space = truncated.rfind(" ")
+        if last_space > 40:
+            truncated = truncated[:last_space]
+        return truncated.rstrip(" ,;:.") + "."
+
+    def _compact_schema_for_llm(self, schema: Any, *, keep_description: bool = False) -> Any:
+        """Strip nonessential JSON-schema verbosity before sending tools to the LLM."""
+        if isinstance(schema, list):
+            compacted_list = [
+                self._compact_schema_for_llm(item, keep_description=keep_description)
+                for item in schema
+            ]
+            return [item for item in compacted_list if item not in (None, {}, [])]
+
+        if not isinstance(schema, dict):
+            return schema
+
+        compacted: dict[str, Any] = {}
+
+        for key, value in schema.items():
+            if key in {"$schema", "title", "default", "examples", "example"}:
+                continue
+
+            if key == "description":
+                if keep_description:
+                    compact_description = self._compact_text(str(value), max_len=120)
+                    if compact_description:
+                        compacted[key] = compact_description
+                continue
+
+            if key == "properties":
+                properties: dict[str, Any] = {}
+                for prop_name, prop_schema in value.items():
+                    compact_prop = self._compact_schema_for_llm(prop_schema)
+                    if compact_prop:
+                        properties[prop_name] = compact_prop
+                if properties:
+                    compacted[key] = properties
+                continue
+
+            if key == "required":
+                if value:
+                    compacted[key] = value
+                continue
+
+            if key == "additionalProperties":
+                continue
+
+            compact_value = self._compact_schema_for_llm(
+                value, keep_description=keep_description
+            )
+            if compact_value not in (None, {}, []):
+                compacted[key] = compact_value
+
+        return compacted
+
+    def _convert_mcp_tools_to_llm_tools(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert MCP tools to a compact OpenAI-style tool schema."""
+        openai_tools = []
+
+        for tool in tools:
+            parameters = self._compact_schema_for_llm(
+                tool.get("inputSchema", {}), keep_description=False
+            )
+            if not parameters:
+                parameters = {"type": "object", "properties": {}}
+
+            openai_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": self._compact_text(
+                            tool.get("description", ""), max_len=180
+                        ),
+                        "parameters": parameters,
+                    },
+                }
+            )
+
+        return openai_tools
 
     @property
     def attribution(self) -> str:
@@ -1105,7 +1214,7 @@ class MCPAssistConversationEntity(ConversationEntity):
     async def _build_system_prompt_with_context(
         self, user_input: ConversationInput
     ) -> str:
-        """Build system prompt with Smart Entity Index."""
+        """Build the compact system prompt used for model calls."""
         try:
             if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_MOLTBOT:
                 system_prompt = ""
@@ -1117,39 +1226,48 @@ class MCPAssistConversationEntity(ConversationEntity):
                 )
             technical_prompt = self._resolve_prompt_setting(
                 prompt_key=CONF_TECHNICAL_PROMPT,
-                mode_key=CONF_TECHNICAL_PROMPT_MODE,
-                default_prompt=DEFAULT_TECHNICAL_PROMPT,
+                    mode_key=CONF_TECHNICAL_PROMPT_MODE,
+                    default_prompt=DEFAULT_TECHNICAL_PROMPT,
             )
 
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
-            technical_prompt = technical_prompt.replace("{time}", current_time)
-            technical_prompt = technical_prompt.replace("{date}", current_date)
-
-            # Get current area from satellite (if available)
-            current_area = await self._get_current_area(user_input)
-            technical_prompt = technical_prompt.replace("{current_area}", current_area)
-
-            # Inject mode-specific instructions
-            mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
-                self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"]
+            current_area = "Unknown"
+            needs_current_area = "{current_area}" in technical_prompt or (
+                self.music_assistant_support_enabled
             )
-            technical_prompt = technical_prompt.replace(
-                "{response_mode}", mode_instructions
-            )
+            if needs_current_area:
+                current_area = await self._get_current_area(user_input)
+            if "{current_area}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{current_area}", current_area
+                )
 
-            # Get Smart Entity Index from IndexManager
-            index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
-            if index_manager:
-                index = await index_manager.get_index()
-                index_json = json.dumps(index, indent=2)
-            else:
-                index_json = "{}"
-                _LOGGER.warning("IndexManager not available, using empty index")
+            if "{time}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{time}", dt_util.now().strftime("%H:%M:%S")
+                )
 
-            # Replace {index} placeholder
-            technical_prompt = technical_prompt.replace("{index}", index_json)
+            if "{date}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{date}", dt_util.now().strftime("%Y-%m-%d")
+                )
+
+            if "{response_mode}" in technical_prompt:
+                mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
+                    self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"]
+                )
+                technical_prompt = technical_prompt.replace(
+                    "{response_mode}", mode_instructions
+                )
+
+            if "{index}" in technical_prompt:
+                index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
+                if index_manager:
+                    index = await index_manager.get_index()
+                    index_json = json.dumps(index, separators=(",", ":"))
+                else:
+                    index_json = "{}"
+                    _LOGGER.warning("IndexManager not available, using empty index")
+                technical_prompt = technical_prompt.replace("{index}", index_json)
 
             optional_instructions = self._build_optional_technical_instructions(
                 current_area
@@ -1159,17 +1277,9 @@ class MCPAssistConversationEntity(ConversationEntity):
                     f"{technical_prompt.rstrip()}\n\n{optional_instructions}"
                 )
 
-            disabled_tool_family_instructions = (
-                self._build_disabled_tool_family_instructions().strip()
-            )
-            if disabled_tool_family_instructions:
-                technical_prompt = (
-                    f"{technical_prompt.rstrip()}\n\n"
-                    f"{disabled_tool_family_instructions}"
-                )
-
-            # Combine: system prompt + technical prompt
-            return f"{system_prompt}\n\n{technical_prompt}"
+            if system_prompt:
+                return f"{system_prompt}\n\n{technical_prompt}"
+            return technical_prompt
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
@@ -1221,15 +1331,25 @@ class MCPAssistConversationEntity(ConversationEntity):
                 default_prompt=DEFAULT_TECHNICAL_PROMPT,
             )
 
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
-
-            # Replace placeholders in technical prompt
-            technical_prompt = technical_prompt.replace("{time}", current_time)
-            technical_prompt = technical_prompt.replace("{date}", current_date)
-            technical_prompt = technical_prompt.replace("{current_area}", "Unknown")
-            technical_prompt = technical_prompt.replace("{index}", "{}")
+            if "{time}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{time}", dt_util.now().strftime("%H:%M:%S")
+                )
+            if "{date}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{date}", dt_util.now().strftime("%Y-%m-%d")
+                )
+            if "{current_area}" in technical_prompt:
+                technical_prompt = technical_prompt.replace("{current_area}", "Unknown")
+            if "{index}" in technical_prompt:
+                technical_prompt = technical_prompt.replace("{index}", "{}")
+            if "{response_mode}" in technical_prompt:
+                mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
+                    self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"]
+                )
+                technical_prompt = technical_prompt.replace(
+                    "{response_mode}", mode_instructions
+                )
 
             optional_instructions = self._build_optional_technical_instructions(
                 "Unknown"
@@ -1239,17 +1359,9 @@ class MCPAssistConversationEntity(ConversationEntity):
                     f"{technical_prompt.rstrip()}\n\n{optional_instructions}"
                 )
 
-            disabled_tool_family_instructions = (
-                self._build_disabled_tool_family_instructions().strip()
-            )
-            if disabled_tool_family_instructions:
-                technical_prompt = (
-                    f"{technical_prompt.rstrip()}\n\n"
-                    f"{disabled_tool_family_instructions}"
-                )
-
-            # Combine prompts
-            return f"{system_prompt}\n\n{technical_prompt}"
+            if system_prompt:
+                return f"{system_prompt}\n\n{technical_prompt}"
+            return technical_prompt
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
@@ -1264,10 +1376,12 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         # For Moltbot, skip history - server manages context via user field
         if self.server_type != SERVER_TYPE_MOLTBOT:
-            # Add conversation history (last 5 turns)
-            for turn in history[-5:]:
-                messages.append({"role": "user", "content": turn["user"]})
-                messages.append({"role": "assistant", "content": turn["assistant"]})
+            # Add conversation history using the configured limit
+            history_limit = max(0, self.max_history)
+            if history_limit > 0:
+                for turn in history[-history_limit:]:
+                    messages.append({"role": "user", "content": turn["user"]})
+                    messages.append({"role": "assistant", "content": turn["assistant"]})
 
         # Add current user message
         messages.append({"role": "user", "content": user_text})
@@ -1305,20 +1419,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                             len(tools),
                         )
 
-                        # Convert to OpenAI format for LM Studio
-                        openai_tools = []
                         tool_names = []
                         for tool in tools:
-                            openai_tools.append(
-                                {
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool["name"],
-                                        "description": tool["description"],
-                                        "parameters": tool.get("inputSchema", {}),
-                                    },
-                                }
-                            )
                             tool_names.append(tool["name"])
 
                         _LOGGER.info("MCP tools available: %s", ", ".join(tool_names))
@@ -1327,7 +1429,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                         else:
                             _LOGGER.warning("⚠️ perform_action tool NOT found!")
 
-                        return openai_tools
+                        return self._convert_mcp_tools_to_llm_tools(tools)
                     return None
 
         except Exception as err:

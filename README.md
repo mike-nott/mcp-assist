@@ -1,18 +1,17 @@
 # MCP Assist for Home Assistant
 
-A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, OpenRouter, Moltbot, and vLLM.
+A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
 
 ## Key Features
 
 - ✅ **95% Token Reduction**: Uses MCP tools for dynamic entity discovery instead of sending all entities
 - ✅ **No Entity Dumps**: Never sends 12,000+ token entity lists to the LLM
 - ✅ **Smart Entity Index**: Pre-generated system structure index (~400-800 tokens) for context-aware queries
-- ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, OpenRouter, Moltbot, and vLLM
+- ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
 - ✅ **Multilingual Support**: 21 languages with localized UI, system prompts, and speech detection
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
-- ✅ **Dynamic Discovery**: Finds entities and devices by area, floor, label, domain, device_class, state, or alias-aware name search on-demand
-- ✅ **Native History & Service Reads**: Uses recorder-backed history plus Home Assistant response-capable services for things like event history, forecasts, calendars, and to-do queries
-- ✅ **Calculator Tools**: Built-in arithmetic, unit conversion, and expression-evaluation tools for exact math through tool calling
+- ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
+- ✅ **Calculator Tools**: Built-in arithmetic tools for exact math through tool calling
 - ✅ **Web Search Tools**: Optional DuckDuckGo or Brave Search integration for current information
 - ✅ **Works with 1000+ Entities**: Efficient even with large Home Assistant installations
 - ✅ **Multi-Profile Support**: Run multiple conversation agents with different models
@@ -31,27 +30,24 @@ Traditional voice assistants send your **entire entity list** (lights, switches,
 Instead of dumping all entities, MCP Assist:
 
 1. **Starts an MCP Server** on Home Assistant that exposes entity discovery tools
-2. **Your LLM connects** to the MCP server and gets access to these tools:
-   - `get_index` - Get system structure index (areas, floors, labels, devices, domains, device_classes, people, etc.) including aliases for alias-capable objects
-   - `discover_entities` - Find entities by type, area, floor, label, domain, device_class, state, or alias-aware name search. This is the preferred path for most direct control
-   - `discover_devices` - Find Home Assistant devices by area, floor, label, domain, name, or alias-aware search when you want physical-device context or related entities on the same device
-   - `get_entity_details` - Get current entity state and full serialized attributes
-   - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
+2. **Your LLM connects** to the MCP server and gets access to core tools such as:
+   - `get_index` - Get a lightweight system structure index
+   - `discover_entities` - Find entities by type, area, state, or name
+   - `discover_devices` - Find Home Assistant devices when physical-device context matters
+   - `get_entity_details` - Get current entity state and attributes
+   - `get_device_details` - Get device metadata and related entities
    - `perform_action` - Control Home Assistant entities and perform supported write actions
-   - `list_response_services` / `call_service_with_response` - Discover and call Home Assistant services that return structured response data for things like weather forecasts, calendar event reads, to-do list queries, and other native reads
-   - `get_entity_history` / `analyze_entity_history` / `get_entity_state_at_time` - Query recorder history for last events, counts, streaks, durations, numeric summaries, and point-in-time answers
-   - `list_assist_tools` / `call_assist_tool` / `get_assist_prompt` / `get_assist_context_snapshot` - Optional native Assist bridge tools for compatibility and debugging
-   - Calculator tools - Optional exact arithmetic, unit conversion, and expression evaluation through tool calling
+   - `call_service_with_response` - Read from response-capable Home Assistant services when structured data is available
+   - `get_entity_history` / `analyze_entity_history` / `get_entity_state_at_time` - Answer recorder-backed history questions
+   - Calculator tools - Do exact math through tool calling
    - `run_script` - Execute scripts and return response data
    - `run_automation` - Trigger automations manually
-   - `list_areas` - List all areas in your home with entity/device counts
+   - `list_areas` - List all areas in your home
    - `list_domains` - List all entity types
    - `set_conversation_state` - Smart follow-up handling
 3. **LLM uses the index for smart queries** - Understands what exists without full context dump
 4. **LLM discovers on-demand** - Only fetches the entities it needs for each request
 5. **Token usage drops** from 12,000+ to ~400 tokens per request
-
-The custom MCP Assist tools remain the primary path for precise Home Assistant work. The native Assist bridge tools are complementary: they let the model inspect or call the built-in Home Assistant Assist tool surface when compatibility, debugging, or native Assist behavior is useful.
 
 ## Token Usage Comparison
 
@@ -110,9 +106,9 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
   - **OpenAI** - Cloud, paid
   - **Google Gemini** - Cloud, paid/free tier
   - **Anthropic Claude** - Cloud, paid
-  - **OpenRouter** - Cloud, multi-model gateway with access to many models
-  - **Moltbot** - Local or self-hosted server with its own model/session handling
-  - **vLLM** - Local or self-hosted OpenAI-compatible inference server
+  - **OpenRouter** - Cloud, multi-model gateway
+  - **Moltbot** - Local or self-hosted server
+  - **vLLM** - Local or self-hosted OpenAI-compatible server
 
 **Step 2 - Server Configuration:**
 
@@ -129,48 +125,36 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 
 **Step 3 - Model & Prompts:**
 - Model Name: Select from auto-loaded models or enter manually
-- System Prompt: Prefilled with the current built-in prompt so you can review, copy, or customize it
-- Technical Instructions: Prefilled with the current built-in instructions so you can review, copy, or customize them
+- System Prompt: Prefilled with the current effective prompt so you can review, copy, or customize it
+- Technical Instructions: Prefilled with the current effective instructions so you can review, copy, or customize them
 
 If you leave the prompt text effectively unchanged, MCP Assist continues using the built-in prompt from the integration code.
 
-**Step 4 - Conversation, Tools, and Advanced Settings:**
-- Conversation settings:
-  - Response Mode: None / Smart / Always (conversation continuation behavior)
-  - Follow-up Phrases: Configurable phrases for pattern detection
-  - End Conversation Words: Words/phrases that end conversations
-  - Control Home Assistant: Enable/disable device control
-  - Clean Responses: Optional cleanup for voice-friendly output
-- Tools section:
-  - Tool Family Overrides: Optionally narrow this profile to a smaller subset of the shared MCP server's optional tools
-  - Leave blank to inherit the shared MCP server tool families
-- Advanced section:
-  - Temperature: Response randomness (0.0-1.0)
-  - Max Response Tokens: Maximum length of responses
-  - Max History Messages: Conversation memory depth
-  - Max Tool Iterations: How many tool calls are allowed per request
-  - Timeout: Maximum wait time for provider responses
-  - Debug Mode: Extra logging for troubleshooting
-  - **Ollama Keep Alive** (Ollama only): Control how long models stay loaded in memory
-    - `-1` = Keep loaded indefinitely
-    - `0` = Unload immediately after response
-    - `"5m"` = Keep for 5 minutes (default)
-    - Duration strings like `"24h"`, `"168h"` also supported
-  - **Ollama Context Window** (Ollama only): Custom context window size (`0` = use model default)
+**Step 4 - Conversation & Advanced Settings:**
+- Temperature: Response randomness (0.0-1.0)
+- Max Response Tokens: Maximum length of responses
+- Max History Messages: Conversation memory depth
+- Response Mode: None / Smart / Always (conversation continuation behavior)
+- Follow-up Phrases: Configurable phrases for pattern detection
+- End Conversation Words: Words/phrases that end conversations
+- Control Home Assistant: Enable/disable device control
+- Clean Responses: Optional voice-friendly response cleanup
+- Max Tool Iterations: How many tool calls allowed per request
+- Timeout: Maximum wait time for provider responses
+- Debug Mode: Extra logging for troubleshooting
+- Tool Family Overrides: Optional per-profile narrowing of shared optional MCP tool families
+- **Ollama Keep Alive** (Ollama only): Control how long models stay loaded in memory
+  - `-1` = Keep loaded indefinitely
+  - `0` = Unload immediately after response
+  - `"5m"` = Keep for 5 minutes (default)
+  - Duration strings like `"24h"`, `"168h"` also supported
+- **Ollama Context Window** (Ollama only): Custom context window size (0 = use model default)
 
-**Step 5 - Shared MCP Server Settings** (created with the first profile, editable later):  
-These settings affect all profiles because they share one MCP server.
-
-- Top-level shared settings:
-  - MCP Server Port
-  - Additional Allowed IPs/Ranges
-- Discovery section:
-  - Enable Smart Entity Index
-  - Max Entities Per Discovery
-- Tools section:
-  - Web Search Provider: None, DuckDuckGo, or Brave Search
-  - Brave Search API Key
-  - Shared optional tool families such as device tools, response-service tools, recorder tools, Assist bridge tools, calculator tools, and Music Assistant tools
+**Step 5 - Shared MCP Server Settings:**
+- MCP Server Port: Port for the shared MCP server (default: 8090)
+- Additional Allowed IPs/Ranges: Optional allowlist for external MCP clients
+- Discovery: Smart Entity Index and Max Entities Per Discovery
+- Tools: Web Search Provider, Brave Search API Key, and shared optional tool families
 
 ### 3. Set as Voice Assistant
 
@@ -232,7 +216,7 @@ These settings affect all profiles because they share one MCP server.
 - "Search for the latest Home Assistant updates"
 - "What time does the store close?"
 
-For weather, calendar, and to-do queries, the assistant should prefer Home Assistant's native response-capable services before falling back to web search. Web search is most useful when the answer is genuinely external or current information outside Home Assistant.
+For weather, calendar, and to-do queries, the assistant can use Home Assistant's native response-capable services before falling back to web search.
 
 ## Configuration Options
 
@@ -243,24 +227,23 @@ For weather, calendar, and to-do queries, the assistant should prefer Home Assis
 - **Model Name**: Which model to use
 
 ### Prompts
-- **System Prompt**: Prefilled with the built-in prompt so you can review, copy, or customize it
-- **Technical Instructions**: Prefilled with the built-in tool-usage instructions so you can review, copy, or customize them
+- **System Prompt**: Prefilled with the current effective prompt so you can review, copy, or customize it
+- **Technical Instructions**: Prefilled with the current effective instructions so you can review, copy, or customize them
 
-### Conversation & Tools
+### Advanced Settings
+- **Max Response Tokens**: Limit response length (default: 500)
+- **Max History Messages**: How many conversation turns to remember (default: 10)
+- **Max Tool Iterations**: Prevent infinite loops (default: 10)
 - **Response Mode**:
   - **None**: Never ask follow-ups, end immediately
   - **Smart** (default): Contextual follow-ups when relevant, user can end with "bye"/"thanks"
   - **Always**: Natural conversational follow-ups, user can end with "bye"/"thanks"
-- **Follow-up Phrases**: Comma-separated phrases for detecting when the assistant wants to continue
+- **Follow-up Phrases**: Comma-separated phrases for detecting when assistant wants to continue
 - **End Conversation Words**: Comma-separated words/phrases for user-initiated ending
-- **Control Home Assistant**: Enable or disable device control
-- **Tool Family Overrides**: Optional per-profile narrowing of the shared MCP server tool families
-
-### Advanced Settings
-- **Temperature**: Limit or increase randomness (default depends on provider)
-- **Max Response Tokens**: Limit response length
-- **Max History Messages**: How many conversation turns to remember
-- **Max Tool Iterations**: Prevent infinite loops
+- **Control Home Assistant**: Enable/disable device control
+- **Clean Responses**: Trim unnecessary formatting or filler for voice output
+- **Tool Family Overrides**: Optional per-profile narrowing of the shared MCP server tool families (leave blank to inherit the shared MCP server defaults)
+- **Temperature**: Response randomness (default depends on provider)
 - **Timeout**: Provider response timeout
 - **Debug Mode**: Extra logging for troubleshooting
 - **Ollama Keep Alive** / **Ollama Context Window**: Ollama-specific tuning
@@ -285,9 +268,8 @@ For weather, calendar, and to-do queries, the assistant should prefer Home Assis
 MCP Assist has two types of settings:
 
 **Per-Profile Settings** (independent per conversation agent):
-- Model name and prompt overrides
-- Conversation behavior and response mode
-- Temperature, max tokens, timeout, and other advanced tuning
+- Model name, system prompt, technical instructions
+- Temperature, max tokens, response mode, and timeout
 - Debug mode and max iterations
 - Server URL or API key
 - Optional per-profile tool family overrides
@@ -424,11 +406,6 @@ One of MCP Assist's features is **dynamic model switching** - you can change mod
 - Check that entities are exposed (Settings → Voice Assistants → Expose)
 - Look for MCP server errors in logs
 - Ensure Max Tool Iterations isn't set too low
-
-### History, Forecast, or Calendar Questions Feel Incomplete
-- Make sure the relevant optional tool families are enabled on the shared MCP server
-- Recorder-backed questions depend on Home Assistant recorder data being available
-- Weather, calendar, and to-do reads work best through Home Assistant's native response-capable services
 
 ## Entity Exposure
 
