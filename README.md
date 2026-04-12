@@ -36,9 +36,10 @@ Instead of dumping all entities, MCP Assist:
    - `discover_devices` - Find Home Assistant devices by area, floor, label, domain, name, or alias-aware search when you want physical-device context or related entities on the same device
    - `get_entity_details` - Get current entity state and attributes
    - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
-   - `perform_action` - Control devices, usually with entity IDs for direct control
+   - `perform_action` - Control devices, usually with entity IDs for direct control, or with area/floor/label/device IDs that resolve to exposed entity IDs first
    - `get_entity_history` - Query recorder history as a timeline or just the last matching event with `mode="last_event"`
-   - `analyze_entity_history` - Use recorder history for aggregate questions like counts, durations, and numeric summaries over time
+   - `get_last_entity_event` - Compatibility alias for `get_entity_history(mode="last_event")`
+   - `analyze_entity_history` - Use recorder history for aggregate questions like counts, current streaks, durations, and numeric summaries over time
    - `get_entity_state_at_time` - Look up what state an entity was in at a specific time
    - `add` / `subtract` / `multiply` / `divide` / `sqrt` / `power` / `round_number` - Do exact calculator operations through tool calling
    - `run_script` - Execute scripts and return response data
@@ -197,6 +198,8 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 - "What's the weather forecast for tomorrow?"
 - "Search for the latest Home Assistant updates"
 - "What time does the store close?"
+
+For Home Assistant weather entities, the assistant should first use local entity data via `discover_entities(domain="weather")` and `get_entity_details(...)`. Rich attributes like `forecast` are available through entity details; web search is only a fallback when no suitable local forecast data exists.
 
 ## Configuration Options
 

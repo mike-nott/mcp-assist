@@ -12,7 +12,11 @@ from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import history
 from homeassistant.util import dt as dt_util
@@ -685,7 +689,7 @@ class MCPServer:
         tools = [
             {
                 "name": "discover_entities",
-                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, current state, or aliases. Prefer this for most direct control and status checks, including entities that do not belong to any device.",
+                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, current state, or aliases. Prefer this for most direct control and status checks, including entities that do not belong to any device. This returns a compact summary; call get_entity_details for full entity attributes.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -716,7 +720,7 @@ class MCPServer:
                         },
                         "name_contains": {
                             "type": "string",
-                            "description": "Text that an entity name or alias should contain. Also matches related device names, device aliases, area aliases, floor aliases, and labels (case-insensitive).",
+                            "description": "Text that an entity name or alias should contain. Also matches related device names, device aliases, area aliases, floor aliases, and labels (case-insensitive). Results are ranked by the strongest match.",
                         },
                         "device_class": {
                             "oneOf": [
@@ -768,7 +772,7 @@ class MCPServer:
                         },
                         "name_contains": {
                             "type": "string",
-                            "description": "Text that a device name or alias should contain. Also matches attached entity names/aliases, area aliases, floor aliases, and label names (case-insensitive).",
+                            "description": "Text that a device name or alias should contain. Also matches attached entity names/aliases, area aliases, floor aliases, and label names (case-insensitive). Results are ranked by the strongest match.",
                         },
                         "manufacturer": {
                             "type": "string",
@@ -790,7 +794,7 @@ class MCPServer:
             },
             {
                 "name": "get_entity_details",
-                "description": "Get current state, attributes, aliases, area, floor, and labels of specific entities",
+                "description": "Get current state plus full serialized entity attributes, aliases, area, floor, labels, and device context for specific entities",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -872,7 +876,7 @@ class MCPServer:
                         },
                         "target": {
                             "type": "object",
-                            "description": "Target entities, areas, or devices",
+                            "description": "Target entities or selector IDs such as areas, floors, labels, or devices",
                             "properties": {
                                 "entity_id": {
                                     "oneOf": [
@@ -886,14 +890,28 @@ class MCPServer:
                                         {"type": "string"},
                                         {"type": "array", "items": {"type": "string"}},
                                     ],
-                                    "description": "Single area ID or list of area IDs",
+                                    "description": "Single area ID or list of area IDs. Resolved to exposed entity IDs before the service call.",
+                                },
+                                "floor_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single floor ID or list of floor IDs. Resolved to exposed entity IDs before the service call.",
+                                },
+                                "label_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Single label ID or list of label IDs. Resolved to exposed entity IDs before the service call.",
                                 },
                                 "device_id": {
                                     "oneOf": [
                                         {"type": "string"},
                                         {"type": "array", "items": {"type": "string"}},
                                     ],
-                                    "description": "Single device ID or list of device IDs. Use when intentionally targeting a physical device, often after inspecting its attached entities with get_device_details.",
+                                    "description": "Single device ID or list of device IDs. Resolved to exposed attached entity IDs before the service call.",
                                 },
                             },
                             "minProperties": 1,
@@ -1006,12 +1024,11 @@ class MCPServer:
                                     "items": {"type": "string"},
                                 },
                             ],
-                            "description": "Optional target state or states to filter by. Most useful with mode='last_event'.",
+                            "description": "Optional target state or states to filter by. Works with both timeline and last_event modes.",
                         },
                         "hours": {
                             "type": "integer",
-                            "description": "Number of hours of recorder history to search (default: 24, max: 8760 for 1 year).",
-                            "default": 24,
+                            "description": "Number of hours of recorder history to search. In timeline mode the default is 24 hours; in last_event mode the default is 720 hours (30 days). Max: 8760 hours / 1 year.",
                             "minimum": 1,
                             "maximum": 8760,
                         },
@@ -1066,7 +1083,7 @@ class MCPServer:
             },
             {
                 "name": "analyze_entity_history",
-                "description": "Analyze Home Assistant recorder history for aggregate questions such as 'how many times was the door opened in the last hour?' or 'how often did this sensor trigger today?'. Can count all changes or matching states/events.",
+                "description": "Analyze Home Assistant recorder history for aggregate questions such as 'how many times was the door opened in the last hour?', 'how long has it been locked?', or 'how often did this sensor trigger today?'. Can count all changes or matching states/events.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1091,16 +1108,15 @@ class MCPServer:
                         },
                         "hours": {
                             "type": "integer",
-                            "description": "How far back to analyze recorder history (default: 24 hours, max: 8760 hours / 1 year).",
-                            "default": 24,
+                            "description": "How far back to analyze recorder history. Default is 24 hours for count/summary/duration/stats, and 720 hours (30 days) for streak. Max: 8760 hours / 1 year.",
                             "minimum": 1,
                             "maximum": 8760,
                         },
                         "analysis": {
                             "type": "string",
-                            "enum": ["count", "summary", "duration", "stats"],
+                            "enum": ["count", "summary", "duration", "streak", "stats"],
                             "default": "count",
-                            "description": "count returns how many matching events occurred; summary also includes the first and last matching times in the window; duration reports total time spent in the matching state; stats reports numeric min/max/average over the window.",
+                            "description": "count returns how many matching events occurred; summary also includes the first and last matching times in the window; duration reports total time spent in the matching state; streak reports how long the entity has continuously been in the matching state right now; stats reports numeric min/max/average over the window.",
                         },
                     },
                     "required": ["entity_id"],
@@ -1263,6 +1279,8 @@ class MCPServer:
             detail_parts = [f"{device['entity_count']} entities"]
             if device.get("domains"):
                 detail_parts.append(f"Domains: {', '.join(device['domains'])}")
+            if device.get("match_reasons"):
+                detail_parts.append(f"Matched on: {', '.join(device['match_reasons'])}")
             if device.get("device_aliases"):
                 detail_parts.append(f"Aliases: {', '.join(device['device_aliases'])}")
             if device.get("area"):
@@ -1402,12 +1420,33 @@ class MCPServer:
             for entity in entities:
                 detail_parts = [f"State: {entity['state']}"]
                 detail_parts.append(f"Area: {entity.get('area', 'None')}")
+                if entity.get("device"):
+                    detail_parts.append(f"Device: {entity['device']}")
                 if entity.get("floor"):
                     detail_parts.append(f"Floor: {entity['floor']}")
+                if entity.get("attributes", {}).get("device_class"):
+                    detail_parts.append(
+                        f"Device class: {entity['attributes']['device_class']}"
+                    )
+                if entity.get("match_reasons"):
+                    detail_parts.append(
+                        f"Matched on: {', '.join(entity['match_reasons'])}"
+                    )
                 if entity.get("aliases"):
                     detail_parts.append(f"Aliases: {', '.join(entity['aliases'])}")
                 if entity.get("labels"):
                     detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
+                if entity.get("forecast_available"):
+                    detail_parts.append(
+                        f"Forecast available: {entity.get('forecast_entries', 0)} entries"
+                    )
+                elif entity.get("attribute_keys"):
+                    preview_keys = entity["attribute_keys"][:6]
+                    detail_parts.append(
+                        "Extra attrs via get_entity_details: "
+                        + ", ".join(preview_keys)
+                        + ("..." if len(entity["attribute_keys"]) > len(preview_keys) else "")
+                    )
                 text_parts.append(
                     f"- {entity['entity_id']}: {entity['name']} ({', '.join(detail_parts)})"
                 )
@@ -1792,7 +1831,16 @@ class MCPServer:
 
     async def tool_get_entity_history(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Get entity history with human-readable formatting."""
-        mode = args.get("mode", "timeline")
+        mode = str(args.get("mode", "timeline")).strip().casefold()
+        if mode not in {"timeline", "last_event"}:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Invalid mode. Use 'timeline' or 'last_event'.",
+                    }
+                ]
+            }
         if mode == "last_event":
             return await self._tool_get_last_entity_event_impl(
                 args,
@@ -1800,8 +1848,11 @@ class MCPServer:
             )
 
         entity_id = args.get("entity_id")
-        hours = min(args.get("hours", 24), 8760)  # Max 1 year
-        limit = min(args.get("limit", 50), 100)  # Max 100 changes
+        hours = self._coerce_int_arg(args.get("hours"), default=24, minimum=1, maximum=8760)
+        limit = self._coerce_int_arg(args.get("limit"), default=50, minimum=1, maximum=100)
+        target_states = self._normalize_history_targets(
+            args.get("state"), args.get("event")
+        )
 
         _LOGGER.info(f"📜 Getting history for {entity_id}: {hours} hours, limit {limit}")
 
@@ -1830,7 +1881,7 @@ class MCPServer:
                 entity_id,
                 hours=hours,
                 descending=True,
-                limit=limit,
+                limit=None if target_states else limit,
             )
         except Exception as e:
             _LOGGER.error(f"Failed to get history for {entity_id}: {e}")
@@ -1839,6 +1890,14 @@ class MCPServer:
                     {"type": "text", "text": f"Failed to retrieve history: {str(e)}"}
                 ]
             }
+
+        if target_states:
+            entity_states = [
+                state
+                for state in entity_states
+                if state.state.casefold() in target_states
+            ]
+            entity_states = entity_states[:limit]
 
         # Notify completion
         self.publish_progress(
@@ -1850,6 +1909,22 @@ class MCPServer:
 
         # 4. Format history (most recent first, limited)
         if not entity_states:
+            if target_states:
+                search_label = self._describe_history_target(
+                    args.get("state"), args.get("event")
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{friendly_name} ({entity_id})\n"
+                                f"Current state: {current_state.state}\n\n"
+                                f"No recorded {search_label} entries were found in the last {hours} hours."
+                            ),
+                        }
+                    ]
+                }
             return {
                 "content": [
                     {
@@ -1864,18 +1939,27 @@ class MCPServer:
             f"{friendly_name} ({entity_id})",
             f"Current state: {current_state.state}",
             "",
-            f"Recent history (last {hours} hours):",
+            (
+                f"Matching history for {self._describe_history_target(args.get('state'), args.get('event'))} "
+                f"(last {hours} hours):"
+                if target_states
+                else f"Recent history (last {hours} hours):"
+            ),
         ]
 
         for state in entity_states:
             when = state.last_changed or state.last_updated
-            relative = self._format_relative_time(when)
-            absolute = self._format_absolute_time(when)
-            text_parts.append(f"• {relative} ({absolute}) → {state.state}")
+            text_parts.append(
+                f"• {self._format_relative_absolute_time(when)} → {state.state}"
+            )
 
         text_parts.append("")
         text_parts.append(
-            f"Showing {len(entity_states)} change{'s' if len(entity_states) != 1 else ''}"
+            (
+                f"Showing {len(entity_states)} matching entr{'ies' if len(entity_states) != 1 else 'y'}"
+                if target_states
+                else f"Showing {len(entity_states)} change{'s' if len(entity_states) != 1 else ''}"
+            )
         )
 
         return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
@@ -1892,7 +1976,7 @@ class MCPServer:
     ) -> Dict[str, Any]:
         """Shared implementation for latest-event recorder lookups."""
         entity_id = args.get("entity_id")
-        hours = min(args.get("hours", 720), 8760)  # Max 1 year
+        hours = self._coerce_int_arg(args.get("hours"), default=720, minimum=1, maximum=8760)
         current_state = self.hass.states.get(entity_id)
 
         if not current_state:
@@ -1902,17 +1986,23 @@ class MCPServer:
                 ]
             }
 
-        friendly_name = current_state.attributes.get("friendly_name", entity_id)
         target_states = self._normalize_history_targets(
             args.get("state"), args.get("event")
         )
+        history_entity_id, resolution_note = self._resolve_history_entity_for_request(
+            entity_id,
+            args.get("state"),
+            args.get("event"),
+        )
+        current_state = self.hass.states.get(history_entity_id)
+        friendly_name = current_state.attributes.get("friendly_name", history_entity_id)
         end_time = dt_util.utcnow()
 
         self.publish_progress(
             "tool_start",
-            f"Searching recorder history for {entity_id}",
+            f"Searching recorder history for {history_entity_id}",
             tool=tool_name,
-            entity_id=entity_id,
+            entity_id=history_entity_id,
         )
 
         try:
@@ -1920,7 +2010,7 @@ class MCPServer:
                 matched_state = None
                 for window_hours in self._build_history_search_windows(hours):
                     entity_states = await self._fetch_entity_history_states(
-                        entity_id,
+                        history_entity_id,
                         hours=window_hours,
                         end_time=end_time,
                         descending=True,
@@ -1937,7 +2027,7 @@ class MCPServer:
                         break
             else:
                 entity_states = await self._fetch_entity_history_states(
-                    entity_id,
+                    history_entity_id,
                     hours=hours,
                     end_time=end_time,
                     descending=True,
@@ -1945,7 +2035,9 @@ class MCPServer:
                 )
                 matched_state = entity_states[0] if entity_states else None
         except Exception as err:
-            _LOGGER.error("Failed to get last recorder event for %s: %s", entity_id, err)
+            _LOGGER.error(
+                "Failed to get last recorder event for %s: %s", history_entity_id, err
+            )
             return {
                 "content": [
                     {
@@ -1972,17 +2064,20 @@ class MCPServer:
                     {
                         "type": "text",
                         "text": (
-                            f"{friendly_name} ({entity_id})\n"
+                            f"{friendly_name} ({history_entity_id})\n"
                             f"Current state: {current_state.state}\n\n"
                             f"No recorded {search_label} event was found in the last {hours} hours."
+                            + (
+                                f"\n\n{resolution_note}"
+                                if resolution_note
+                                else ""
+                            )
                         ),
                     }
                 ]
             }
 
         when = matched_state.last_changed or matched_state.last_updated
-        relative = self._format_relative_time(when)
-        absolute = self._format_absolute_time(when)
         search_label = self._describe_history_target(
             args.get("state"), args.get("event")
         )
@@ -1992,9 +2087,14 @@ class MCPServer:
                 {
                     "type": "text",
                     "text": (
-                        f"{friendly_name} ({entity_id})\n"
+                        (
+                            f"{resolution_note}\n\n"
+                            if resolution_note
+                            else ""
+                        )
+                        + f"{friendly_name} ({history_entity_id})\n"
                         f"Current state: {current_state.state}\n"
-                        f"Last recorded {search_label}: {absolute} ({relative})\n"
+                        f"Last recorded {search_label}: {self._format_relative_absolute_time(when)}\n"
                         f"Matched state: {matched_state.state}"
                     ),
                 }
@@ -2003,28 +2103,45 @@ class MCPServer:
 
     async def tool_analyze_entity_history(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze recorder history for counts and summaries."""
+        analysis = str(args.get("analysis", "count")).strip().casefold()
+        if analysis not in {"count", "summary", "duration", "stats", "streak"}:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Invalid analysis. Use 'count', 'summary', 'duration', 'streak', or 'stats'.",
+                    }
+                ]
+            }
         entity_id = args.get("entity_id")
-        hours = min(args.get("hours", 24), 8760)  # Max 1 year
-        analysis = args.get("analysis", "count")
-        current_state = self.hass.states.get(entity_id)
+        default_hours = 720 if analysis == "streak" else 24
+        hours = self._coerce_int_arg(
+            args.get("hours"), default=default_hours, minimum=1, maximum=8760
+        )
+        history_entity_id, resolution_note = self._resolve_history_entity_for_request(
+            entity_id,
+            args.get("state"),
+            args.get("event"),
+        )
+        current_state = self.hass.states.get(history_entity_id)
 
         if not current_state:
             return {
                 "content": [
-                    {"type": "text", "text": f"Entity '{entity_id}' not found."}
+                    {"type": "text", "text": f"Entity '{history_entity_id}' not found."}
                 ]
             }
 
-        friendly_name = current_state.attributes.get("friendly_name", entity_id)
+        friendly_name = current_state.attributes.get("friendly_name", history_entity_id)
         target_states = self._normalize_history_targets(
             args.get("state"), args.get("event")
         )
 
         self.publish_progress(
             "tool_start",
-            f"Analyzing recorder history for {entity_id}",
+            f"Analyzing recorder history for {history_entity_id}",
             tool="analyze_entity_history",
-            entity_id=entity_id,
+            entity_id=history_entity_id,
         )
 
         query_end_time = dt_util.utcnow()
@@ -2032,14 +2149,16 @@ class MCPServer:
 
         try:
             entity_states = await self._fetch_entity_history_states(
-                entity_id,
+                history_entity_id,
                 hours=hours,
                 end_time=query_end_time,
                 descending=False,
-                include_start_time_state=analysis in {"duration", "stats"},
+                include_start_time_state=analysis in {"duration", "streak", "stats"},
             )
         except Exception as err:
-            _LOGGER.error("Failed to analyze history for %s: %s", entity_id, err)
+            _LOGGER.error(
+                "Failed to analyze history for %s: %s", history_entity_id, err
+            )
             return {
                 "content": [
                     {
@@ -2065,7 +2184,7 @@ class MCPServer:
                         {
                             "type": "text",
                             "text": (
-                                f"{friendly_name} ({entity_id})\n"
+                                f"{friendly_name} ({history_entity_id})\n"
                                 "Duration analysis requires a target event or state, such as opened, closed, on, or off."
                             ),
                         }
@@ -2093,22 +2212,24 @@ class MCPServer:
             )
 
             text_parts = [
-                f"{friendly_name} ({entity_id})",
+                f"{friendly_name} ({history_entity_id})",
                 f"Current state: {current_state.state}",
                 f"Total time in {search_label} state during the last {hours} hour{'s' if hours != 1 else ''}: {self._format_duration(total_duration)}",
                 f"Matching interval{'s' if interval_count != 1 else ''}: {interval_count}",
             ]
+            text_parts = self._prepend_resolution_note(text_parts, resolution_note)
 
             if interval_count:
                 first_start = duration_result.get("first_start")
                 last_end = duration_result.get("last_end")
                 if first_start is not None:
                     text_parts.append(
-                        f"First matching interval in window started: {self._format_absolute_time(first_start)} ({self._format_relative_time(first_start)})"
+                        "First matching interval in window started: "
+                        f"{self._format_relative_absolute_time(first_start)}"
                     )
                 if last_end is not None and last_end < query_end_time:
                     text_parts.append(
-                        f"Last matching interval ended: {self._format_absolute_time(last_end)} ({self._format_relative_time(last_end)})"
+                        f"Last matching interval ended: {self._format_relative_absolute_time(last_end)}"
                     )
 
             if current_state.state.casefold() in target_filter_states:
@@ -2120,6 +2241,106 @@ class MCPServer:
             if not interval_count:
                 text_parts.append("No matching recorder intervals were found in that window.")
 
+            return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+        if analysis == "streak":
+            if not target_filter_states:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{friendly_name} ({history_entity_id})\n"
+                                "Streak analysis requires a target event or state, such as locked, opened, on, or home."
+                            ),
+                        }
+                    ]
+                }
+
+            search_label = self._describe_history_target(
+                args.get("state"), args.get("event")
+            )
+            if current_state.state.casefold() not in target_filter_states:
+                text_parts = [
+                    f"{friendly_name} ({history_entity_id})",
+                    f"Current state: {current_state.state}",
+                    f"It is not currently {search_label}, so there is no ongoing {search_label} streak to measure.",
+                ]
+                text_parts = self._prepend_resolution_note(text_parts, resolution_note)
+                return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+            streak_start = query_start_time
+            exact_start = False
+            streak_reaches_window_start = True
+
+            for window_hours in self._build_history_search_windows(hours):
+                window_start = query_end_time - timedelta(hours=window_hours)
+                window_states = await self._fetch_entity_history_states(
+                    history_entity_id,
+                    hours=window_hours,
+                    end_time=query_end_time,
+                    descending=False,
+                    include_start_time_state=True,
+                )
+                if not window_states:
+                    continue
+                if window_states[-1].state.casefold() not in target_filter_states:
+                    break
+
+                start_idx = len(window_states) - 1
+                while (
+                    start_idx > 0
+                    and window_states[start_idx - 1].state.casefold() in target_filter_states
+                ):
+                    start_idx -= 1
+
+                streak_start = (
+                    window_states[start_idx].last_changed
+                    or window_states[start_idx].last_updated
+                )
+                if start_idx > 0:
+                    exact_start = True
+                    streak_reaches_window_start = False
+                    break
+                if streak_start > window_start:
+                    exact_start = True
+                    streak_reaches_window_start = False
+                    break
+                streak_reaches_window_start = True
+                if window_hours >= hours:
+                    break
+
+            streak_duration = query_end_time - max(streak_start, query_start_time)
+
+            self.publish_progress(
+                "tool_complete",
+                "Recorder history streak analysis complete",
+                tool="analyze_entity_history",
+                success=True,
+                seconds=int(streak_duration.total_seconds()),
+            )
+
+            duration_text = self._format_duration(streak_duration)
+            text_parts = [
+                f"{friendly_name} ({history_entity_id})",
+                f"Current state: {current_state.state}",
+            ]
+            if exact_start:
+                text_parts.append(
+                    f"Current {search_label} streak: {duration_text}"
+                )
+                text_parts.append(
+                    f"Streak started: {self._format_relative_absolute_time(streak_start)}"
+                )
+            else:
+                text_parts.append(
+                    f"Current {search_label} streak: at least {duration_text}"
+                )
+                if streak_reaches_window_start:
+                    text_parts.append(
+                        f"The streak extends beyond the searched {hours}-hour window."
+                    )
+            text_parts = self._prepend_resolution_note(text_parts, resolution_note)
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
 
         if analysis == "stats":
@@ -2135,7 +2356,7 @@ class MCPServer:
                         {
                             "type": "text",
                             "text": (
-                                f"{friendly_name} ({entity_id})\n"
+                                f"{friendly_name} ({history_entity_id})\n"
                                 "Recorder history did not contain numeric states in that window, so min/max/average could not be calculated."
                             ),
                         }
@@ -2152,24 +2373,25 @@ class MCPServer:
             min_time = stats_result["min_time"]
             max_time = stats_result["max_time"]
             text_parts = [
-                f"{friendly_name} ({entity_id})",
+                f"{friendly_name} ({history_entity_id})",
                 f"Current state: {current_state.state}",
                 f"Numeric recorder stats for the last {hours} hour{'s' if hours != 1 else ''}:",
                 f"Minimum: {self._format_number(stats_result['min'])}"
                 + (
-                    f" at {self._format_absolute_time(min_time)} ({self._format_relative_time(min_time)})"
+                    f" at {self._format_relative_absolute_time(min_time)}"
                     if min_time is not None
                     else ""
                 ),
                 f"Maximum: {self._format_number(stats_result['max'])}"
                 + (
-                    f" at {self._format_absolute_time(max_time)} ({self._format_relative_time(max_time)})"
+                    f" at {self._format_relative_absolute_time(max_time)}"
                     if max_time is not None
                     else ""
                 ),
                 f"Average: {self._format_number(stats_result['average'])} (time-weighted)",
                 f"Numeric state samples: {stats_result['sample_count']}",
             ]
+            text_parts = self._prepend_resolution_note(text_parts, resolution_note)
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
 
@@ -2198,7 +2420,7 @@ class MCPServer:
         noun = f"{search_label} event" if search_label != "change" else "state change"
 
         text_parts = [
-            f"{friendly_name} ({entity_id})",
+            f"{friendly_name} ({history_entity_id})",
             f"Current state: {current_state.state}",
             f"Recorded {noun}{'s' if match_count != 1 else ''} in the last {hours} hour{'s' if hours != 1 else ''}: {match_count}",
         ]
@@ -2214,15 +2436,16 @@ class MCPServer:
             first_when = first_match.last_changed or first_match.last_updated
             last_when = last_match.last_changed or last_match.last_updated
             text_parts.append(
-                f"First matching event in window: {self._format_absolute_time(first_when)} ({self._format_relative_time(first_when)})"
+                f"First matching event in window: {self._format_relative_absolute_time(first_when)}"
             )
             text_parts.append(
-                f"Most recent matching event: {self._format_absolute_time(last_when)} ({self._format_relative_time(last_when)})"
+                f"Most recent matching event: {self._format_relative_absolute_time(last_when)}"
             )
 
         if analysis == "summary" and not matched_states:
             text_parts.append("No matching recorder events were found in that window.")
 
+        text_parts = self._prepend_resolution_note(text_parts, resolution_note)
         return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
 
     async def tool_get_entity_state_at_time(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2279,6 +2502,10 @@ class MCPServer:
             }
 
         state_at_time = entity_states[0] if entity_states else None
+        if state_at_time is not None:
+            state_when = state_at_time.last_changed or state_at_time.last_updated
+            if state_when > target_time:
+                state_at_time = None
 
         self.publish_progress(
             "tool_complete",
@@ -2547,6 +2774,150 @@ class MCPServer:
             return str(int(value))
         return f"{value:.3f}".rstrip("0").rstrip(".")
 
+    def _history_preferred_domains(self, requested_values: List[str]) -> Dict[str, int]:
+        """Return domain preferences for semantic history requests."""
+        domain_scores: Dict[str, int] = {}
+        for value in requested_values:
+            if value in {"locked", "unlocked"}:
+                domain_scores["lock"] = max(domain_scores.get("lock", 0), 120)
+            elif value in {"open", "opened", "opening", "close", "closed", "closing"}:
+                domain_scores["cover"] = max(domain_scores.get("cover", 0), 90)
+                domain_scores["binary_sensor"] = max(
+                    domain_scores.get("binary_sensor", 0), 80
+                )
+                domain_scores["lock"] = max(domain_scores.get("lock", 0), 40)
+            elif value in {"home", "away", "not_home"}:
+                domain_scores["person"] = max(domain_scores.get("person", 0), 100)
+                domain_scores["device_tracker"] = max(
+                    domain_scores.get("device_tracker", 0), 95
+                )
+            elif value in {"detected", "triggered", "clear", "cleared"}:
+                domain_scores["binary_sensor"] = max(
+                    domain_scores.get("binary_sensor", 0), 90
+                )
+        return domain_scores
+
+    def _history_preferred_device_classes(self, requested_values: List[str]) -> set[str]:
+        """Return preferred device classes for semantic history requests."""
+        device_classes: set[str] = set()
+        for value in requested_values:
+            if value in {"open", "opened", "opening", "close", "closed", "closing"}:
+                device_classes.update({"door", "window", "opening", "garage_door"})
+            elif value in {"detected", "triggered", "clear", "cleared"}:
+                device_classes.update(
+                    {
+                        "motion",
+                        "occupancy",
+                        "presence",
+                        "door",
+                        "window",
+                        "opening",
+                        "garage_door",
+                        "sound",
+                        "vibration",
+                    }
+                )
+        return device_classes
+
+    def _score_entity_for_history_request(
+        self,
+        state_obj: Any,
+        requested_values: List[str],
+        target_states: List[str],
+    ) -> int:
+        """Score how appropriate an entity is for a semantic history request."""
+        if state_obj is None or not requested_values:
+            return 0
+
+        domain = state_obj.entity_id.split(".", 1)[0]
+        device_class = str(state_obj.attributes.get("device_class", "")).casefold()
+        current_state = state_obj.state.casefold()
+        preferred_domains = self._history_preferred_domains(requested_values)
+        preferred_device_classes = self._history_preferred_device_classes(
+            requested_values
+        )
+
+        score = preferred_domains.get(domain, 0)
+        if device_class and device_class in preferred_device_classes:
+            score += 25
+        if current_state in target_states:
+            score += 20
+
+        return score
+
+    def _resolve_history_entity_for_request(
+        self,
+        entity_id: str,
+        raw_state: Any,
+        raw_event: Any,
+    ) -> tuple[str, str | None]:
+        """Resolve a better sibling entity for semantic history requests when needed."""
+        requested_values = self._normalize_history_request_values(raw_state, raw_event)
+        if not requested_values:
+            return entity_id, None
+
+        target_states = self._normalize_history_targets(raw_state, raw_event)
+        current_state = self.hass.states.get(entity_id)
+        if current_state is None:
+            return entity_id, None
+
+        current_score = self._score_entity_for_history_request(
+            current_state,
+            requested_values,
+            target_states,
+        )
+
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        entity_entry = entity_registry.async_get(entity_id)
+        if not entity_entry or not entity_entry.device_id:
+            return entity_id, None
+
+        best_entity_id = entity_id
+        best_score = current_score
+
+        for sibling_state in self.hass.states.async_all():
+            sibling_entity_id = sibling_state.entity_id
+            if sibling_entity_id == entity_id:
+                continue
+            if not async_should_expose(self.hass, "conversation", sibling_entity_id):
+                continue
+
+            sibling_entry = entity_registry.async_get(sibling_entity_id)
+            if not sibling_entry or sibling_entry.device_id != entity_entry.device_id:
+                continue
+            if device_registry.async_get(sibling_entry.device_id) is None:
+                continue
+
+            sibling_score = self._score_entity_for_history_request(
+                sibling_state,
+                requested_values,
+                target_states,
+            )
+            if sibling_score > best_score:
+                best_entity_id = sibling_entity_id
+                best_score = sibling_score
+
+        if best_entity_id == entity_id or best_score < current_score + 20:
+            return entity_id, None
+
+        requested_label = self._describe_history_target(raw_state, raw_event)
+        return (
+            best_entity_id,
+            (
+                f"Using related entity {best_entity_id} because {entity_id} is on the same device, "
+                f"and the requested {requested_label} history applies more directly to that entity."
+            ),
+        )
+
+    def _prepend_resolution_note(
+        self, text_parts: List[str], resolution_note: str | None
+    ) -> List[str]:
+        """Prepend a history-entity resolution note when a sibling entity was used."""
+        if not resolution_note:
+            return text_parts
+        return [resolution_note, ""] + text_parts
+
     def _history_state_aliases(self, value: str) -> List[str]:
         """Map semantic event words to likely recorder states."""
         aliases = {
@@ -2607,7 +2978,29 @@ class MCPServer:
 
     def _format_absolute_time(self, when) -> str:
         """Format a timestamp in the user's local time zone."""
-        return dt_util.as_local(when).strftime("%Y-%m-%d %H:%M:%S %Z")
+        local_when = dt_util.as_local(when)
+        now_local = dt_util.as_local(dt_util.utcnow())
+        time_text = local_when.strftime("%I:%M %p %Z").lstrip("0")
+
+        if local_when.date() == now_local.date():
+            day_text = "today"
+        elif local_when.date() == now_local.date() - timedelta(days=1):
+            day_text = "yesterday"
+        elif local_when.date() == now_local.date() + timedelta(days=1):
+            day_text = "tomorrow"
+        else:
+            date_text = local_when.strftime("%b %d").replace(" 0", " ")
+            if local_when.year != now_local.year:
+                date_text += f", {local_when.year}"
+            day_text = f"on {date_text}"
+
+        return f"{time_text} {day_text}"
+
+    def _format_relative_absolute_time(self, when) -> str:
+        """Format a timestamp with both relative and absolute local time."""
+        relative = self._format_relative_time(when)
+        absolute = self._format_absolute_time(when)
+        return f"{relative} at {absolute}"
 
     def _parse_history_datetime(self, value: Any):
         """Parse a recorder lookup datetime and assume local time if naive."""
@@ -2619,9 +3012,31 @@ class MCPServer:
             return None
 
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt_util.now().tzinfo)
+            parsed = parsed.replace(
+                tzinfo=getattr(dt_util, "DEFAULT_TIME_ZONE", dt_util.now().tzinfo)
+            )
 
         return dt_util.as_utc(parsed)
+
+    def _coerce_int_arg(
+        self, value: Any, *, default: int, minimum: int, maximum: int
+    ) -> int:
+        """Coerce an integer-like tool argument safely."""
+        if value is None:
+            parsed = default
+        elif isinstance(value, bool):
+            parsed = default
+        elif isinstance(value, int):
+            parsed = value
+        elif isinstance(value, float):
+            parsed = int(value)
+        else:
+            try:
+                parsed = int(str(value).strip())
+            except (TypeError, ValueError):
+                parsed = default
+
+        return max(minimum, min(parsed, maximum))
 
     def _build_history_search_windows(self, max_hours: int) -> List[int]:
         """Build progressively larger recorder search windows."""
@@ -2690,42 +3105,149 @@ class MCPServer:
             raise ValueError(result)  # Returns error message
 
     async def resolve_target(self, target: Dict[str, Any]) -> Dict[str, Any]:
-        """Resolve areas and devices to entity_ids."""
-        resolved = {}
+        """Resolve target selectors to exposed entity IDs."""
+        explicit_entity_ids = self._normalize_target_values(target.get("entity_id"))
+        selector_values = {
+            "area_id": self._normalize_target_values(target.get("area_id")),
+            "floor_id": self._normalize_target_values(target.get("floor_id")),
+            "label_id": self._normalize_target_values(target.get("label_id")),
+            "device_id": self._normalize_target_values(target.get("device_id")),
+        }
+        active_selectors = {
+            key: values for key, values in selector_values.items() if values
+        }
 
-        # Pass through entity_id as-is
-        if "entity_id" in target:
-            entity_id = target["entity_id"]
-            # Ensure it's a list for consistency
-            if isinstance(entity_id, str):
-                entity_id = [entity_id]
-            resolved["entity_id"] = entity_id
-            _LOGGER.debug(f"Using entity_ids: {entity_id}")
+        resolved_entities = set()
+        invalid_entity_ids = []
+        for entity_id in explicit_entity_ids:
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                invalid_entity_ids.append(f"{entity_id} (not found)")
+                continue
+            if not async_should_expose(self.hass, "conversation", entity_id):
+                invalid_entity_ids.append(f"{entity_id} (not exposed to conversation)")
+                continue
+            resolved_entities.add(entity_id)
 
-        # Resolve area_id to entities
-        if "area_id" in target:
-            area_ids = target["area_id"]
-            if isinstance(area_ids, str):
-                area_ids = [area_ids]
+        if invalid_entity_ids:
+            raise ValueError(
+                "Invalid entity targets: " + ", ".join(invalid_entity_ids)
+            )
 
-            area_entities = []
-            for area_id in area_ids:
-                # Get entities in this area
-                entities = await self.discovery.get_entities_by_area(area_id)
-                area_entities.extend([e["entity_id"] for e in entities])
-                _LOGGER.debug(f"Found {len(entities)} entities in area '{area_id}'")
+        if active_selectors:
+            selector_matches = self._find_exposed_entities_for_target(active_selectors)
+            selector_sets = []
 
-            if area_entities:
-                if "entity_id" in resolved:
-                    # Merge with existing entity_ids
-                    existing = resolved["entity_id"]
-                    resolved["entity_id"] = list(set(existing + area_entities))
-                else:
-                    resolved["entity_id"] = area_entities
+            for selector_key, selector_ids in active_selectors.items():
+                matched_entities = selector_matches.get(selector_key, set())
+                if not matched_entities:
+                    raise ValueError(
+                        "No exposed conversation entities matched "
+                        f"{selector_key}: {', '.join(selector_ids)}"
+                    )
+                selector_sets.append(matched_entities)
 
-        # Pass through device_id if present (HA will handle it)
-        if "device_id" in target:
-            resolved["device_id"] = target["device_id"]
-            _LOGGER.debug(f"Using device_id: {target['device_id']}")
+            combined_matches = set.intersection(*selector_sets)
+            if not combined_matches:
+                raise ValueError(
+                    "No exposed conversation entities matched the combined target selectors."
+                )
 
-        return resolved if resolved else target
+            resolved_entities.update(combined_matches)
+
+        if not resolved_entities:
+            raise ValueError(
+                "Target did not resolve to any exposed entities. Use discover_entities first."
+            )
+
+        resolved_target = {"entity_id": sorted(resolved_entities)}
+        _LOGGER.debug("Resolved target %s to entity_ids: %s", target, resolved_target["entity_id"])
+        return resolved_target
+
+    @staticmethod
+    def _normalize_target_values(value: Any) -> List[str]:
+        """Normalize scalar or list target selector values to unique strings."""
+        if value is None:
+            return []
+
+        if isinstance(value, str):
+            raw_values = [value]
+        elif isinstance(value, (list, tuple, set)):
+            raw_values = list(value)
+        else:
+            raw_values = [value]
+
+        normalized = []
+        seen = set()
+        for item in raw_values:
+            if item is None:
+                continue
+            item_text = str(item).strip()
+            if not item_text or item_text in seen:
+                continue
+            seen.add(item_text)
+            normalized.append(item_text)
+
+        return normalized
+
+    def _find_exposed_entities_for_target(
+        self, selectors: Dict[str, List[str]]
+    ) -> Dict[str, set[str]]:
+        """Resolve area, floor, label, and device selectors to exposed entities."""
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        selector_sets = {key: set(values) for key, values in selectors.items() if values}
+
+        area_floor_ids = {}
+        area_label_ids = {}
+        for area_entry in area_registry.async_list_areas():
+            area_floor_ids[area_entry.id] = getattr(area_entry, "floor_id", None)
+            area_label_ids[area_entry.id] = set(getattr(area_entry, "labels", set()) or set())
+
+        matches = {
+            "area_id": set(),
+            "floor_id": set(),
+            "label_id": set(),
+            "device_id": set(),
+        }
+
+        for state_obj in self.hass.states.async_all():
+            entity_id = state_obj.entity_id
+            if not async_should_expose(self.hass, "conversation", entity_id):
+                continue
+
+            entity_entry = entity_registry.async_get(entity_id)
+            device_entry = (
+                device_registry.async_get(entity_entry.device_id)
+                if entity_entry and entity_entry.device_id
+                else None
+            )
+            area_id = None
+            if entity_entry and entity_entry.area_id:
+                area_id = entity_entry.area_id
+            elif device_entry and device_entry.area_id:
+                area_id = device_entry.area_id
+
+            floor_id = area_floor_ids.get(area_id)
+
+            label_ids = set(getattr(entity_entry, "labels", set()) or set())
+            if device_entry:
+                label_ids.update(getattr(device_entry, "labels", set()) or set())
+            if area_id:
+                label_ids.update(area_label_ids.get(area_id, set()))
+
+            if selector_sets.get("area_id") and area_id in selector_sets["area_id"]:
+                matches["area_id"].add(entity_id)
+            if selector_sets.get("floor_id") and floor_id in selector_sets["floor_id"]:
+                matches["floor_id"].add(entity_id)
+            if selector_sets.get("label_id") and label_ids.intersection(selector_sets["label_id"]):
+                matches["label_id"].add(entity_id)
+            if (
+                selector_sets.get("device_id")
+                and entity_entry
+                and entity_entry.device_id in selector_sets["device_id"]
+            ):
+                matches["device_id"].add(entity_id)
+
+        return matches

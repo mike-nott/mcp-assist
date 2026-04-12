@@ -9,7 +9,7 @@ import fnmatch
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from enum import Enum
 
@@ -486,30 +486,154 @@ class SmartDiscovery:
         entity_context: Dict[str, Any],
     ) -> bool:
         """Check whether a search term matches an entity or its related context."""
-        search_values = {
-            state_obj.entity_id,
-            state_obj.name,
-            state_obj.attributes.get("friendly_name", ""),
-            entity_context.get("area"),
-            entity_context.get("floor"),
-            entity_context.get("device"),
-            entity_context.get("device_name"),
-            entity_context.get("device_name_by_user"),
-        }
-
-        entity_aliases = self._get_entity_aliases(entity_entry)
-        if entity_aliases:
-            search_values.update(entity_aliases)
-
-        search_values.update(entity_context.get("area_aliases", []))
-        search_values.update(entity_context.get("floor_aliases", []))
-        search_values.update(entity_context.get("device_aliases", []))
-        search_values.update(entity_context.get("labels", []))
-
-        return any(
-            value and search_term in value.casefold()
-            for value in search_values
+        score, _ = self._get_entity_match_details(
+            search_term,
+            state_obj,
+            entity_entry,
+            entity_context,
         )
+        return score > 0
+
+    def _score_search_value(
+        self,
+        search_term: str,
+        value: Any,
+        *,
+        exact_score: int,
+        substring_score: int,
+        token_score: int,
+    ) -> int:
+        """Score how strongly a value matches a search term."""
+        if not value:
+            return 0
+
+        normalized_value = str(value).casefold()
+        if normalized_value == search_term:
+            return exact_score
+        if search_term in normalized_value:
+            return substring_score
+
+        search_tokens = [
+            token for token in re.split(r"[\s._-]+", search_term) if token
+        ]
+        if search_tokens and all(token in normalized_value for token in search_tokens):
+            return token_score
+
+        return 0
+
+    def _get_entity_match_details(
+        self,
+        search_term: str,
+        state_obj: Any,
+        entity_entry: Any,
+        entity_context: Dict[str, Any],
+    ) -> Tuple[int, List[str]]:
+        """Return match score and reasons for an entity search."""
+        score = 0
+        reasons: List[str] = []
+
+        def consider(
+            reason: str,
+            value: Any,
+            *,
+            exact_score: int,
+            substring_score: int,
+            token_score: int,
+        ) -> None:
+            nonlocal score
+            match_score = self._score_search_value(
+                search_term,
+                value,
+                exact_score=exact_score,
+                substring_score=substring_score,
+                token_score=token_score,
+            )
+            if match_score <= 0:
+                return
+            score += match_score
+            if reason not in reasons:
+                reasons.append(reason)
+
+        consider(
+            "entity name",
+            state_obj.name,
+            exact_score=120,
+            substring_score=90,
+            token_score=75,
+        )
+        consider(
+            "entity id",
+            state_obj.entity_id,
+            exact_score=115,
+            substring_score=85,
+            token_score=70,
+        )
+        consider(
+            "friendly name",
+            state_obj.attributes.get("friendly_name", ""),
+            exact_score=120,
+            substring_score=90,
+            token_score=75,
+        )
+
+        for alias in self._get_entity_aliases(entity_entry):
+            consider(
+                "entity alias",
+                alias,
+                exact_score=110,
+                substring_score=80,
+                token_score=65,
+            )
+
+        for key, reason, exact_score, substring_score, token_score in (
+            ("device", "device name", 95, 70, 60),
+            ("device_name", "device name", 95, 70, 60),
+            ("device_name_by_user", "device name", 95, 70, 60),
+            ("area", "area", 45, 25, 20),
+            ("floor", "floor", 45, 25, 20),
+        ):
+            consider(
+                reason,
+                entity_context.get(key),
+                exact_score=exact_score,
+                substring_score=substring_score,
+                token_score=token_score,
+            )
+
+        for alias in entity_context.get("device_aliases", []):
+            consider(
+                "device alias",
+                alias,
+                exact_score=90,
+                substring_score=65,
+                token_score=55,
+            )
+        for alias in entity_context.get("area_aliases", []):
+            consider(
+                "area alias",
+                alias,
+                exact_score=40,
+                substring_score=22,
+                token_score=18,
+            )
+        for alias in entity_context.get("floor_aliases", []):
+            consider(
+                "floor alias",
+                alias,
+                exact_score=40,
+                substring_score=22,
+                token_score=18,
+            )
+        for label_name in entity_context.get("labels", []):
+            consider(
+                "label",
+                label_name,
+                exact_score=35,
+                substring_score=20,
+                token_score=16,
+            )
+
+        return score, reasons
 
     def _get_device_context(
         self,
@@ -609,36 +733,121 @@ class SmartDiscovery:
         device_entities: List[Dict[str, Any]],
     ) -> bool:
         """Check whether a search term matches a device or its attached entities."""
-        search_values = {
-            device_context.get("device"),
-            device_context.get("device_name"),
-            device_context.get("device_name_by_user"),
-            device_context.get("manufacturer"),
-            device_context.get("model"),
-            device_context.get("model_id"),
-            device_context.get("area"),
-            device_context.get("floor"),
-        }
+        score, _ = self._get_device_match_details(
+            search_term,
+            device_context,
+            device_entities,
+        )
+        return score > 0
 
-        search_values.update(device_context.get("device_aliases", []))
-        search_values.update(device_context.get("area_aliases", []))
-        search_values.update(device_context.get("floor_aliases", []))
-        search_values.update(device_context.get("labels", []))
+    def _get_device_match_details(
+        self,
+        search_term: str,
+        device_context: Dict[str, Any],
+        device_entities: List[Dict[str, Any]],
+    ) -> Tuple[int, List[str]]:
+        """Return match score and reasons for a device search."""
+        score = 0
+        reasons: List[str] = []
+
+        def consider(
+            reason: str,
+            value: Any,
+            *,
+            exact_score: int,
+            substring_score: int,
+            token_score: int,
+        ) -> None:
+            nonlocal score
+            match_score = self._score_search_value(
+                search_term,
+                value,
+                exact_score=exact_score,
+                substring_score=substring_score,
+                token_score=token_score,
+            )
+            if match_score <= 0:
+                return
+            score += match_score
+            if reason not in reasons:
+                reasons.append(reason)
+
+        for key, reason, exact_score, substring_score, token_score in (
+            ("device", "device name", 120, 90, 75),
+            ("device_name", "device name", 120, 90, 75),
+            ("device_name_by_user", "device name", 120, 90, 75),
+            ("manufacturer", "manufacturer", 55, 35, 28),
+            ("model", "model", 55, 35, 28),
+            ("model_id", "model", 45, 28, 22),
+            ("area", "area", 45, 25, 20),
+            ("floor", "floor", 45, 25, 20),
+        ):
+            consider(
+                reason,
+                device_context.get(key),
+                exact_score=exact_score,
+                substring_score=substring_score,
+                token_score=token_score,
+            )
+
+        for alias in device_context.get("device_aliases", []):
+            consider(
+                "device alias",
+                alias,
+                exact_score=110,
+                substring_score=80,
+                token_score=65,
+            )
+        for alias in device_context.get("area_aliases", []):
+            consider(
+                "area alias",
+                alias,
+                exact_score=40,
+                substring_score=22,
+                token_score=18,
+            )
+        for alias in device_context.get("floor_aliases", []):
+            consider(
+                "floor alias",
+                alias,
+                exact_score=40,
+                substring_score=22,
+                token_score=18,
+            )
+        for label_name in device_context.get("labels", []):
+            consider(
+                "label",
+                label_name,
+                exact_score=35,
+                substring_score=20,
+                token_score=16,
+            )
 
         for entity in device_entities:
-            search_values.update(
-                [
-                    entity.get("entity_id"),
-                    entity.get("name"),
-                    entity.get("domain"),
-                ]
+            consider(
+                "attached entity name",
+                entity.get("name"),
+                exact_score=70,
+                substring_score=45,
+                token_score=36,
             )
-            search_values.update(entity.get("aliases", []))
+            consider(
+                "attached entity id",
+                entity.get("entity_id"),
+                exact_score=68,
+                substring_score=44,
+                token_score=34,
+            )
+            for alias in entity.get("aliases", []):
+                consider(
+                    "attached entity alias",
+                    alias,
+                    exact_score=64,
+                    substring_score=42,
+                    token_score=32,
+                )
 
-        return any(
-            value and search_term in value.casefold()
-            for value in search_values
-        )
+        return score, reasons
 
     def _create_device_info(
         self,
@@ -979,7 +1188,8 @@ class SmartDiscovery:
             else:
                 _LOGGER.warning("Index manager not available for inferred_type lookup")
 
-        entities = []
+        entities_with_score: List[Tuple[int, str, Dict[str, Any]]] = []
+        collect_all_matches = bool(name_contains)
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
@@ -1067,14 +1277,17 @@ class SmartDiscovery:
             )
 
             # Enhanced name search - search entity_id, friendly name, AND aliases
+            match_score = 0
+            match_reasons: List[str] = []
             if name_contains:
-                search_term = name_contains.lower()
-                if not self._entity_matches_search_term(
+                search_term = name_contains.casefold()
+                match_score, match_reasons = self._get_entity_match_details(
                     search_term,
                     state_obj,
                     entity_entry,
                     entity_context,
-                ):
+                )
+                if match_score <= 0:
                     continue
 
             # Device class filter
@@ -1116,11 +1329,29 @@ class SmartDiscovery:
                 entity_context=entity_context,
             )
 
-            entities.append(entity_info)
+            if match_score > 0:
+                entity_info["match_score"] = match_score
+            if match_reasons:
+                entity_info["match_reasons"] = match_reasons
 
-            # Stop if we hit the limit
-            if len(entities) >= limit:
+            entities_with_score.append(
+                (
+                    match_score,
+                    state_obj.entity_id,
+                    entity_info,
+                )
+            )
+
+            if not collect_all_matches and len(entities_with_score) >= limit:
                 break
+
+        if collect_all_matches:
+            entities_with_score.sort(
+                key=lambda item: (-item[0], item[1])
+            )
+            entities = [entity for _, _, entity in entities_with_score[:limit]]
+        else:
+            entities = [entity for _, _, entity in entities_with_score]
 
         _LOGGER.debug(
             f"General discovery found {len(entities)} entities with filters: "
@@ -1192,11 +1423,27 @@ class SmartDiscovery:
         if state_obj.attributes:
             useful_attrs = {}
             for attr in ["brightness", "temperature", "humidity", "unit_of_measurement",
-                        "device_class", "friendly_name"]:
+                        "device_class", "friendly_name", "wind_speed", "wind_bearing",
+                        "pressure", "visibility", "condition"]:
                 if attr in state_obj.attributes:
                     useful_attrs[attr] = state_obj.attributes[attr]
             if useful_attrs:
-                entity_info["attributes"] = useful_attrs
+                entity_info["attributes"] = self._serialize_attributes(useful_attrs)
+
+            attribute_keys = sorted(state_obj.attributes.keys(), key=str.casefold)
+            if attribute_keys:
+                entity_info["attribute_keys"] = attribute_keys
+                entity_info["attribute_count"] = len(attribute_keys)
+
+            if state_obj.domain == "weather":
+                forecast = state_obj.attributes.get("forecast")
+                if isinstance(forecast, (list, tuple)):
+                    entity_info["forecast_available"] = True
+                    entity_info["forecast_entries"] = len(forecast)
+                    if forecast:
+                        entity_info["forecast_preview"] = self._serialize_attribute_value(
+                            list(forecast[:2])
+                        )
 
         return entity_info
 
@@ -1241,22 +1488,34 @@ class SmartDiscovery:
         return formatted
 
     @staticmethod
+    def _serialize_attribute_value(value: Any) -> Any:
+        """Recursively serialize attribute values into JSON-safe structures."""
+        if isinstance(value, (datetime, date, time)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {
+                key: EntityDiscovery._serialize_attribute_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [
+                EntityDiscovery._serialize_attribute_value(item)
+                for item in value
+            ]
+        if isinstance(value, set):
+            return [
+                EntityDiscovery._serialize_attribute_value(item)
+                for item in sorted(value, key=str)
+            ]
+        return value
+
+    @staticmethod
     def _serialize_attributes(attributes: Dict[str, Any]) -> Dict[str, Any]:
-        """Serialize entity attributes, converting datetime objects to ISO strings."""
-        serialized = {}
-        for key, value in attributes.items():
-            if isinstance(value, datetime):
-                serialized[key] = value.isoformat()
-            elif isinstance(value, dict):
-                serialized[key] = EntityDiscovery._serialize_attributes(value)
-            elif isinstance(value, (list, tuple)):
-                serialized[key] = [
-                    item.isoformat() if isinstance(item, datetime) else item
-                    for item in value
-                ]
-            else:
-                serialized[key] = value
-        return serialized
+        """Serialize entity attributes into JSON-safe structures."""
+        return {
+            key: EntityDiscovery._serialize_attribute_value(value)
+            for key, value in attributes.items()
+        }
 
     # Legacy methods for backward compatibility
     async def get_entity_details(self, entity_ids: List[str]) -> Dict[str, Any]:
@@ -1387,7 +1646,8 @@ class SmartDiscovery:
         limit = min(limit, max_limit)
 
         device_entities_map = self._build_device_entity_map(entity_registry, device_registry)
-        devices = []
+        devices_with_score: List[Tuple[int, str, Dict[str, Any]]] = []
+        collect_all_matches = bool(name_contains)
 
         for device_entry in device_registry.devices.values():
             device_entities = device_entities_map.get(device_entry.id, [])
@@ -1424,24 +1684,37 @@ class SmartDiscovery:
                 if model.casefold() not in model_name:
                     continue
 
-            if name_contains and not self._device_matches_search_term(
-                name_contains.casefold(),
-                device_entry,
-                device_context,
-                device_entities,
-            ):
-                continue
-
-            devices.append(
-                self._create_device_info(
-                    device_entry,
+            match_score = 0
+            match_reasons: List[str] = []
+            if name_contains:
+                match_score, match_reasons = self._get_device_match_details(
+                    name_contains.casefold(),
                     device_context,
                     device_entities,
                 )
-            )
+                if match_score <= 0:
+                    continue
 
-            if len(devices) >= limit:
+            device_info = self._create_device_info(
+                device_entry,
+                device_context,
+                device_entities,
+            )
+            if match_score > 0:
+                device_info["match_score"] = match_score
+            if match_reasons:
+                device_info["match_reasons"] = match_reasons
+
+            devices_with_score.append((match_score, device_entry.id, device_info))
+
+            if not collect_all_matches and len(devices_with_score) >= limit:
                 break
+
+        if collect_all_matches:
+            devices_with_score.sort(key=lambda item: (-item[0], item[1]))
+            devices = [device for _, _, device in devices_with_score[:limit]]
+        else:
+            devices = [device for _, _, device in devices_with_score]
 
         _LOGGER.debug(
             "Device discovery found %d devices with filters: area=%s, floor=%s, "
