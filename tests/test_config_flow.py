@@ -11,7 +11,13 @@ from custom_components.mcp_assist.config_flow import (
     ADVANCED_SECTION_KEY,
     CONVERSATION_SECTION_KEY,
     DISCOVERY_SECTION_KEY,
-    ENABLED_TOOLS_FIELD,
+    DISABLE_ASSIST_BRIDGE_FIELD,
+    DISABLE_CALCULATOR_FIELD,
+    DISABLE_DEVICE_FIELD,
+    DISABLE_MUSIC_ASSISTANT_FIELD,
+    DISABLE_RECORDER_FIELD,
+    DISABLE_RESPONSE_SERVICE_FIELD,
+    DISABLE_WEATHER_FORECAST_FIELD,
     MCPAssistConfigFlow,
     MCPAssistOptionsFlow,
     MODEL_SECTION_KEY,
@@ -19,7 +25,7 @@ from custom_components.mcp_assist.config_flow import (
     PROFILE_SECTION_KEY,
     PROMPTS_SECTION_KEY,
     TOOLS_SECTION_KEY,
-    _apply_tool_family_selection,
+    _apply_profile_tool_disables,
     _infer_prompt_mode,
     _needs_prompt_followup,
     _normalize_prompt_inputs,
@@ -27,10 +33,15 @@ from custom_components.mcp_assist.config_flow import (
 )
 from custom_components.mcp_assist.const import (
     CONF_BRAVE_API_KEY,
+    CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_GAP_FILLING,
-    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_MCP_PORT,
     CONF_LMSTUDIO_URL,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
@@ -46,8 +57,6 @@ from custom_components.mcp_assist.const import (
     PROMPT_MODE_DEFAULT,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_MOLTBOT,
-    TOOL_FAMILY_PROFILE_SETTINGS,
-    TOOL_FAMILY_SHARED_SETTINGS,
 )
 
 
@@ -210,46 +219,36 @@ async def test_model_step_prompt_overrides_are_optional(hass) -> None:
     assert marker_by_key[CONF_TECHNICAL_PROMPT].description["suggested_value"]
 
 
-def test_apply_tool_family_selection_expands_profile_multiselect() -> None:
-    """The tools multiselect should expand into stored per-profile booleans."""
-    normalized = _apply_tool_family_selection(
-        {ENABLED_TOOLS_FIELD: ["device"]},
-        TOOL_FAMILY_PROFILE_SETTINGS,
-        inherit_when_empty=True,
+def test_apply_profile_tool_disables_marks_checked_tools_disabled() -> None:
+    """Checked profile tool toggles should store disabled flags."""
+    normalized = _apply_profile_tool_disables(
+        {
+            DISABLE_DEVICE_FIELD: True,
+            DISABLE_ASSIST_BRIDGE_FIELD: True,
+        }
     )
 
-    assert normalized[CONF_PROFILE_ENABLE_DEVICE_TOOLS] is True
+    assert normalized[CONF_PROFILE_ENABLE_DEVICE_TOOLS] is False
     assert normalized[CONF_PROFILE_ENABLE_ASSIST_BRIDGE] is False
 
 
-def test_apply_tool_family_selection_allows_blank_profile_inheritance() -> None:
-    """A blank profile tool override should inherit the shared MCP server tools."""
-    normalized = _apply_tool_family_selection(
+def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
+    """Unchecked profile tool toggles should fall back to shared settings."""
+    normalized = _apply_profile_tool_disables(
         {
-            ENABLED_TOOLS_FIELD: [],
+            DISABLE_DEVICE_FIELD: False,
+            DISABLE_ASSIST_BRIDGE_FIELD: False,
             CONF_PROFILE_ENABLE_DEVICE_TOOLS: False,
             CONF_PROFILE_ENABLE_ASSIST_BRIDGE: False,
-        },
-        TOOL_FAMILY_PROFILE_SETTINGS,
-        inherit_when_empty=True,
+        }
     )
 
     assert CONF_PROFILE_ENABLE_DEVICE_TOOLS not in normalized
     assert CONF_PROFILE_ENABLE_ASSIST_BRIDGE not in normalized
 
 
-def test_apply_tool_family_selection_expands_shared_multiselect() -> None:
-    """The shared tools multiselect should expand into shared booleans."""
-    normalized = _apply_tool_family_selection(
-        {ENABLED_TOOLS_FIELD: ["assist_bridge"]},
-        TOOL_FAMILY_SHARED_SETTINGS,
-    )
-
-    assert normalized[CONF_ENABLE_ASSIST_BRIDGE] is True
-
-
-async def test_advanced_step_groups_profile_tools_into_multiselect_section(hass) -> None:
-    """Advanced settings should group behavior, performance, and tools into sections."""
+async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) -> None:
+    """Advanced settings should expose per-profile tool disable checkboxes."""
     flow = MCPAssistConfigFlow()
     flow.hass = hass
     flow.context = {"source": "user"}
@@ -262,13 +261,19 @@ async def test_advanced_step_groups_profile_tools_into_multiselect_section(hass)
     tools_section = result["data_schema"].schema[TOOLS_SECTION_KEY]
     assert isinstance(tools_section, section)
 
-    section_keys = {
+    section_keys = [
         getattr(key, "schema", key) for key in tools_section.schema.schema.keys()
-    }
-    assert ENABLED_TOOLS_FIELD in section_keys
-
-    selector = next(iter(tools_section.schema.schema.values()))
-    assert selector.config["multiple"] is True
+    ]
+    assert section_keys == [
+        DISABLE_ASSIST_BRIDGE_FIELD,
+        DISABLE_CALCULATOR_FIELD,
+        DISABLE_DEVICE_FIELD,
+        DISABLE_MUSIC_ASSISTANT_FIELD,
+        DISABLE_RECORDER_FIELD,
+        DISABLE_RESPONSE_SERVICE_FIELD,
+        DISABLE_WEATHER_FORECAST_FIELD,
+    ]
+    assert all(value is bool for value in tools_section.schema.schema.values())
 
 
 async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> None:
@@ -288,20 +293,25 @@ async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> Non
     discovery_keys = {
         getattr(key, "schema", key) for key in discovery_section.schema.schema.keys()
     }
-    tool_keys = {
+    tool_keys = [
         getattr(key, "schema", key) for key in tools_section.schema.schema.keys()
-    }
+    ]
 
     assert discovery_keys == {
         CONF_ENABLE_GAP_FILLING,
         CONF_MAX_ENTITIES_PER_DISCOVERY,
     }
-    assert tool_keys == {
+    assert tool_keys == [
         CONF_SEARCH_PROVIDER,
         CONF_BRAVE_API_KEY,
+        CONF_ENABLE_ASSIST_BRIDGE,
+        CONF_ENABLE_CALCULATOR_TOOLS,
+        CONF_ENABLE_DEVICE_TOOLS,
+        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+        CONF_ENABLE_RECORDER_TOOLS,
+        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
         CONF_ENABLE_WEATHER_FORECAST_TOOL,
-        ENABLED_TOOLS_FIELD,
-    }
+    ]
 
 
 async def test_options_step_groups_profile_settings_into_sections(

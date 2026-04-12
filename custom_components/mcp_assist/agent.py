@@ -382,6 +382,14 @@ class MCPAssistConversationEntity(ConversationEntity):
         return self._is_optional_tool_family_enabled("response_service")
 
     @property
+    def weather_forecast_tools_enabled(self) -> bool:
+        """Get effective weather forecast helper setting for this profile."""
+        return (
+            self.native_response_service_tools_enabled
+            and self._is_optional_tool_family_enabled("weather_forecast")
+        )
+
+    @property
     def recorder_tools_enabled(self) -> bool:
         """Get effective recorder tool setting for this profile."""
         return self._is_optional_tool_family_enabled("recorder")
@@ -413,6 +421,10 @@ class MCPAssistConversationEntity(ConversationEntity):
         if not self.native_response_service_tools_enabled:
             lines.append(
                 "- Native response-service tools are disabled. Do not call list_response_services or call_service_with_response. Use entity details or other MCP tools instead."
+            )
+        elif not self.weather_forecast_tools_enabled:
+            lines.append(
+                "- Weather forecast tools are disabled. Do not call get_weather_forecast, and do not use call_service_with_response for weather forecasts."
             )
 
         if not self.recorder_tools_enabled:
@@ -1466,6 +1478,24 @@ class MCPAssistConversationEntity(ConversationEntity):
                         "type": "text",
                         "text": (
                             f"Tool '{tool_name}' is disabled for this profile. "
+                            "Use this profile's enabled tools instead."
+                        ),
+                    }
+                ],
+            }
+
+        if (
+            tool_name == "call_service_with_response"
+            and str(arguments.get("domain") or "").strip().lower() == "weather"
+            and not self.weather_forecast_tools_enabled
+        ):
+            return {
+                "isError": True,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Weather forecast tools are disabled for this profile. "
                             "Use this profile's enabled tools instead."
                         ),
                     }

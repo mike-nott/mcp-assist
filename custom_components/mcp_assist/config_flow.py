@@ -119,6 +119,7 @@ from .const import (
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
+    TOOL_FAMILY_WEATHER_FORECAST,
     TOOL_FAMILY_SHARED_SETTINGS,
     OPENAI_BASE_URL,
     OPENROUTER_BASE_URL,
@@ -244,7 +245,6 @@ def _optional_with_suggested_value(key: str, suggested_value: str | None) -> vol
 
 TOOLS_SECTION_KEY = "tools"
 DISCOVERY_SECTION_KEY = "discovery"
-SEARCH_SECTION_KEY = "search"
 PROFILE_SECTION_KEY = "profile"
 CONNECTION_SECTION_KEY = "connection"
 MODEL_SECTION_KEY = "model_fields"
@@ -253,15 +253,33 @@ CONVERSATION_SECTION_KEY = "conversation"
 PERFORMANCE_SECTION_KEY = "performance"
 PROVIDER_SECTION_KEY = "provider"
 ADVANCED_SECTION_KEY = "advanced_settings"
-ENABLED_TOOLS_FIELD = "enabled_tools"
-TOOL_FAMILY_OPTIONS = [
-    TOOL_FAMILY_DEVICE,
-    TOOL_FAMILY_RESPONSE_SERVICE,
-    TOOL_FAMILY_RECORDER,
+DISABLE_ASSIST_BRIDGE_FIELD = "disable_assist_bridge"
+DISABLE_CALCULATOR_FIELD = "disable_calculator"
+DISABLE_DEVICE_FIELD = "disable_device"
+DISABLE_MUSIC_ASSISTANT_FIELD = "disable_music_assistant"
+DISABLE_RECORDER_FIELD = "disable_recorder"
+DISABLE_RESPONSE_SERVICE_FIELD = "disable_response_service"
+DISABLE_WEATHER_FORECAST_FIELD = "disable_weather_forecast"
+
+TOOL_FAMILY_ALPHABETICAL = [
     TOOL_FAMILY_ASSIST_BRIDGE,
     TOOL_FAMILY_CALCULATOR,
+    TOOL_FAMILY_DEVICE,
     TOOL_FAMILY_MUSIC_ASSISTANT,
+    TOOL_FAMILY_RECORDER,
+    TOOL_FAMILY_RESPONSE_SERVICE,
+    TOOL_FAMILY_WEATHER_FORECAST,
 ]
+
+PROFILE_DISABLE_FIELD_BY_FAMILY = {
+    TOOL_FAMILY_ASSIST_BRIDGE: DISABLE_ASSIST_BRIDGE_FIELD,
+    TOOL_FAMILY_CALCULATOR: DISABLE_CALCULATOR_FIELD,
+    TOOL_FAMILY_DEVICE: DISABLE_DEVICE_FIELD,
+    TOOL_FAMILY_MUSIC_ASSISTANT: DISABLE_MUSIC_ASSISTANT_FIELD,
+    TOOL_FAMILY_RECORDER: DISABLE_RECORDER_FIELD,
+    TOOL_FAMILY_RESPONSE_SERVICE: DISABLE_RESPONSE_SERVICE_FIELD,
+    TOOL_FAMILY_WEATHER_FORECAST: DISABLE_WEATHER_FORECAST_FIELD,
+}
 
 
 def _flatten_section_values(
@@ -278,74 +296,35 @@ def _flatten_section_values(
     return normalized
 
 
-def _tool_family_selector() -> SelectSelector:
-    """Build a multi-select for optional tool families."""
-    return SelectSelector(
-        SelectSelectorConfig(
-            options=TOOL_FAMILY_OPTIONS,
-            multiple=True,
-            mode=SelectSelectorMode.DROPDOWN,
-            translation_key="tool_family",
-        )
-    )
-
-
-def _selected_tool_families(
+def _profile_tool_disabled_default(
     current_values: dict[str, Any] | None,
-    setting_map: dict[str, tuple[str, bool]],
+    family: str,
     options: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
-    *,
-    explicit_only: bool = False,
-) -> list[str]:
-    """Return the selected tool families for a config form default."""
+) -> bool:
+    """Return whether a profile tool family should default to disabled in the form."""
     options = options or {}
     data = data or {}
-    if explicit_only:
-        has_explicit_values = any(
-            (
-                current_values and setting_key in current_values
-            ) or setting_key in options or setting_key in data
-            for setting_key, _default in setting_map.values()
-        )
-        if not has_explicit_values:
-            return []
-    return [
-        family
-        for family, (setting_key, default) in setting_map.items()
-        if _get_form_value(
-            current_values,
-            setting_key,
-            options.get(setting_key, data.get(setting_key, default)),
-        )
-    ]
+    disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+    if current_values and disable_field in current_values:
+        return bool(current_values[disable_field])
+
+    setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
+    stored_value = options.get(setting_key, data.get(setting_key))
+    return stored_value is False
 
 
-def _apply_tool_family_selection(
-    user_input: dict[str, Any],
-    setting_map: dict[str, tuple[str, bool]],
-    *,
-    inherit_when_empty: bool = False,
-) -> dict[str, Any]:
-    """Expand a multi-select tool list into stored per-family booleans."""
+def _apply_profile_tool_disables(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Map profile disable checkboxes to stored profile enable flags."""
     normalized = dict(user_input)
-    selected = normalized.pop(ENABLED_TOOLS_FIELD, None)
-    if selected is None:
-        return normalized
-
-    selected_set = {
-        str(value)
-        for value in selected
-        if str(value) in setting_map
-    }
-
-    if inherit_when_empty and not selected_set:
-        for _family, (setting_key, _default) in setting_map.items():
+    for family in TOOL_FAMILY_ALPHABETICAL:
+        disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+        disabled = bool(normalized.pop(disable_field, False))
+        setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
+        if disabled:
+            normalized[setting_key] = False
+        else:
             normalized.pop(setting_key, None)
-        return normalized
-
-    for family, (setting_key, _default) in setting_map.items():
-        normalized[setting_key] = family in selected_set
 
     return normalized
 
@@ -358,21 +337,19 @@ def _build_profile_tools_section(
     """Build the per-profile tool preferences section."""
     options = options or {}
     data = data or {}
+    profile_tool_fields = {}
+    for family in TOOL_FAMILY_ALPHABETICAL:
+        disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+        profile_tool_fields[
+            vol.Optional(
+                disable_field,
+                default=_profile_tool_disabled_default(
+                    current_values, family, options, data
+                ),
+            )
+        ] = bool
     return section(
-        vol.Schema(
-            {
-                vol.Optional(
-                    ENABLED_TOOLS_FIELD,
-                    default=_selected_tool_families(
-                        current_values,
-                        TOOL_FAMILY_PROFILE_SETTINGS,
-                        options,
-                        data,
-                        explicit_only=True,
-                    ),
-                ): _tool_family_selector(),
-            }
-        ),
+        vol.Schema(profile_tool_fields),
         {"collapsed": False},
     )
 
@@ -381,6 +358,16 @@ def _build_shared_tools_section(
     defaults: dict[str, Any],
 ) -> section:
     """Build the shared MCP server optional tools section."""
+    shared_tool_fields = {}
+    for family in TOOL_FAMILY_ALPHABETICAL:
+        setting_key, default = TOOL_FAMILY_SHARED_SETTINGS[family]
+        shared_tool_fields[
+            vol.Optional(
+                setting_key,
+                default=_get_form_value(defaults, setting_key, default),
+            )
+        ] = bool
+
     return section(
         vol.Schema(
             {
@@ -408,20 +395,7 @@ def _build_shared_tools_section(
                         defaults, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
                     ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-                vol.Optional(
-                    CONF_ENABLE_WEATHER_FORECAST_TOOL,
-                    default=_get_form_value(
-                        defaults,
-                        CONF_ENABLE_WEATHER_FORECAST_TOOL,
-                        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
-                    ),
-                ): bool,
-                vol.Optional(
-                    ENABLED_TOOLS_FIELD,
-                    default=_selected_tool_families(
-                        defaults, TOOL_FAMILY_SHARED_SETTINGS
-                    ),
-                ): _tool_family_selector(),
+                **shared_tool_fields,
             }
         ),
         {"collapsed": False},
@@ -1075,11 +1049,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 PROVIDER_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
-            user_input = _apply_tool_family_selection(
-                user_input,
-                TOOL_FAMILY_PROFILE_SETTINGS,
-                inherit_when_empty=True,
-            )
+            user_input = _apply_profile_tool_disables(user_input)
 
             # For Moltbot, set defaults for hidden fields
             if server_type == SERVER_TYPE_MOLTBOT:
@@ -1316,8 +1286,8 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "advanced_info": (
                     "Moltbot manages temperature, token limits, history, and tool "
                     "iterations internally. Only essential settings are shown. The "
-                    "Tools section still lets this profile opt into a smaller MCP "
-                    "tool set."
+                    "Tools section still lets this profile disable specific shared "
+                    "MCP tool families."
                 )
             }
         else:
@@ -1325,7 +1295,8 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "advanced_info": (
                     "These settings are organized by conversation behavior, performance, "
                     "provider-specific options, and tools. The Tools section only affects "
-                    "this profile and can narrow the shared MCP server tool set for smaller models."
+                    "this profile and can disable specific shared MCP tool families for "
+                    "smaller models."
                 )
             }
 
@@ -1344,9 +1315,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input = _flatten_section_values(
                 user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
-            )
-            user_input = _apply_tool_family_selection(
-                user_input, TOOL_FAMILY_SHARED_SETTINGS
             )
             current_values = user_input
 
@@ -1507,7 +1475,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "info": (
                     "⚠️ These settings define the shared MCP server capabilities "
                     "available to all profiles and external MCP clients. Individual "
-                    "profiles can still opt into a smaller subset later."
+                    "profiles can still disable specific tool families later."
                 )
             },
         )
@@ -1575,11 +1543,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 ADVANCED_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
-            user_input = _apply_tool_family_selection(
-                user_input,
-                TOOL_FAMILY_PROFILE_SETTINGS,
-                inherit_when_empty=True,
-            )
+            user_input = _apply_profile_tool_disables(user_input)
             user_input = _normalize_prompt_inputs(
                 user_input, server_type, default_system_prompt
             )
@@ -2070,8 +2034,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     "server. The technical instructions field is prefilled with the "
                     "current effective prompt so you can review, copy, or edit it. "
                     "If you leave it unchanged, the integration keeps using the built-in "
-                    "version from code. The Tools section can still keep "
-                    "this profile on a smaller MCP tool set."
+                    "version from code. The Tools section can still disable specific "
+                    "shared MCP tool families for this profile."
                 )
             }
         else:
@@ -2082,8 +2046,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     "effective prompts so you can review, copy, or edit them directly. "
                     "If you leave a prompt unchanged, the integration keeps using the "
                     "built-in version from code. "
-                    "The Tools section can keep smaller models on a leaner subset of "
-                    "the shared MCP server."
+                    "The Tools section can disable specific shared MCP tool families "
+                    "for smaller models."
                 )
             }
 
@@ -2102,9 +2066,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             user_input = _flatten_section_values(
                 user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
-            )
-            user_input = _apply_tool_family_selection(
-                user_input, TOOL_FAMILY_SHARED_SETTINGS
             )
             current_values = user_input
 

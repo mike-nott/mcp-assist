@@ -3114,9 +3114,6 @@ class MCPServer:
                 return_response=False,
             )
 
-            # Wait briefly for state to update
-            await asyncio.sleep(0.5)
-
             # Notify completion
             self.publish_progress(
                 "tool_complete",
@@ -3134,16 +3131,35 @@ class MCPServer:
                 entity_ids = resolved_target["entity_id"]
                 if isinstance(entity_ids, str):
                     entity_ids = [entity_ids]
+                action_observation = await self._observe_action_outcome(
+                    domain=domain,
+                    service=service,
+                    entity_ids=entity_ids,
+                    action_data=data,
+                )
 
-                # Get new states
-                states_info = []
-                for entity_id in entity_ids[:10]:  # Limit to first 10 for response size
-                    state = self.hass.states.get(entity_id)
-                    if state:
-                        states_info.append(f"  • {entity_id}: {state.state}")
-
-                if states_info:
-                    result_text += "\n\nNew states:\n" + "\n".join(states_info)
+                if action_observation["status"] == "pending":
+                    result_text = f"✅ Sent {domain}.{service}"
+                    if service != action:
+                        result_text += f" (mapped from '{action}')"
+                    result_text += (
+                        f"\n\nFinal state is not yet confirmed; the device may still be "
+                        f"{action_observation['progress_phrase']}."
+                    )
+                    if action_observation["state_lines"]:
+                        result_text += (
+                            "\n\nCurrent states right now:\n"
+                            + "\n".join(action_observation["state_lines"])
+                        )
+                elif action_observation["state_lines"]:
+                    heading = (
+                        "Confirmed states:"
+                        if action_observation["status"] == "confirmed"
+                        else "Current states:"
+                    )
+                    result_text += (
+                        f"\n\n{heading}\n" + "\n".join(action_observation["state_lines"])
+                    )
 
             return {"content": [{"type": "text", "text": result_text}]}
 
@@ -3151,6 +3167,139 @@ class MCPServer:
             error_msg = f"Service call failed: {err}"
             _LOGGER.exception(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+    def _get_action_state_expectation(
+        self, domain: str, service: str, action_data: Dict[str, Any] | None = None
+    ) -> Dict[str, Any] | None:
+        """Return final/transitional state expectations for slow mechanical actions."""
+        action_data = action_data or {}
+
+        if domain == "lock":
+            if service == "lock":
+                return {
+                    "expected_states": {"locked"},
+                    "transitional_states": {"locking"},
+                    "progress_phrase": "locking",
+                }
+            if service == "unlock":
+                return {
+                    "expected_states": {"unlocked"},
+                    "transitional_states": {"unlocking"},
+                    "progress_phrase": "unlocking",
+                }
+
+        if domain == "cover":
+            if service == "close_cover":
+                return {
+                    "expected_states": {"closed"},
+                    "transitional_states": {"closing"},
+                    "progress_phrase": "closing",
+                }
+            if service == "open_cover":
+                return {
+                    "expected_states": {"open"},
+                    "transitional_states": {"opening"},
+                    "progress_phrase": "opening",
+                }
+            if service == "set_cover_position":
+                position = action_data.get("position")
+                try:
+                    position_value = int(position)
+                except (TypeError, ValueError):
+                    position_value = None
+
+                if position_value is not None:
+                    if position_value <= 0:
+                        return {
+                            "expected_states": {"closed"},
+                            "transitional_states": {"closing"},
+                            "progress_phrase": "closing",
+                        }
+                    if position_value >= 100:
+                        return {
+                            "expected_states": {"open"},
+                            "transitional_states": {"opening"},
+                            "progress_phrase": "opening",
+                        }
+
+        if domain == "valve":
+            if service == "close_valve":
+                return {
+                    "expected_states": {"closed"},
+                    "transitional_states": {"closing"},
+                    "progress_phrase": "closing",
+                }
+            if service == "open_valve":
+                return {
+                    "expected_states": {"open"},
+                    "transitional_states": {"opening"},
+                    "progress_phrase": "opening",
+                }
+
+        return None
+
+    def _format_action_state_lines(self, entity_ids: List[str]) -> List[str]:
+        """Format a compact snapshot of current entity states."""
+        lines: List[str] = []
+        for entity_id in entity_ids[:10]:
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                lines.append(f"  • {entity_id}: unavailable")
+                continue
+
+            friendly_name = state.attributes.get("friendly_name")
+            if friendly_name and str(friendly_name) != entity_id:
+                lines.append(f"  • {friendly_name}: {state.state}")
+            else:
+                lines.append(f"  • {entity_id}: {state.state}")
+
+        return lines
+
+    async def _observe_action_outcome(
+        self,
+        *,
+        domain: str,
+        service: str,
+        entity_ids: List[str],
+        action_data: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Observe post-action state with transition-aware polling."""
+        expectation = self._get_action_state_expectation(domain, service, action_data)
+        if expectation is None:
+            await asyncio.sleep(0.5)
+            return {
+                "status": "snapshot",
+                "state_lines": self._format_action_state_lines(entity_ids),
+                "progress_phrase": "",
+            }
+
+        deadline = asyncio.get_running_loop().time() + 3.0
+        last_lines: List[str] = []
+
+        while True:
+            current_states = []
+            for entity_id in entity_ids[:10]:
+                state = self.hass.states.get(entity_id)
+                current_states.append(state.state if state is not None else "unavailable")
+
+            last_lines = self._format_action_state_lines(entity_ids)
+            if current_states and all(
+                state in expectation["expected_states"] for state in current_states
+            ):
+                return {
+                    "status": "confirmed",
+                    "state_lines": last_lines,
+                    "progress_phrase": expectation["progress_phrase"],
+                }
+
+            if asyncio.get_running_loop().time() >= deadline:
+                return {
+                    "status": "pending",
+                    "state_lines": last_lines,
+                    "progress_phrase": expectation["progress_phrase"],
+                }
+
+            await asyncio.sleep(0.5)
 
     async def tool_call_service_with_response(
         self, args: Dict[str, Any]

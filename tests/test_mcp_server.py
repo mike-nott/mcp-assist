@@ -466,3 +466,65 @@ async def test_get_weather_forecast_discovers_entity_and_summarizes_tomorrow(
     assert request_args["data"]["type"] == "twice_daily"
     assert "Tomorrow for Weather:" in result["content"][0]["text"]
     assert "morning: sunny, around 72" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_observe_action_outcome_confirms_expected_lock_state(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Mechanical actions should confirm completion once the expected state is reached."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "lock.front_door_deadbolt",
+        "locked",
+        {"friendly_name": "Front Door Deadbolt"},
+    )
+
+    result = await server._observe_action_outcome(
+        domain="lock",
+        service="lock",
+        entity_ids=["lock.front_door_deadbolt"],
+    )
+
+    assert result["status"] == "confirmed"
+    assert result["progress_phrase"] == "locking"
+    assert result["state_lines"] == ["  • Front Door Deadbolt: locked"]
+
+
+@pytest.mark.asyncio
+async def test_tool_perform_action_reports_pending_lock_transition(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Slow lock transitions should be reported as pending, not as failures."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.resolve_target = AsyncMock(
+        return_value={"entity_id": ["lock.front_door_deadbolt"]}
+    )
+    server._observe_action_outcome = AsyncMock(
+        return_value={
+            "status": "pending",
+            "progress_phrase": "locking",
+            "state_lines": ["  • Front Door Deadbolt: unlocked"],
+        }
+    )
+    async_call_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(type(hass.services), "async_call", async_call_mock)
+
+    result = await server.tool_perform_action(
+        {
+            "domain": "lock",
+            "action": "lock",
+            "target": {"entity_id": "lock.front_door_deadbolt"},
+            "data": {},
+        }
+    )
+
+    text = result["content"][0]["text"]
+    async_call_mock.assert_awaited_once()
+    assert text.startswith("✅ Sent lock.lock")
+    assert "may still be locking" in text
+    assert "Current states right now:" in text
+    assert "Front Door Deadbolt: unlocked" in text
+    assert "Successfully executed lock.lock" not in text

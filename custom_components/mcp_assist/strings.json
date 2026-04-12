@@ -138,12 +138,24 @@
           },
           "tools": {
             "name": "Tools",
-            "description": "Optional per-profile tool filtering.",
+            "description": "Unchecked tools remain available whenever they are enabled on the shared MCP server. Check a box to forbid a tool family for just this profile.",
             "data": {
-              "enabled_tools": "Tool Family Overrides"
+              "disable_assist_bridge": "Disable Assist Bridge",
+              "disable_calculator": "Disable Calculator",
+              "disable_device": "Disable Device Tools",
+              "disable_music_assistant": "Disable Music Assistant",
+              "disable_recorder": "Disable Recorder History",
+              "disable_response_service": "Disable Response Service Reads",
+              "disable_weather_forecast": "Disable Weather Forecast"
             },
             "data_description": {
-              "enabled_tools": "Optional. Leave blank to inherit whatever tool families are enabled on the shared MCP server. If you choose specific items here, this profile will be narrowed to that subset only. Each selected family must also be enabled in the shared MCP server settings to actually work. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
+              "disable_assist_bridge": "Prevents this profile from using Home Assistant's native Assist tools, prompt, and context snapshot.",
+              "disable_calculator": "Prevents this profile from using math, expression, and unit-conversion tools.",
+              "disable_device": "Prevents this profile from discovering physical devices and device details.",
+              "disable_music_assistant": "Prevents this profile from using Music Assistant search, queue, library, and playback tools.",
+              "disable_recorder": "Prevents this profile from using recorder-backed history, count, duration, and point-in-time tools.",
+              "disable_response_service": "Prevents this profile from using Home Assistant services that return structured data, such as calendar and forecast reads.",
+              "disable_weather_forecast": "Prevents this profile from using the dedicated Home Assistant weather forecast helper."
             }
           }
         }
@@ -186,18 +198,28 @@
           },
           "tools": {
             "name": "Tools",
-            "description": "Configure optional tool capabilities exposed by the shared MCP server, including web search.",
+            "description": "Enable or disable optional tool capabilities exposed by the shared MCP server. Web search is configured here because it is also exposed as a tool.",
             "data": {
               "search_provider": "Web Search",
               "brave_api_key": "Brave Search API Key",
-              "enable_weather_forecast_tool": "Weather Forecast Tool",
-              "enabled_tools": "Available Tool Families"
+              "enable_assist_bridge": "Assist Bridge",
+              "enable_calculator_tools": "Calculator",
+              "enable_device_tools": "Device Tools",
+              "enable_music_assistant_support": "Music Assistant",
+              "enable_recorder_tools": "Recorder History",
+              "enable_response_service_tools": "Response Service Reads",
+              "enable_weather_forecast_tool": "Weather Forecast"
             },
             "data_description": {
-              "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
+              "search_provider": "Expose web search tools and choose which provider to use.",
               "brave_api_key": "Required only when Brave Search is selected.",
-              "enable_weather_forecast_tool": "Expose the dedicated Home Assistant weather forecast tool. When disabled, weather forecast questions will not use the weather MCP endpoint or weather response services.",
-              "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
+              "enable_assist_bridge": "Expose Home Assistant's native Assist tools, prompt, and context snapshot.",
+              "enable_calculator_tools": "Expose math, expression, and unit-conversion tools.",
+              "enable_device_tools": "Expose physical-device discovery and device detail tools.",
+              "enable_music_assistant_support": "Expose Music Assistant search, queue, library, and playback tools.",
+              "enable_recorder_tools": "Expose recorder-backed history, analysis, and point-in-time tools.",
+              "enable_response_service_tools": "Expose Home Assistant services that return structured data, such as calendar and forecast reads.",
+              "enable_weather_forecast_tool": "Expose the dedicated Home Assistant weather forecast helper."
             }
           }
         }
@@ -341,12 +363,24 @@
           },
           "tools": {
             "name": "Tools",
-            "description": "Optional per-profile tool filtering.",
+            "description": "Unchecked tools remain available whenever they are enabled on the shared MCP server. Check a box to forbid a tool family for just this profile.",
             "data": {
-              "enabled_tools": "Tool Family Overrides"
+              "disable_assist_bridge": "Disable Assist Bridge",
+              "disable_calculator": "Disable Calculator",
+              "disable_device": "Disable Device Tools",
+              "disable_music_assistant": "Disable Music Assistant",
+              "disable_recorder": "Disable Recorder History",
+              "disable_response_service": "Disable Response Service Reads",
+              "disable_weather_forecast": "Disable Weather Forecast"
             },
             "data_description": {
-              "enabled_tools": "Optional. Leave blank to inherit whatever tool families are enabled on the shared MCP server. If you choose specific items here, this profile will be narrowed to that subset only. Each selected family must also be enabled in the shared MCP server settings to actually work. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
+              "disable_assist_bridge": "Prevents this profile from using Home Assistant's native Assist tools, prompt, and context snapshot.",
+              "disable_calculator": "Prevents this profile from using math, expression, and unit-conversion tools.",
+              "disable_device": "Prevents this profile from discovering physical devices and device details.",
+              "disable_music_assistant": "Prevents this profile from using Music Assistant search, queue, library, and playback tools.",
+              "disable_recorder": "Prevents this profile from using recorder-backed history, count, duration, and point-in-time tools.",
+              "disable_response_service": "Prevents this profile from using Home Assistant services that return structured data, such as calendar and forecast reads.",
+              "disable_weather_forecast": "Prevents this profile from using the dedicated Home Assistant weather forecast helper."
             }
           }
         }
@@ -389,18 +423,28 @@
           },
           "tools": {
             "name": "Tools",
-            "description": "Configure optional tool capabilities exposed by the shared MCP server, including web search.",
+            "description": "Enable or disable optional tool capabilities exposed by the shared MCP server. Web search is configured here because it is also exposed as a tool.",
             "data": {
               "search_provider": "Web Search",
               "brave_api_key": "Brave Search API Key",
-              "enable_weather_forecast_tool": "Weather Forecast Tool",
-              "enabled_tools": "Available Tool Families"
+              "enable_assist_bridge": "Assist Bridge",
+              "enable_calculator_tools": "Calculator",
+              "enable_device_tools": "Device Tools",
+              "enable_music_assistant_support": "Music Assistant",
+              "enable_recorder_tools": "Recorder History",
+              "enable_response_service_tools": "Response Service Reads",
+              "enable_weather_forecast_tool": "Weather Forecast"
             },
             "data_description": {
-              "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
+              "search_provider": "Expose web search tools and choose which provider to use.",
               "brave_api_key": "Required only when Brave Search is selected.",
-              "enable_weather_forecast_tool": "Expose the dedicated Home Assistant weather forecast tool. When disabled, weather forecast questions will not use the weather MCP endpoint or weather response services.",
-              "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
+              "enable_assist_bridge": "Expose Home Assistant's native Assist tools, prompt, and context snapshot.",
+              "enable_calculator_tools": "Expose math, expression, and unit-conversion tools.",
+              "enable_device_tools": "Expose physical-device discovery and device detail tools.",
+              "enable_music_assistant_support": "Expose Music Assistant search, queue, library, and playback tools.",
+              "enable_recorder_tools": "Expose recorder-backed history, analysis, and point-in-time tools.",
+              "enable_response_service_tools": "Expose Home Assistant services that return structured data, such as calendar and forecast reads.",
+              "enable_weather_forecast_tool": "Expose the dedicated Home Assistant weather forecast helper."
             }
           }
         }
@@ -412,16 +456,6 @@
       "options": {
         "default": "Default",
         "custom": "Custom"
-      }
-    },
-    "tool_family": {
-      "options": {
-        "device": "Device Tools",
-        "response_service": "Response Service Tools",
-        "recorder": "Recorder History Tools",
-        "assist_bridge": "Native Assist Bridge",
-        "calculator": "Calculator Tools",
-        "music_assistant": "Music Assistant Tools"
       }
     }
   },
