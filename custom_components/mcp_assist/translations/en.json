@@ -46,6 +46,17 @@
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
           "clean_responses": "Clean Responses for Voice Output"
+        },
+        "sections": {
+          "tools": {
+            "name": "Tools",
+            "data": {
+              "enabled_tools": "Tool Families"
+            },
+            "data_description": {
+              "enabled_tools": "Choose which optional MCP tool families this profile can use. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
+            }
+          }
         }
       },
       "mcp_server": {
@@ -56,14 +67,27 @@
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Additional Allowed IPs/Ranges",
-          "enable_gap_filling": "Enable Smart Entity Index",
-          "enable_assist_bridge": "Enable Native Assist Bridge",
-          "enable_response_service_tools": "Enable Response Service Tools",
-          "enable_recorder_tools": "Enable Recorder History Tools",
-          "enable_calculator_tools": "Enable Calculator Tools",
-          "enable_device_tools": "Enable Device Tools",
-          "enable_music_assistant_support": "Enable Music Assistant Support",
           "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+        },
+        "sections": {
+          "discovery": {
+            "name": "Discovery",
+            "data": {
+              "enable_gap_filling": "Enable Smart Entity Index"
+            },
+            "data_description": {
+              "enable_gap_filling": "Builds a compact system index to keep discovery fast and context-aware."
+            }
+          },
+          "tools": {
+            "name": "Tools",
+            "data": {
+              "enabled_tools": "Available Tool Families"
+            },
+            "data_description": {
+              "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
+            }
+          }
         }
       }
     },
@@ -110,6 +134,17 @@
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
           "clean_responses": "Clean Responses for Voice Output"
+        },
+        "sections": {
+          "tools": {
+            "name": "Tools",
+            "data": {
+              "enabled_tools": "Tool Families"
+            },
+            "data_description": {
+              "enabled_tools": "Choose which optional MCP tool families this profile can use. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
+            }
+          }
         }
       },
       "mcp_server": {
@@ -120,14 +155,27 @@
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Additional Allowed IPs/Ranges",
-          "enable_gap_filling": "Enable Smart Entity Index",
-          "enable_assist_bridge": "Enable Native Assist Bridge",
-          "enable_response_service_tools": "Enable Response Service Tools",
-          "enable_recorder_tools": "Enable Recorder History Tools",
-          "enable_calculator_tools": "Enable Calculator Tools",
-          "enable_device_tools": "Enable Device Tools",
-          "enable_music_assistant_support": "Enable Music Assistant Support",
           "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+        },
+        "sections": {
+          "discovery": {
+            "name": "Discovery",
+            "data": {
+              "enable_gap_filling": "Enable Smart Entity Index"
+            },
+            "data_description": {
+              "enable_gap_filling": "Builds a compact system index to keep discovery fast and context-aware."
+            }
+          },
+          "tools": {
+            "name": "Tools",
+            "data": {
+              "enabled_tools": "Available Tool Families"
+            },
+            "data_description": {
+              "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
+            }
+          }
         }
       }
     }
@@ -137,6 +185,16 @@
       "options": {
         "default": "Default",
         "custom": "Custom"
+      }
+    },
+    "tool_family": {
+      "options": {
+        "device": "Device Tools",
+        "response_service": "Response Service Tools",
+        "recorder": "Recorder History Tools",
+        "assist_bridge": "Native Assist Bridge",
+        "calculator": "Calculator Tools",
+        "music_assistant": "Music Assistant Tools"
       }
     }
   },

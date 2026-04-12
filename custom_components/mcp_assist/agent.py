@@ -50,12 +50,6 @@ from .const import (
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
     CONF_SEARCH_PROVIDER,
-    CONF_ENABLE_ASSIST_BRIDGE,
-    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-    CONF_ENABLE_RECORDER_TOOLS,
-    CONF_ENABLE_CALCULATOR_TOOLS,
-    CONF_ENABLE_DEVICE_TOOLS,
-    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_FOLLOW_UP_PHRASES,
     CONF_END_WORDS,
@@ -71,12 +65,6 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_RESPONSE_MODE,
     DEFAULT_MCP_PORT,
-    DEFAULT_ENABLE_ASSIST_BRIDGE,
-    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
-    DEFAULT_ENABLE_RECORDER_TOOLS,
-    DEFAULT_ENABLE_CALCULATOR_TOOLS,
-    DEFAULT_ENABLE_DEVICE_TOOLS,
-    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
     DEFAULT_CONTROL_HA,
@@ -106,6 +94,9 @@ from .const import (
     GEMINI_BASE_URL,
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
+    TOOL_FAMILY_PROFILE_SETTINGS,
+    TOOL_FAMILY_SHARED_SETTINGS,
+    get_optional_tool_family,
 )
 from .conversation_history import ConversationHistory
 
@@ -220,6 +211,29 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         # Return default
         return default
+
+    def _get_profile_setting(self, key: str, default: Any) -> Any:
+        """Get a profile-specific setting from this conversation profile."""
+        value = self.entry.options.get(key, self.entry.data.get(key))
+        if value is not None:
+            return value
+        return default
+
+    def _is_optional_tool_family_enabled(self, family: str) -> bool:
+        """Return whether an optional tool family is enabled for this profile."""
+        shared_key, shared_default = TOOL_FAMILY_SHARED_SETTINGS[family]
+        profile_key, profile_default = TOOL_FAMILY_PROFILE_SETTINGS[family]
+        return bool(
+            self._get_shared_setting(shared_key, shared_default)
+            and self._get_profile_setting(profile_key, profile_default)
+        )
+
+    def _is_tool_enabled_for_profile(self, tool_name: str) -> bool:
+        """Return whether a tool should be visible to this profile."""
+        family = get_optional_tool_family(tool_name)
+        if family is None:
+            return True
+        return self._is_optional_tool_family_enabled(family)
 
     # Dynamic configuration properties - read from entry.options/data each time
     @property
@@ -345,63 +359,33 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     @property
     def music_assistant_support_enabled(self) -> bool:
-        """Get Music Assistant support setting (shared setting)."""
-        return bool(
-            self._get_shared_setting(
-                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-            )
-        )
+        """Get effective Music Assistant support setting for this profile."""
+        return self._is_optional_tool_family_enabled("music_assistant")
 
     @property
     def assist_bridge_enabled(self) -> bool:
-        """Get Assist bridge setting (shared setting)."""
-        return bool(
-            self._get_shared_setting(
-                CONF_ENABLE_ASSIST_BRIDGE,
-                DEFAULT_ENABLE_ASSIST_BRIDGE,
-            )
-        )
+        """Get effective Assist bridge setting for this profile."""
+        return self._is_optional_tool_family_enabled("assist_bridge")
 
     @property
     def native_response_service_tools_enabled(self) -> bool:
-        """Get response-service tool setting (shared setting)."""
-        return bool(
-            self._get_shared_setting(
-                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
-            )
-        )
+        """Get effective response-service tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("response_service")
 
     @property
     def recorder_tools_enabled(self) -> bool:
-        """Get recorder tool setting (shared setting)."""
-        return bool(
-            self._get_shared_setting(
-                CONF_ENABLE_RECORDER_TOOLS,
-                DEFAULT_ENABLE_RECORDER_TOOLS,
-            )
-        )
+        """Get effective recorder tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("recorder")
 
     @property
     def calculator_tools_enabled(self) -> bool:
-        """Get calculator tool setting (shared setting)."""
-        return bool(
-            self._get_shared_setting(
-                CONF_ENABLE_CALCULATOR_TOOLS,
-                DEFAULT_ENABLE_CALCULATOR_TOOLS,
-            )
-        )
+        """Get effective calculator tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("calculator")
 
     @property
     def device_tools_enabled(self) -> bool:
-        """Get device tool setting (shared setting)."""
-        return bool(
-            self._get_shared_setting(
-                CONF_ENABLE_DEVICE_TOOLS,
-                DEFAULT_ENABLE_DEVICE_TOOLS,
-            )
-        )
+        """Get effective device tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("device")
 
     def _build_disabled_tool_family_instructions(self) -> str:
         """Build prompt instructions for disabled optional tool families."""
@@ -1313,8 +1297,13 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                     data = await response.json()
                     if "result" in data and "tools" in data["result"]:
-                        tools = data["result"]["tools"]
-                        _LOGGER.info("Retrieved %d MCP tools", len(tools))
+                        tools = self._filter_mcp_tools_for_profile(
+                            data["result"]["tools"]
+                        )
+                        _LOGGER.info(
+                            "Retrieved %d MCP tools after profile filtering",
+                            len(tools),
+                        )
 
                         # Convert to OpenAI format for LM Studio
                         openai_tools = []
@@ -1345,11 +1334,39 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.error("Failed to get MCP tools: %s", err)
             return None
 
+    def _filter_mcp_tools_for_profile(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Filter shared MCP tools down to the subset enabled for this profile."""
+        filtered_tools = [
+            tool
+            for tool in tools
+            if self._is_tool_enabled_for_profile(tool.get("name", ""))
+        ]
+
+        filtered_names = [tool.get("name", "") for tool in filtered_tools]
+        _LOGGER.info("Profile-visible MCP tools: %s", ", ".join(filtered_names))
+        return filtered_tools
+
     async def _call_mcp_tool(
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute a single MCP tool and return the result."""
         _LOGGER.info(f"🔧 Executing MCP tool: {tool_name} with args: {arguments}")
+
+        if not self._is_tool_enabled_for_profile(tool_name):
+            return {
+                "isError": True,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Tool '{tool_name}' is disabled for this profile. "
+                            "Use this profile's enabled tools instead."
+                        ),
+                    }
+                ],
+            }
 
         try:
             mcp_url = f"http://localhost:{self.mcp_port}"

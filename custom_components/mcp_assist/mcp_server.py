@@ -59,6 +59,8 @@ from .const import (
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    TOOL_FAMILY_SHARED_SETTINGS,
+    get_optional_tool_family,
 )
 from .discovery import EntityDiscovery
 from .domain_registry import (
@@ -239,55 +241,12 @@ class MCPServer:
 
     def _is_tool_enabled(self, tool_name: str) -> bool:
         """Return whether an optional tool is enabled by settings."""
-        if tool_name in {"discover_devices", "get_device_details"}:
-            return self._device_tools_enabled()
+        family = get_optional_tool_family(tool_name)
+        if family is None:
+            return True
 
-        if tool_name in {
-            "list_assist_tools",
-            "call_assist_tool",
-            "get_assist_prompt",
-            "get_assist_context_snapshot",
-        }:
-            return self._assist_bridge_enabled()
-
-        if tool_name in {"list_response_services", "call_service_with_response"}:
-            return self._response_service_tools_enabled()
-
-        if tool_name in {
-            "get_entity_history",
-            "get_last_entity_event",
-            "analyze_entity_history",
-            "get_entity_state_at_time",
-        }:
-            return self._recorder_tools_enabled()
-
-        if tool_name in {
-            "list_music_assistant_players",
-            "play_music_assistant",
-            "list_music_assistant_instances",
-            "search_music_assistant",
-            "get_music_assistant_library",
-            "get_music_assistant_queue",
-        }:
-            return self._music_assistant_support_enabled()
-
-        if tool_name in {
-            "add",
-            "subtract",
-            "multiply",
-            "divide",
-            "sqrt",
-            "power",
-            "round_number",
-            "average",
-            "min_value",
-            "max_value",
-            "convert_unit",
-            "evaluate_expression",
-        }:
-            return self._calculator_tools_enabled()
-
-        return True
+        setting_key, default = TOOL_FAMILY_SHARED_SETTINGS[family]
+        return bool(self._get_shared_setting(setting_key, default))
 
     async def start(self) -> None:
         """Start the MCP server."""

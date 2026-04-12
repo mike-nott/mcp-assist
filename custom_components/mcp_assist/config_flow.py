@@ -12,7 +12,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
     SelectSelector,
@@ -87,8 +87,6 @@ from .const import (
     DEFAULT_TECHNICAL_PROMPT,
     PROMPT_MODE_DEFAULT,
     PROMPT_MODE_CUSTOM,
-    DEFAULT_SYSTEM_PROMPT_MODE,
-    DEFAULT_TECHNICAL_PROMPT_MODE,
     DEFAULT_CONTROL_HA,
     DEFAULT_RESPONSE_MODE,
     DEFAULT_TEMPERATURE,
@@ -112,6 +110,14 @@ from .const import (
     DEFAULT_END_WORDS,
     DEFAULT_CLEAN_RESPONSES,
     DEFAULT_TIMEOUT,
+    TOOL_FAMILY_ASSIST_BRIDGE,
+    TOOL_FAMILY_CALCULATOR,
+    TOOL_FAMILY_DEVICE,
+    TOOL_FAMILY_MUSIC_ASSISTANT,
+    TOOL_FAMILY_PROFILE_SETTINGS,
+    TOOL_FAMILY_RECORDER,
+    TOOL_FAMILY_RESPONSE_SERVICE,
+    TOOL_FAMILY_SHARED_SETTINGS,
     OPENAI_BASE_URL,
     OPENROUTER_BASE_URL,
 )
@@ -167,14 +173,17 @@ def _get_prompt_text_default(
     current_values: dict[str, Any] | None,
     *,
     prompt_key: str,
+    stored_mode: Any = None,
     stored_prompt: Any,
+    default_prompt: str = "",
 ) -> str:
-    """Get the current default text for a custom prompt field."""
+    """Get the current default text for a prompt override field."""
     if current_values and prompt_key in current_values:
         value = current_values.get(prompt_key)
         return "" if value is None else str(value)
 
-    if stored_prompt is None:
+    inferred_mode = _infer_prompt_mode(stored_mode, stored_prompt, default_prompt)
+    if inferred_mode == PROMPT_MODE_DEFAULT or stored_prompt in (None, ""):
         return ""
 
     return str(stored_prompt)
@@ -183,32 +192,26 @@ def _get_prompt_text_default(
 def _normalize_prompt_inputs(
     user_input: dict[str, Any], server_type: str
 ) -> dict[str, Any]:
-    """Normalize prompt mode inputs before storing."""
+    """Normalize prompt override inputs before storing."""
     normalized = dict(user_input)
+
+    def _normalize_prompt(prompt_key: str, mode_key: str) -> None:
+        raw_value = normalized.get(prompt_key, "")
+        text = "" if raw_value is None else str(raw_value)
+        if text.strip():
+            normalized[prompt_key] = text
+            normalized[mode_key] = PROMPT_MODE_CUSTOM
+        else:
+            normalized.pop(prompt_key, None)
+            normalized[mode_key] = PROMPT_MODE_DEFAULT
 
     if server_type == SERVER_TYPE_MOLTBOT:
         normalized[CONF_SYSTEM_PROMPT_MODE] = PROMPT_MODE_DEFAULT
-        normalized[CONF_SYSTEM_PROMPT] = ""
+        normalized.pop(CONF_SYSTEM_PROMPT, None)
     else:
-        system_mode = normalized.get(
-            CONF_SYSTEM_PROMPT_MODE, DEFAULT_SYSTEM_PROMPT_MODE
-        )
-        if system_mode == PROMPT_MODE_DEFAULT:
-            normalized.pop(CONF_SYSTEM_PROMPT, None)
-        else:
-            normalized[CONF_SYSTEM_PROMPT] = str(
-                normalized.get(CONF_SYSTEM_PROMPT, "")
-            )
+        _normalize_prompt(CONF_SYSTEM_PROMPT, CONF_SYSTEM_PROMPT_MODE)
 
-    technical_mode = normalized.get(
-        CONF_TECHNICAL_PROMPT_MODE, DEFAULT_TECHNICAL_PROMPT_MODE
-    )
-    if technical_mode == PROMPT_MODE_DEFAULT:
-        normalized.pop(CONF_TECHNICAL_PROMPT, None)
-    else:
-        normalized[CONF_TECHNICAL_PROMPT] = str(
-            normalized.get(CONF_TECHNICAL_PROMPT, "")
-        )
+    _normalize_prompt(CONF_TECHNICAL_PROMPT, CONF_TECHNICAL_PROMPT_MODE)
 
     return normalized
 
@@ -222,29 +225,135 @@ def _get_form_value(
     return fallback
 
 
+TOOLS_SECTION_KEY = "tools"
+DISCOVERY_SECTION_KEY = "discovery"
+ENABLED_TOOLS_FIELD = "enabled_tools"
+TOOL_FAMILY_OPTIONS = [
+    TOOL_FAMILY_DEVICE,
+    TOOL_FAMILY_RESPONSE_SERVICE,
+    TOOL_FAMILY_RECORDER,
+    TOOL_FAMILY_ASSIST_BRIDGE,
+    TOOL_FAMILY_CALCULATOR,
+    TOOL_FAMILY_MUSIC_ASSISTANT,
+]
+
+
+def _flatten_section_values(
+    user_input: dict[str, Any], *section_keys: str
+) -> dict[str, Any]:
+    """Flatten nested section payloads into a plain config dict."""
+    normalized = dict(user_input)
+
+    for section_key in section_keys:
+        section_values = normalized.pop(section_key, None)
+        if isinstance(section_values, dict):
+            normalized.update(section_values)
+
+    return normalized
+
+
+def _tool_family_selector() -> SelectSelector:
+    """Build a multi-select for optional tool families."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=TOOL_FAMILY_OPTIONS,
+            multiple=True,
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key="tool_family",
+        )
+    )
+
+
+def _selected_tool_families(
+    current_values: dict[str, Any] | None,
+    setting_map: dict[str, tuple[str, bool]],
+    options: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> list[str]:
+    """Return the selected tool families for a config form default."""
+    options = options or {}
+    data = data or {}
+    return [
+        family
+        for family, (setting_key, default) in setting_map.items()
+        if _get_form_value(
+            current_values,
+            setting_key,
+            options.get(setting_key, data.get(setting_key, default)),
+        )
+    ]
+
+
+def _apply_tool_family_selection(
+    user_input: dict[str, Any], setting_map: dict[str, tuple[str, bool]]
+) -> dict[str, Any]:
+    """Expand a multi-select tool list into stored per-family booleans."""
+    normalized = dict(user_input)
+    selected = normalized.pop(ENABLED_TOOLS_FIELD, None)
+    if selected is None:
+        return normalized
+
+    selected_set = {
+        str(value)
+        for value in selected
+        if str(value) in setting_map
+    }
+    for family, (setting_key, _default) in setting_map.items():
+        normalized[setting_key] = family in selected_set
+
+    return normalized
+
+
+def _build_profile_tools_section(
+    current_values: dict[str, Any] | None,
+    options: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> section:
+    """Build the per-profile tool preferences section."""
+    options = options or {}
+    data = data or {}
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    ENABLED_TOOLS_FIELD,
+                    default=_selected_tool_families(
+                        current_values,
+                        TOOL_FAMILY_PROFILE_SETTINGS,
+                        options,
+                        data,
+                    ),
+                ): _tool_family_selector(),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_tools_section(
+    defaults: dict[str, Any],
+) -> section:
+    """Build the shared MCP server optional tools section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    ENABLED_TOOLS_FIELD,
+                    default=_selected_tool_families(
+                        defaults, TOOL_FAMILY_SHARED_SETTINGS
+                    ),
+                ): _tool_family_selector(),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
 def _needs_prompt_followup(
     user_input: dict[str, Any], server_type: str
 ) -> bool:
-    """Check if the form needs to be re-shown with custom prompt fields."""
-    def _prompt_visibility_changed(mode_key: str, prompt_key: str, default_mode: str) -> bool:
-        desired_visible = user_input.get(mode_key, default_mode) == PROMPT_MODE_CUSTOM
-        currently_visible = prompt_key in user_input
-        return desired_visible != currently_visible
-
-    if server_type != SERVER_TYPE_MOLTBOT and _prompt_visibility_changed(
-        CONF_SYSTEM_PROMPT_MODE,
-        CONF_SYSTEM_PROMPT,
-        DEFAULT_SYSTEM_PROMPT_MODE,
-    ):
-        return True
-
-    if _prompt_visibility_changed(
-        CONF_TECHNICAL_PROMPT_MODE,
-        CONF_TECHNICAL_PROMPT,
-        DEFAULT_TECHNICAL_PROMPT_MODE,
-    ):
-        return True
-
+    """Config-flow forms are static per step; prompt followup is no longer used."""
+    del user_input, server_type
     return False
 
 
@@ -645,11 +754,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
-            if _needs_prompt_followup(user_input, server_type):
-                self.step3_data = dict(user_input)
-                return await self.async_step_model(user_input=None)
-
             user_input = _normalize_prompt_inputs(user_input, server_type)
+            if server_type == SERVER_TYPE_MOLTBOT:
+                user_input[CONF_MODEL_NAME] = "main"
 
             # Store data and move to step 4 (advanced)
             self.step3_data = user_input
@@ -661,60 +768,30 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Moltbot doesn't have /v1/models endpoint - skip model selection
         if server_type == SERVER_TYPE_MOLTBOT:
-            # Hardcode model to "main" and use empty system prompt (Moltbot has its own)
-            technical_mode = _get_current_prompt_mode(
-                current_values,
-                mode_key=CONF_TECHNICAL_PROMPT_MODE,
-                stored_mode=None,
-                stored_prompt=None,
-                default_prompt=DEFAULT_TECHNICAL_PROMPT,
-            )
             model_schema = vol.Schema(
                 {
                     vol.Required(
-                        CONF_TECHNICAL_PROMPT_MODE,
-                        default=technical_mode,
-                    ): _prompt_mode_selector(),
+                        CONF_TECHNICAL_PROMPT,
+                        default=_get_prompt_text_default(
+                            current_values,
+                            prompt_key=CONF_TECHNICAL_PROMPT,
+                            stored_prompt=None,
+                            default_prompt=DEFAULT_TECHNICAL_PROMPT,
+                        ),
+                    ): TextSelector(
+                        TextSelectorConfig(
+                            type=TextSelectorType.TEXT, multiline=True
+                        )
+                    ),
                 }
             )
-            if technical_mode == PROMPT_MODE_CUSTOM:
-                model_schema = model_schema.extend(
-                    {
-                        vol.Required(
-                            CONF_TECHNICAL_PROMPT,
-                            default=_get_prompt_text_default(
-                                current_values,
-                                prompt_key=CONF_TECHNICAL_PROMPT,
-                                stored_prompt=None,
-                            ),
-                        ): TextSelector(
-                            TextSelectorConfig(
-                                type=TextSelectorType.TEXT, multiline=True
-                            )
-                        ),
-                    }
-                )
-            # Store hardcoded values
-            self.step3_data = {
-                CONF_MODEL_NAME: "main",
-                CONF_SYSTEM_PROMPT: "",  # Moltbot manages its own system prompt
-                CONF_SYSTEM_PROMPT_MODE: PROMPT_MODE_DEFAULT,
-            }
-            if current_values.get(CONF_TECHNICAL_PROMPT_MODE):
-                self.step3_data[CONF_TECHNICAL_PROMPT_MODE] = current_values.get(
-                    CONF_TECHNICAL_PROMPT_MODE
-                )
-            if CONF_TECHNICAL_PROMPT in current_values:
-                self.step3_data[CONF_TECHNICAL_PROMPT] = current_values[
-                    CONF_TECHNICAL_PROMPT
-                ]
 
             return self.async_show_form(
                 step_id="model",
                 data_schema=model_schema,
                 errors=errors,
                 description_placeholders={
-                    "server_info": "Moltbot's model and system prompt are configured on the Moltbot server. Choose whether technical instructions use the built-in default from the integration or a custom override."
+                    "server_info": "Moltbot's model and system prompt are configured on the Moltbot server. Leave Technical Instructions blank to use the built-in default from the integration."
                 },
             )
         elif server_type in [
@@ -765,21 +842,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Build dynamic schema based on whether models were fetched
         current_model = current_values.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
-        system_mode = _get_current_prompt_mode(
-            current_values,
-            mode_key=CONF_SYSTEM_PROMPT_MODE,
-            stored_mode=None,
-            stored_prompt=None,
-            default_prompt=default_system_prompt,
-        )
-        technical_mode = _get_current_prompt_mode(
-            current_values,
-            mode_key=CONF_TECHNICAL_PROMPT_MODE,
-            stored_mode=None,
-            stored_prompt=None,
-            default_prompt=DEFAULT_TECHNICAL_PROMPT,
-        )
-
         if models:
             # Show dropdown with available models (custom_value allows free text input)
             _LOGGER.info("Showing model dropdown with %d models", len(models))
@@ -797,37 +859,29 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema_dict: dict[Any, Any] = {
             vol.Required(CONF_MODEL_NAME, default=current_model): model_field,
-            vol.Required(CONF_SYSTEM_PROMPT_MODE, default=system_mode): _prompt_mode_selector(),
             vol.Required(
-                CONF_TECHNICAL_PROMPT_MODE, default=technical_mode
-            ): _prompt_mode_selector(),
+                CONF_SYSTEM_PROMPT,
+                default=_get_prompt_text_default(
+                    current_values,
+                    prompt_key=CONF_SYSTEM_PROMPT,
+                    stored_prompt=None,
+                    default_prompt=default_system_prompt,
+                ),
+            ): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+            ),
+            vol.Required(
+                CONF_TECHNICAL_PROMPT,
+                default=_get_prompt_text_default(
+                    current_values,
+                    prompt_key=CONF_TECHNICAL_PROMPT,
+                    stored_prompt=None,
+                    default_prompt=DEFAULT_TECHNICAL_PROMPT,
+                ),
+            ): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+            ),
         }
-        if system_mode == PROMPT_MODE_CUSTOM:
-            schema_dict[
-                vol.Required(
-                    CONF_SYSTEM_PROMPT,
-                    default=_get_prompt_text_default(
-                        current_values,
-                        prompt_key=CONF_SYSTEM_PROMPT,
-                        stored_prompt=None,
-                    ),
-                )
-            ] = TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-            )
-        if technical_mode == PROMPT_MODE_CUSTOM:
-            schema_dict[
-                vol.Required(
-                    CONF_TECHNICAL_PROMPT,
-                    default=_get_prompt_text_default(
-                        current_values,
-                        prompt_key=CONF_TECHNICAL_PROMPT,
-                        stored_prompt=None,
-                    ),
-                )
-            ] = TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-            )
 
         model_schema = vol.Schema(schema_dict)
 
@@ -836,7 +890,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=model_schema,
             errors=errors,
             description_placeholders={
-                "server_info": "Select a model and choose whether each prompt uses the built-in default from the integration or a custom override. Models are automatically loaded from your server."
+                "server_info": "Select a model. Leave System Prompt or Technical Instructions blank to use the built-in defaults from the integration. Models are automatically loaded from your server."
             },
         )
 
@@ -850,6 +904,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
+            user_input = _flatten_section_values(user_input, TOOLS_SECTION_KEY)
+            user_input = _apply_tool_family_selection(
+                user_input, TOOL_FAMILY_PROFILE_SETTINGS
+            )
+
             # For Moltbot, set defaults for hidden fields
             if server_type == SERVER_TYPE_MOLTBOT:
                 user_input[CONF_TEMPERATURE] = DEFAULT_TEMPERATURE
@@ -1056,16 +1115,29 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             )
 
+        advanced_schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
+            getattr(self, "step4_data", {})
+        )
+
         advanced_schema = vol.Schema(advanced_schema_dict)
 
         # Set description based on server type
         if server_type == SERVER_TYPE_MOLTBOT:
             description_placeholders = {
-                "advanced_info": "Moltbot manages temperature, token limits, history, and tool iterations internally. Only essential settings are shown."
+                "advanced_info": (
+                    "Moltbot manages temperature, token limits, history, and tool "
+                    "iterations internally. Only essential settings are shown. The "
+                    "Tools section still lets this profile opt into a smaller MCP "
+                    "tool set."
+                )
             }
         else:
             description_placeholders = {
-                "advanced_info": "Configure temperature, token limits, and other advanced options."
+                "advanced_info": (
+                    "Configure temperature, token limits, and other advanced options. "
+                    "The Tools section only affects this profile and can narrow the "
+                    "shared MCP server tool set for smaller models."
+                )
             }
 
         return self.async_show_form(
@@ -1078,8 +1150,17 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_mcp_server(self, user_input=None) -> FlowResult:
         """Handle step 5 - shared MCP server settings (first profile only)."""
         errors: dict[str, str] = {}
+        current_values = user_input or {}
 
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+            )
+            user_input = _apply_tool_family_selection(
+                user_input, TOOL_FAMILY_SHARED_SETTINGS
+            )
+            current_values = user_input
+
             # Validate MCP port
             mcp_port = user_input.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
             if not 1024 <= mcp_port <= 65535:
@@ -1151,12 +1232,58 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data=combined_data,
                 )
 
+        shared_defaults = {
+            CONF_ENABLE_GAP_FILLING: _get_form_value(
+                current_values,
+                CONF_ENABLE_GAP_FILLING,
+                DEFAULT_ENABLE_GAP_FILLING,
+            ),
+            CONF_ENABLE_ASSIST_BRIDGE: _get_form_value(
+                current_values,
+                CONF_ENABLE_ASSIST_BRIDGE,
+                DEFAULT_ENABLE_ASSIST_BRIDGE,
+            ),
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+            ),
+            CONF_ENABLE_RECORDER_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RECORDER_TOOLS,
+                DEFAULT_ENABLE_RECORDER_TOOLS,
+            ),
+            CONF_ENABLE_CALCULATOR_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_CALCULATOR_TOOLS,
+                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+            ),
+            CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_DEVICE_TOOLS,
+                DEFAULT_ENABLE_DEVICE_TOOLS,
+            ),
+            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: _get_form_value(
+                current_values,
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+            ),
+        }
+
         # Build schema for MCP server settings
         mcp_schema = vol.Schema(
             {
-                vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
                 vol.Required(
-                    CONF_SEARCH_PROVIDER, default=DEFAULT_SEARCH_PROVIDER
+                    CONF_MCP_PORT,
+                    default=_get_form_value(
+                        current_values, CONF_MCP_PORT, DEFAULT_MCP_PORT
+                    ),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_SEARCH_PROVIDER,
+                    default=_get_form_value(
+                        current_values, CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER
+                    ),
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
@@ -1171,38 +1298,36 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Optional(
-                    CONF_BRAVE_API_KEY, default=DEFAULT_BRAVE_API_KEY
+                    CONF_BRAVE_API_KEY,
+                    default=_get_form_value(
+                        current_values, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
+                    ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-                vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
                 vol.Optional(
-                    CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_ASSIST_BRIDGE, default=DEFAULT_ENABLE_ASSIST_BRIDGE
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-                    default=DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_RECORDER_TOOLS,
-                    default=DEFAULT_ENABLE_RECORDER_TOOLS,
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_CALCULATOR_TOOLS,
-                    default=DEFAULT_ENABLE_CALCULATOR_TOOLS,
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_DEVICE_TOOLS,
-                    default=DEFAULT_ENABLE_DEVICE_TOOLS,
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                    default=DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                ): bool,
+                    CONF_ALLOWED_IPS,
+                    default=_get_form_value(
+                        current_values, CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
+                    ),
+                ): str,
+                DISCOVERY_SECTION_KEY: section(
+                    vol.Schema(
+                        {
+                            vol.Optional(
+                                CONF_ENABLE_GAP_FILLING,
+                                default=shared_defaults[CONF_ENABLE_GAP_FILLING],
+                            ): bool,
+                        }
+                    ),
+                    {"collapsed": False},
+                ),
+                TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
                 vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
-                    default=DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MAX_ENTITIES_PER_DISCOVERY,
+                        DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                    ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         )
@@ -1212,7 +1337,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=mcp_schema,
             errors=errors,
             description_placeholders={
-                "info": "⚠️ These settings will be shared across ALL profiles. Restart Home Assistant after making changes."
+                "info": (
+                    "⚠️ These settings define the shared MCP server capabilities "
+                    "available to all profiles and external MCP clients. Individual "
+                    "profiles can still opt into a smaller subset later."
+                )
             },
         )
 
@@ -1268,10 +1397,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
-            if _needs_prompt_followup(user_input, server_type):
-                self.profile_options = dict(user_input)
-                return await self.async_step_init()
-
+            user_input = _flatten_section_values(user_input, TOOLS_SECTION_KEY)
+            user_input = _apply_tool_family_selection(
+                user_input, TOOL_FAMILY_PROFILE_SETTINGS
+            )
             user_input = _normalize_prompt_inputs(user_input, server_type)
 
             if not errors:
@@ -1480,76 +1609,47 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             ] = model_selector
 
         # Continue with remaining common fields
-        # 4. System Prompt (skip custom text for Moltbot - it manages its own)
+        # 4. System Prompt (skip for Moltbot - it manages its own)
         if server_type != SERVER_TYPE_MOLTBOT:
-            system_prompt_mode = _get_current_prompt_mode(
-                current_values,
-                mode_key=CONF_SYSTEM_PROMPT_MODE,
-                stored_mode=options.get(
-                    CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)
-                ),
-                stored_prompt=options.get(
-                    CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)
-                ),
-                default_prompt=default_system_prompt,
-            )
             schema_dict[
                 vol.Required(
-                    CONF_SYSTEM_PROMPT_MODE,
-                    default=system_prompt_mode,
-                )
-            ] = _prompt_mode_selector()
-
-            if system_prompt_mode == PROMPT_MODE_CUSTOM:
-                schema_dict[
-                    vol.Required(
-                        CONF_SYSTEM_PROMPT,
-                        default=_get_prompt_text_default(
-                            current_values,
-                            prompt_key=CONF_SYSTEM_PROMPT,
-                            stored_prompt=options.get(
-                                CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)
-                            ),
-                        ),
-                    )
-                ] = TextSelector(
-                    TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-                )
-
-        # 5. Technical Instructions
-        technical_prompt_mode = _get_current_prompt_mode(
-            current_values,
-            mode_key=CONF_TECHNICAL_PROMPT_MODE,
-            stored_mode=options.get(
-                CONF_TECHNICAL_PROMPT_MODE, data.get(CONF_TECHNICAL_PROMPT_MODE)
-            ),
-            stored_prompt=options.get(
-                CONF_TECHNICAL_PROMPT, data.get(CONF_TECHNICAL_PROMPT)
-            ),
-            default_prompt=DEFAULT_TECHNICAL_PROMPT,
-        )
-        schema_dict[
-            vol.Required(
-                CONF_TECHNICAL_PROMPT_MODE,
-                default=technical_prompt_mode,
-            )
-        ] = _prompt_mode_selector()
-        if technical_prompt_mode == PROMPT_MODE_CUSTOM:
-            schema_dict[
-                vol.Required(
-                    CONF_TECHNICAL_PROMPT,
+                    CONF_SYSTEM_PROMPT,
                     default=_get_prompt_text_default(
                         current_values,
-                        prompt_key=CONF_TECHNICAL_PROMPT,
-                        stored_prompt=options.get(
-                            CONF_TECHNICAL_PROMPT,
-                            data.get(CONF_TECHNICAL_PROMPT),
+                        prompt_key=CONF_SYSTEM_PROMPT,
+                        stored_mode=options.get(
+                            CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)
                         ),
+                        stored_prompt=options.get(
+                            CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)
+                        ),
+                        default_prompt=default_system_prompt,
                     ),
                 )
             ] = TextSelector(
                 TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
             )
+
+        # 5. Technical Instructions
+        schema_dict[
+            vol.Required(
+                CONF_TECHNICAL_PROMPT,
+                default=_get_prompt_text_default(
+                    current_values,
+                    prompt_key=CONF_TECHNICAL_PROMPT,
+                    stored_mode=options.get(
+                        CONF_TECHNICAL_PROMPT_MODE,
+                        data.get(CONF_TECHNICAL_PROMPT_MODE),
+                    ),
+                    stored_prompt=options.get(
+                        CONF_TECHNICAL_PROMPT, data.get(CONF_TECHNICAL_PROMPT)
+                    ),
+                    default_prompt=DEFAULT_TECHNICAL_PROMPT,
+                ),
+            )
+        ] = TextSelector(
+            TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+        )
 
         # For Moltbot, only show Control HA, Timeout, Clean Responses, and Debug Mode
         if server_type == SERVER_TYPE_MOLTBOT:
@@ -1774,16 +1874,31 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             )
 
         # Create the schema from the built dictionary
+        schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
+            current_values, options, data
+        )
+
         options_schema = vol.Schema(schema_dict)
 
         # Set description based on server type
         if server_type == SERVER_TYPE_MOLTBOT:
             description_placeholders = {
-                "server_info": "Moltbot's model and system prompt are configured on the Moltbot server. Choose whether technical instructions use the built-in default from the integration or a custom override."
+                "server_info": (
+                    "Moltbot's model and system prompt are configured on the Moltbot "
+                    "server. Leave Technical Instructions blank to use the built-in "
+                    "default from the integration. The Tools section can still keep "
+                    "this profile on a smaller MCP tool set."
+                )
             }
         else:
             description_placeholders = {
-                "server_info": "Configure this conversation profile. These settings only affect this profile. Prompt Source set to Default uses the built-in prompt text from the integration code."
+                "server_info": (
+                    "Configure this conversation profile. These settings only affect "
+                    "this profile. Leave System Prompt or Technical Instructions "
+                    "blank to use the built-in defaults from the integration code. "
+                    "The Tools section can keep smaller models on a leaner subset of "
+                    "the shared MCP server."
+                )
             }
 
         return self.async_show_form(
@@ -1796,8 +1911,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
     async def async_step_mcp_server(self, user_input=None):
         """Configure shared MCP server settings (affects all profiles)."""
         errors: dict[str, str] = {}
+        current_values = user_input or {}
 
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+            )
+            user_input = _apply_tool_family_selection(
+                user_input, TOOL_FAMILY_SHARED_SETTINGS
+            )
+            current_values = user_input
+
             # Validate allowed IPs
             allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
             is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
@@ -1863,18 +1987,102 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             sys_options = self.config_entry.options
             sys_data = self.config_entry.data
 
+        shared_defaults = {
+            CONF_ENABLE_GAP_FILLING: _get_form_value(
+                current_values,
+                CONF_ENABLE_GAP_FILLING,
+                sys_options.get(
+                    CONF_ENABLE_GAP_FILLING,
+                    sys_data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING),
+                ),
+            ),
+            CONF_ENABLE_ASSIST_BRIDGE: _get_form_value(
+                current_values,
+                CONF_ENABLE_ASSIST_BRIDGE,
+                sys_options.get(
+                    CONF_ENABLE_ASSIST_BRIDGE,
+                    sys_data.get(
+                        CONF_ENABLE_ASSIST_BRIDGE, DEFAULT_ENABLE_ASSIST_BRIDGE
+                    ),
+                ),
+            ),
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                        DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_RECORDER_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RECORDER_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_RECORDER_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_RECORDER_TOOLS,
+                        DEFAULT_ENABLE_RECORDER_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_CALCULATOR_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_CALCULATOR_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_CALCULATOR_TOOLS,
+                        DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_DEVICE_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_DEVICE_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_DEVICE_TOOLS, DEFAULT_ENABLE_DEVICE_TOOLS
+                    ),
+                ),
+            ),
+            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: _get_form_value(
+                current_values,
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                sys_options.get(
+                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    sys_data.get(
+                        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                        DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    ),
+                ),
+            ),
+        }
+
         # Build schema for MCP server settings
         mcp_schema = vol.Schema(
             {
                 vol.Required(
                     CONF_MCP_PORT,
-                    default=sys_options.get(
-                        CONF_MCP_PORT, sys_data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MCP_PORT,
+                        sys_options.get(
+                            CONF_MCP_PORT,
+                            sys_data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT),
+                        ),
                     ),
                 ): vol.Coerce(int),
                 vol.Required(
                     CONF_SEARCH_PROVIDER,
-                    default=self._get_search_provider_default(sys_options, sys_data),
+                    default=_get_form_value(
+                        current_values,
+                        CONF_SEARCH_PROVIDER,
+                        self._get_search_provider_default(sys_options, sys_data),
+                    ),
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
@@ -1890,94 +2098,49 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_BRAVE_API_KEY,
-                    default=sys_options.get(
+                    default=_get_form_value(
+                        current_values,
                         CONF_BRAVE_API_KEY,
-                        sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
+                        sys_options.get(
+                            CONF_BRAVE_API_KEY,
+                            sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
+                        ),
                     ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 vol.Optional(
                     CONF_ALLOWED_IPS,
-                    default=sys_options.get(
+                    default=_get_form_value(
+                        current_values,
                         CONF_ALLOWED_IPS,
-                        sys_data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS),
+                        sys_options.get(
+                            CONF_ALLOWED_IPS,
+                            sys_data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS),
+                        ),
                     ),
                 ): str,
-                vol.Optional(
-                    CONF_ENABLE_GAP_FILLING,
-                    default=sys_options.get(
-                        CONF_ENABLE_GAP_FILLING,
-                        sys_data.get(
-                            CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
-                        ),
+                DISCOVERY_SECTION_KEY: section(
+                    vol.Schema(
+                        {
+                            vol.Optional(
+                                CONF_ENABLE_GAP_FILLING,
+                                default=shared_defaults[CONF_ENABLE_GAP_FILLING],
+                            ): bool,
+                        }
                     ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_ASSIST_BRIDGE,
-                    default=sys_options.get(
-                        CONF_ENABLE_ASSIST_BRIDGE,
-                        sys_data.get(
-                            CONF_ENABLE_ASSIST_BRIDGE,
-                            DEFAULT_ENABLE_ASSIST_BRIDGE,
-                        ),
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-                    default=sys_options.get(
-                        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-                        sys_data.get(
-                            CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-                            DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
-                        ),
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_RECORDER_TOOLS,
-                    default=sys_options.get(
-                        CONF_ENABLE_RECORDER_TOOLS,
-                        sys_data.get(
-                            CONF_ENABLE_RECORDER_TOOLS,
-                            DEFAULT_ENABLE_RECORDER_TOOLS,
-                        ),
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_CALCULATOR_TOOLS,
-                    default=sys_options.get(
-                        CONF_ENABLE_CALCULATOR_TOOLS,
-                        sys_data.get(
-                            CONF_ENABLE_CALCULATOR_TOOLS,
-                            DEFAULT_ENABLE_CALCULATOR_TOOLS,
-                        ),
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_DEVICE_TOOLS,
-                    default=sys_options.get(
-                        CONF_ENABLE_DEVICE_TOOLS,
-                        sys_data.get(
-                            CONF_ENABLE_DEVICE_TOOLS,
-                            DEFAULT_ENABLE_DEVICE_TOOLS,
-                        ),
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                    default=sys_options.get(
-                        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                        sys_data.get(
-                            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                            DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-                        ),
-                    ),
-                ): bool,
+                    {"collapsed": False},
+                ),
+                TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
                 vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
-                    default=sys_options.get(
+                    default=_get_form_value(
+                        current_values,
                         CONF_MAX_ENTITIES_PER_DISCOVERY,
-                        sys_data.get(
+                        sys_options.get(
                             CONF_MAX_ENTITIES_PER_DISCOVERY,
-                            DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                            sys_data.get(
+                                CONF_MAX_ENTITIES_PER_DISCOVERY,
+                                DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                            ),
                         ),
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
@@ -1989,7 +2152,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             data_schema=mcp_schema,
             errors=errors,
             description_placeholders={
-                "warning": "⚠️ These settings are shared across ALL MCP Assist profiles. Restart Home Assistant after making changes."
+                "warning": (
+                    "⚠️ These settings are shared across ALL MCP Assist profiles and "
+                    "external MCP clients. Individual profiles can still opt into a "
+                    "smaller subset in their own settings."
+                )
             },
         )
 

@@ -45,6 +45,12 @@ CONF_ENABLE_RECORDER_TOOLS = "enable_recorder_tools"
 CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
 CONF_ENABLE_DEVICE_TOOLS = "enable_device_tools"
 CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT = "enable_music_assistant_support"
+CONF_PROFILE_ENABLE_ASSIST_BRIDGE = "profile_enable_assist_bridge"
+CONF_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = "profile_enable_response_service_tools"
+CONF_PROFILE_ENABLE_RECORDER_TOOLS = "profile_enable_recorder_tools"
+CONF_PROFILE_ENABLE_CALCULATOR_TOOLS = "profile_enable_calculator_tools"
+CONF_PROFILE_ENABLE_DEVICE_TOOLS = "profile_enable_device_tools"
+CONF_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT = "profile_enable_music_assistant_support"
 CONF_OLLAMA_KEEP_ALIVE = "ollama_keep_alive"
 CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
 CONF_FOLLOW_UP_PHRASES = "follow_up_phrases"
@@ -97,6 +103,12 @@ DEFAULT_ENABLE_RECORDER_TOOLS = True
 DEFAULT_ENABLE_CALCULATOR_TOOLS = False
 DEFAULT_ENABLE_DEVICE_TOOLS = True
 DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT = False
+DEFAULT_PROFILE_ENABLE_ASSIST_BRIDGE = True
+DEFAULT_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = True
+DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS = True
+DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS = True
+DEFAULT_PROFILE_ENABLE_DEVICE_TOOLS = True
+DEFAULT_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT = True
 DEFAULT_OLLAMA_KEEP_ALIVE = "5m"  # 5 minutes
 DEFAULT_OLLAMA_NUM_CTX = 0  # 0 = use model default
 DEFAULT_FOLLOW_UP_PHRASES = (
@@ -109,6 +121,127 @@ DEFAULT_END_WORDS = (
 )
 DEFAULT_CLEAN_RESPONSES = False
 DEFAULT_TIMEOUT = 30
+
+TOOL_FAMILY_DEVICE = "device"
+TOOL_FAMILY_ASSIST_BRIDGE = "assist_bridge"
+TOOL_FAMILY_RESPONSE_SERVICE = "response_service"
+TOOL_FAMILY_RECORDER = "recorder"
+TOOL_FAMILY_CALCULATOR = "calculator"
+TOOL_FAMILY_MUSIC_ASSISTANT = "music_assistant"
+
+OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
+    TOOL_FAMILY_DEVICE: frozenset({"discover_devices", "get_device_details"}),
+    TOOL_FAMILY_ASSIST_BRIDGE: frozenset(
+        {
+            "list_assist_tools",
+            "call_assist_tool",
+            "get_assist_prompt",
+            "get_assist_context_snapshot",
+        }
+    ),
+    TOOL_FAMILY_RESPONSE_SERVICE: frozenset(
+        {"list_response_services", "call_service_with_response"}
+    ),
+    TOOL_FAMILY_RECORDER: frozenset(
+        {
+            "get_entity_history",
+            "get_last_entity_event",
+            "analyze_entity_history",
+            "get_entity_state_at_time",
+        }
+    ),
+    TOOL_FAMILY_CALCULATOR: frozenset(
+        {
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+            "sqrt",
+            "power",
+            "round_number",
+            "average",
+            "min_value",
+            "max_value",
+            "convert_unit",
+            "evaluate_expression",
+        }
+    ),
+    TOOL_FAMILY_MUSIC_ASSISTANT: frozenset(
+        {
+            "list_music_assistant_players",
+            "play_music_assistant",
+            "list_music_assistant_instances",
+            "search_music_assistant",
+            "get_music_assistant_library",
+            "get_music_assistant_queue",
+        }
+    ),
+}
+
+OPTIONAL_TOOL_NAME_TO_FAMILY = {
+    tool_name: family
+    for family, tool_names in OPTIONAL_TOOL_FAMILY_TOOL_NAMES.items()
+    for tool_name in tool_names
+}
+
+TOOL_FAMILY_SHARED_SETTINGS = {
+    TOOL_FAMILY_DEVICE: (
+        CONF_ENABLE_DEVICE_TOOLS,
+        DEFAULT_ENABLE_DEVICE_TOOLS,
+    ),
+    TOOL_FAMILY_ASSIST_BRIDGE: (
+        CONF_ENABLE_ASSIST_BRIDGE,
+        DEFAULT_ENABLE_ASSIST_BRIDGE,
+    ),
+    TOOL_FAMILY_RESPONSE_SERVICE: (
+        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+        DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    ),
+    TOOL_FAMILY_RECORDER: (
+        CONF_ENABLE_RECORDER_TOOLS,
+        DEFAULT_ENABLE_RECORDER_TOOLS,
+    ),
+    TOOL_FAMILY_CALCULATOR: (
+        CONF_ENABLE_CALCULATOR_TOOLS,
+        DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    ),
+    TOOL_FAMILY_MUSIC_ASSISTANT: (
+        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+        DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    ),
+}
+
+TOOL_FAMILY_PROFILE_SETTINGS = {
+    TOOL_FAMILY_DEVICE: (
+        CONF_PROFILE_ENABLE_DEVICE_TOOLS,
+        DEFAULT_PROFILE_ENABLE_DEVICE_TOOLS,
+    ),
+    TOOL_FAMILY_ASSIST_BRIDGE: (
+        CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
+        DEFAULT_PROFILE_ENABLE_ASSIST_BRIDGE,
+    ),
+    TOOL_FAMILY_RESPONSE_SERVICE: (
+        CONF_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS,
+        DEFAULT_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS,
+    ),
+    TOOL_FAMILY_RECORDER: (
+        CONF_PROFILE_ENABLE_RECORDER_TOOLS,
+        DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS,
+    ),
+    TOOL_FAMILY_CALCULATOR: (
+        CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
+        DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
+    ),
+    TOOL_FAMILY_MUSIC_ASSISTANT: (
+        CONF_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+        DEFAULT_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    ),
+}
+
+
+def get_optional_tool_family(tool_name: str) -> str | None:
+    """Return the optional tool family for a tool name, if any."""
+    return OPTIONAL_TOOL_NAME_TO_FAMILY.get(tool_name)
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"
