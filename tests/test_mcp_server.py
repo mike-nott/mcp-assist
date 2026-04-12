@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from aiohttp import ClientSession
 from homeassistant.components.weather import WeatherEntityFeature
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.util import dt as dt_util
 import pytest
 from pytest_socket import disable_socket, enable_socket
 
@@ -18,6 +21,7 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_LMSTUDIO_URL,
 )
@@ -82,6 +86,7 @@ def test_tool_enablement_follows_shared_settings(
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: False,
             CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: False,
         }
     )
@@ -94,7 +99,24 @@ def test_tool_enablement_follows_shared_settings(
     assert server._is_tool_enabled("get_weather_forecast") is False
     assert server._is_tool_enabled("analyze_entity_history") is False
     assert server._is_tool_enabled("add") is False
+    assert server._is_tool_enabled("convert_unit") is False
     assert server._is_tool_enabled("play_music_assistant") is False
+
+
+def test_unit_conversion_can_stay_enabled_when_calculator_is_disabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Unit conversion should be independently gateable from calculator math tools."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
+        }
+    )
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    assert server._is_tool_enabled("add") is False
+    assert server._is_tool_enabled("convert_unit") is True
 
 
 def test_weather_forecast_tool_and_weather_services_can_be_disabled_independently(
@@ -128,13 +150,17 @@ async def test_handle_tools_list_filters_disabled_tool_families(
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: False,
             CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: False,
         }
     )
     server = MCPServer(hass, 8099, profile_entry_factory())
     server.custom_tools = SimpleNamespace(
-        get_tool_definitions=lambda: [{"name": "add", "description": "calc", "inputSchema": {}}],
-        is_custom_tool=lambda tool_name: tool_name == "add",
+        get_tool_definitions=lambda: [
+            {"name": "add", "description": "calc", "inputSchema": {}},
+            {"name": "convert_unit", "description": "convert", "inputSchema": {}},
+        ],
+        is_custom_tool=lambda tool_name: tool_name in {"add", "convert_unit"},
     )
 
     result = await server.handle_tools_list()
@@ -148,6 +174,7 @@ async def test_handle_tools_list_filters_disabled_tool_families(
     assert "get_entity_history" not in tool_names
     assert "play_music_assistant" not in tool_names
     assert "add" not in tool_names
+    assert "convert_unit" not in tool_names
 
 
 @pytest.mark.asyncio
@@ -167,6 +194,30 @@ async def test_default_tool_list_stays_streamlined(
 
 
 @pytest.mark.asyncio
+async def test_handle_tools_list_uses_cache_for_stable_signature(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Repeated tools/list requests should reuse the cached tool surface when settings are unchanged."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    custom_tools = SimpleNamespace(
+        tools={},
+        get_tool_definitions=lambda: [
+            {"name": "search", "description": "search", "inputSchema": {"type": "object", "properties": {}}},
+        ],
+    )
+    server.custom_tools = custom_tools
+
+    result_one = await server.handle_tools_list()
+    custom_tools.get_tool_definitions = lambda: (_ for _ in ()).throw(
+        AssertionError("tools/list should have been served from cache")
+    )
+    result_two = await server.handle_tools_list()
+
+    assert result_one == result_two
+
+
+@pytest.mark.asyncio
 async def test_handle_tool_call_rejects_disabled_tools(
     hass, profile_entry_factory, system_entry_factory
 ) -> None:
@@ -176,6 +227,85 @@ async def test_handle_tool_call_rejects_disabled_tools(
 
     with pytest.raises(ValueError, match="disabled"):
         await server.handle_tool_call({"name": "discover_devices", "arguments": {}})
+
+
+@pytest.mark.asyncio
+async def test_tool_discover_entities_reports_paging_metadata(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Entity discovery responses should tell callers when more results are available."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.discovery.discover_entities_page = AsyncMock(
+        return_value={
+            "items": [
+                {
+                    "entity_id": "light.kitchen",
+                    "name": "Kitchen Light",
+                    "state": "on",
+                    "area": "Kitchen",
+                },
+                {
+                    "entity_id": "light.pantry",
+                    "name": "Pantry Light",
+                    "state": "on",
+                    "area": "Kitchen",
+                },
+            ],
+            "total_found": 5,
+            "returned_count": 2,
+            "remaining_count": 3,
+            "offset": 0,
+            "limit": 2,
+            "has_more": True,
+            "next_offset": 2,
+        }
+    )
+
+    result = await server.tool_discover_entities({"domain": "light", "limit": 2})
+
+    assert "Showing 1-2 of 5 entities; 3 more available (next_offset=2):" in (
+        result["content"][0]["text"]
+    )
+    assert result["pagination"]["next_offset"] == 2
+    assert len(result["entities"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_tool_discover_devices_reports_paging_metadata(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Device discovery responses should include paging metadata too."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.discovery.discover_devices_page = AsyncMock(
+        return_value={
+            "items": [
+                {
+                    "device_id": "abc123",
+                    "name": "Kitchen Speaker",
+                    "entity_count": 3,
+                    "domains": ["media_player"],
+                    "entities_preview": [{"entity_id": "media_player.kitchen"}],
+                }
+            ],
+            "total_found": 4,
+            "returned_count": 1,
+            "remaining_count": 3,
+            "offset": 1,
+            "limit": 1,
+            "has_more": True,
+            "next_offset": 2,
+        }
+    )
+
+    result = await server.tool_discover_devices({"domain": "media_player", "limit": 1, "offset": 1})
+
+    assert "Showing 2-2 of 4 devices; 2 more available (next_offset=2)" in (
+        result["content"][0]["text"]
+    )
+    assert result["pagination"]["offset"] == 1
+    assert result["pagination"]["next_offset"] == 2
 
 
 def test_validate_service_blocks_music_assistant_when_disabled(
@@ -465,7 +595,45 @@ async def test_get_weather_forecast_discovers_entity_and_summarizes_tomorrow(
     assert request_args["target"] == {"entity_id": ["weather.home"]}
     assert request_args["data"]["type"] == "twice_daily"
     assert "Tomorrow for Weather:" in result["content"][0]["text"]
-    assert "morning: sunny, around 72" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_weather_forecast_target_uses_generic_ranking(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Weather target resolution should not rely on install-specific entity names."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.discovery.discover_entities = AsyncMock(
+        return_value=[
+            {
+                "entity_id": "weather.weather",
+                "name": "Weather",
+                "forecast_service_supported": False,
+                "forecast_available": False,
+            },
+            {
+                "entity_id": "weather.acme_sky",
+                "name": "Acme Sky",
+                "forecast_service_supported": True,
+                "forecast_available": True,
+            },
+            {
+                "entity_id": "weather.zeta_forecast",
+                "name": "Zeta Forecast",
+                "forecast_service_supported": True,
+                "forecast_available": True,
+            },
+        ]
+    )
+
+    resolved_target, entity_info = await server._resolve_weather_forecast_target()
+
+    assert resolved_target == {"entity_id": ["weather.acme_sky"]}
+    assert entity_info == {
+        "entity_id": "weather.acme_sky",
+        "name": "Acme Sky",
+    }
 
 
 @pytest.mark.asyncio
@@ -528,3 +696,168 @@ async def test_tool_perform_action_reports_pending_lock_transition(
     assert "Current states right now:" in text
     assert "Front Door Deadbolt: unlocked" in text
     assert "Successfully executed lock.lock" not in text
+
+
+def test_history_resolution_prefers_related_contact_sensor_for_open_requests(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Open-history requests should prefer a strongly matching door sensor over a lock."""
+    system_entry_factory()
+    entry = profile_entry_factory()
+    server = MCPServer(hass, 8099, entry)
+
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+
+    lock_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "front_door_lock")},
+        name="Front Door Deadbolt",
+    )
+    contact_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "front_door_contact")},
+        name="Front Door",
+    )
+
+    entity_registry.async_get_or_create(
+        "lock",
+        "test",
+        "front_door_deadbolt",
+        suggested_object_id="front_door_deadbolt",
+        device_id=lock_device.id,
+    )
+    entity_registry.async_get_or_create(
+        "binary_sensor",
+        "test",
+        "front_door_contact",
+        suggested_object_id="front_door",
+        device_id=contact_device.id,
+    )
+
+    hass.states.async_set(
+        "lock.front_door_deadbolt",
+        "locked",
+        {"friendly_name": "Front Door Deadbolt"},
+    )
+    hass.states.async_set(
+        "binary_sensor.front_door",
+        "off",
+        {"friendly_name": "Front Door", "device_class": "door"},
+    )
+
+    with patch(
+        "custom_components.mcp_assist.mcp_server.async_should_expose",
+        return_value=True,
+    ):
+        history_entity_id, resolution_note = server._resolve_history_entity_for_request(
+            "lock.front_door_deadbolt",
+            None,
+            "opened",
+        )
+
+    assert history_entity_id == "binary_sensor.front_door"
+    assert resolution_note is not None
+    assert "binary_sensor.front_door" in resolution_note
+
+
+@pytest.mark.asyncio
+async def test_analyze_history_falls_back_to_related_contact_sensor_when_primary_has_no_matches(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Count analysis should try strong related entities before returning zero matches."""
+    system_entry_factory()
+    entry = profile_entry_factory()
+    server = MCPServer(hass, 8099, entry)
+
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+
+    lock_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "front_door_lock_count")},
+        name="Front Door Deadbolt",
+    )
+    contact_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "front_door_contact_count")},
+        name="Front Door",
+    )
+
+    entity_registry.async_get_or_create(
+        "lock",
+        "test",
+        "front_door_deadbolt_count",
+        suggested_object_id="front_door_deadbolt",
+        device_id=lock_device.id,
+    )
+    entity_registry.async_get_or_create(
+        "binary_sensor",
+        "test",
+        "front_door_contact_count",
+        suggested_object_id="front_door",
+        device_id=contact_device.id,
+    )
+
+    hass.states.async_set(
+        "lock.front_door_deadbolt",
+        "locked",
+        {"friendly_name": "Front Door Deadbolt"},
+    )
+    hass.states.async_set(
+        "binary_sensor.front_door",
+        "off",
+        {"friendly_name": "Front Door", "device_class": "door"},
+    )
+
+    now = dt_util.utcnow()
+
+    async def fake_fetch(entity_id, *args, **kwargs):
+        if entity_id == "lock.front_door_deadbolt":
+            return [
+                SimpleNamespace(
+                    state="locked",
+                    last_changed=now - timedelta(hours=12),
+                    last_updated=now - timedelta(hours=12),
+                )
+            ]
+        if entity_id == "binary_sensor.front_door":
+            return [
+                SimpleNamespace(
+                    state="off",
+                    last_changed=now - timedelta(hours=24),
+                    last_updated=now - timedelta(hours=24),
+                ),
+                SimpleNamespace(
+                    state="on",
+                    last_changed=now - timedelta(hours=18),
+                    last_updated=now - timedelta(hours=18),
+                ),
+                SimpleNamespace(
+                    state="off",
+                    last_changed=now - timedelta(hours=17, minutes=55),
+                    last_updated=now - timedelta(hours=17, minutes=55),
+                ),
+            ]
+        raise AssertionError(f"Unexpected entity history fetch for {entity_id}")
+
+    server._fetch_entity_history_states = AsyncMock(side_effect=fake_fetch)
+
+    with patch(
+        "custom_components.mcp_assist.mcp_server.async_should_expose",
+        return_value=True,
+    ):
+        result = await server.tool_analyze_entity_history(
+            {
+                "entity_id": "lock.front_door_deadbolt",
+                "event": "opened",
+                "analysis": "count",
+                "hours": 24,
+            }
+        )
+
+    text = result["content"][0]["text"]
+
+    assert "Using related entity binary_sensor.front_door" in text
+    assert "Front Door (binary_sensor.front_door)" in text
+    assert "Recorded opened event in the last 24 hours: 1" in text

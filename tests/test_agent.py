@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,12 +11,16 @@ from custom_components.mcp_assist.agent import MCPAssistConversationEntity
 from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_CLEAN_RESPONSES,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_MAX_HISTORY,
     CONF_TECHNICAL_PROMPT,
     CONF_TECHNICAL_PROMPT_MODE,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
+    CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_PROFILE_ENABLE_DEVICE_TOOLS,
     DOMAIN,
     PROMPT_MODE_CUSTOM,
@@ -52,6 +57,27 @@ def test_profile_tool_enablement_respects_shared_and_profile_settings(
 
     assert agent.assist_bridge_enabled is False
     assert agent.device_tools_enabled is False
+
+
+def test_unit_conversion_tool_enablement_has_backward_compatible_fallbacks(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Unit conversion should inherit older calculator settings when its own flags are absent."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: None,
+        }
+    )
+    entry = profile_entry_factory(
+        options={
+            CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS: None,
+        }
+    )
+
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    assert agent.unit_conversion_tools_enabled is True
 
 
 def test_profile_tool_filtering_hides_disabled_optional_tools(
@@ -165,6 +191,63 @@ async def test_default_prompt_does_not_fetch_index_unless_requested(
 
 
 @pytest.mark.asyncio
+async def test_default_prompt_includes_current_user_and_home_location_context(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Default prompts should include current HA user and home location when enabled."""
+    system_entry_factory(
+        data={
+            CONF_INCLUDE_CURRENT_USER: True,
+            CONF_INCLUDE_HOME_LOCATION: True,
+        }
+    )
+    hass.config.location_name = "Test Home"
+    hass.config.latitude = 47.6205
+    hass.config.longitude = -122.3493
+    monkeypatch.setattr(
+        hass.auth,
+        "async_get_user",
+        AsyncMock(return_value=SimpleNamespace(name="Jason")),
+    )
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    prompt = await agent._build_system_prompt_with_context(
+        SimpleNamespace(device_id=None, context=SimpleNamespace(user_id="user-123"))
+    )
+
+    assert "Current user: Jason" in prompt
+    assert "Home location: Test Home (47.6205, -122.3493)" in prompt
+
+
+@pytest.mark.asyncio
+async def test_default_prompt_omits_optional_identity_context_when_disabled(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Shared privacy settings should allow identity/location prompt context to be omitted."""
+    system_entry_factory(
+        data={
+            CONF_INCLUDE_CURRENT_USER: False,
+            CONF_INCLUDE_HOME_LOCATION: False,
+        }
+    )
+    monkeypatch.setattr(
+        hass.auth,
+        "async_get_user",
+        AsyncMock(return_value=SimpleNamespace(name="Jason")),
+    )
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    prompt = await agent._build_system_prompt_with_context(
+        SimpleNamespace(device_id=None, context=SimpleNamespace(user_id="user-123"))
+    )
+
+    assert "Current user:" not in prompt
+    assert "Home location:" not in prompt
+
+
+@pytest.mark.asyncio
 async def test_custom_prompt_with_index_placeholder_fetches_index(
     hass, profile_entry_factory
 ) -> None:
@@ -186,6 +269,70 @@ async def test_custom_prompt_with_index_placeholder_fetches_index(
     prompt = await agent._build_system_prompt_with_context(SimpleNamespace(device_id=None))
 
     assert 'Index:{"areas":["Kitchen"],"domains":{"light":3}}' in prompt
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_tools_uses_short_lived_cache(
+    hass, profile_entry_factory, monkeypatch
+) -> None:
+    """Repeated tool fetches with the same profile surface should reuse the cache."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+    fetch_mock = AsyncMock(return_value=[{"type": "function", "function": {"name": "discover_entities"}}])
+    monkeypatch.setattr(agent, "_fetch_mcp_tools_from_server", fetch_mock)
+
+    first = await agent._get_mcp_tools()
+    second = await agent._get_mcp_tools()
+
+    assert first == second
+    fetch_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_tools_uses_stale_cache_on_refresh_failure(
+    hass, profile_entry_factory, monkeypatch
+) -> None:
+    """A transient tools/list failure should fall back to the last cached tool surface."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+    cached_tools = [{"type": "function", "function": {"name": "discover_entities"}}]
+    agent._cached_llm_tools = list(cached_tools)
+    agent._cached_llm_tools_key = agent._build_mcp_tool_cache_key()
+    agent._cached_llm_tools_fetched_at = 0
+    monkeypatch.setattr(agent, "_fetch_mcp_tools_from_server", AsyncMock(return_value=None))
+    monkeypatch.setattr("custom_components.mcp_assist.agent.time.monotonic", lambda: 9999.0)
+
+    result = await agent._get_mcp_tools()
+
+    assert result == cached_tools
+
+
+def test_compact_tool_result_for_llm_truncates_large_payloads(
+    hass, profile_entry_factory
+) -> None:
+    """Oversized tool results should be trimmed before re-entering the model loop."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    large_result = "\n".join(f"line {index}" for index in range(300))
+    compacted = agent._compact_tool_result_for_llm(
+        "discover_entities", large_result
+    )
+
+    assert "Tool result truncated for model context" in compacted
+    assert "Use limit/offset paging" in compacted
+    assert len(compacted) < len(large_result)
+
+
+@pytest.mark.asyncio
+async def test_trigger_tts_is_a_noop(
+    hass, profile_entry_factory
+) -> None:
+    """Interim streaming TTS should simply return without doing extra work."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    assert await agent._trigger_tts("Hello there.") is None
 
 
 def test_convert_mcp_tools_to_llm_tools_compacts_schema(

@@ -18,24 +18,32 @@ from .const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
     CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_INCLUDE_CURRENT_USER,
+    DEFAULT_INCLUDE_HOME_LOCATION,
     DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_ENABLE_ASSIST_BRIDGE,
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
 )
@@ -110,6 +118,20 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     CONF_MCP_PORT,
                     first_profile.data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
                 ),
+                CONF_ENABLE_WEB_SEARCH: first_profile.options.get(
+                    CONF_ENABLE_WEB_SEARCH,
+                    first_profile.data.get(
+                        CONF_ENABLE_WEB_SEARCH,
+                        (
+                            search_provider != DEFAULT_SEARCH_PROVIDER
+                            if search_provider
+                            else first_profile.options.get(
+                                CONF_ENABLE_CUSTOM_TOOLS,
+                                first_profile.data.get(CONF_ENABLE_CUSTOM_TOOLS, False),
+                            )
+                        ),
+                    ),
+                ),
                 CONF_SEARCH_PROVIDER: search_provider,
                 CONF_BRAVE_API_KEY: first_profile.options.get(
                     CONF_BRAVE_API_KEY,
@@ -118,6 +140,20 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_ALLOWED_IPS: first_profile.options.get(
                     CONF_ALLOWED_IPS,
                     first_profile.data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
+                ),
+                CONF_INCLUDE_CURRENT_USER: first_profile.options.get(
+                    CONF_INCLUDE_CURRENT_USER,
+                    first_profile.data.get(
+                        CONF_INCLUDE_CURRENT_USER,
+                        DEFAULT_INCLUDE_CURRENT_USER,
+                    ),
+                ),
+                CONF_INCLUDE_HOME_LOCATION: first_profile.options.get(
+                    CONF_INCLUDE_HOME_LOCATION,
+                    first_profile.data.get(
+                        CONF_INCLUDE_HOME_LOCATION,
+                        DEFAULT_INCLUDE_HOME_LOCATION,
+                    ),
                 ),
                 CONF_ENABLE_GAP_FILLING: first_profile.options.get(
                     CONF_ENABLE_GAP_FILLING,
@@ -156,6 +192,19 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                         DEFAULT_ENABLE_CALCULATOR_TOOLS,
                     ),
                 ),
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                        first_profile.options.get(
+                            CONF_ENABLE_CALCULATOR_TOOLS,
+                            first_profile.data.get(
+                                CONF_ENABLE_CALCULATOR_TOOLS,
+                                DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                            ),
+                        ),
+                    ),
+                ),
                 CONF_ENABLE_DEVICE_TOOLS: first_profile.options.get(
                     CONF_ENABLE_DEVICE_TOOLS,
                     first_profile.data.get(
@@ -176,15 +225,19 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
             _LOGGER.info("No existing profiles found, using default shared settings")
             shared_settings = {
                 CONF_MCP_PORT: DEFAULT_MCP_PORT,
+                CONF_ENABLE_WEB_SEARCH: DEFAULT_ENABLE_WEB_SEARCH,
                 CONF_SEARCH_PROVIDER: DEFAULT_SEARCH_PROVIDER,
                 CONF_BRAVE_API_KEY: DEFAULT_BRAVE_API_KEY,
                 CONF_ALLOWED_IPS: DEFAULT_ALLOWED_IPS,
+                CONF_INCLUDE_CURRENT_USER: DEFAULT_INCLUDE_CURRENT_USER,
+                CONF_INCLUDE_HOME_LOCATION: DEFAULT_INCLUDE_HOME_LOCATION,
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
                 CONF_ENABLE_ASSIST_BRIDGE: DEFAULT_ENABLE_ASSIST_BRIDGE,
                 CONF_ENABLE_RESPONSE_SERVICE_TOOLS: DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
                 CONF_ENABLE_WEATHER_FORECAST_TOOL: DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
                 CONF_ENABLE_RECORDER_TOOLS: DEFAULT_ENABLE_RECORDER_TOOLS,
                 CONF_ENABLE_CALCULATOR_TOOLS: DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS: DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
                 CONF_ENABLE_DEVICE_TOOLS: DEFAULT_ENABLE_DEVICE_TOOLS,
                 CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
             }

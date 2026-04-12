@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 import ipaddress
 import json
 import logging
+import re
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
 from datetime import date, datetime, time, timedelta
@@ -45,21 +46,25 @@ from .const import (
     CONF_LMSTUDIO_URL,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_CUSTOM_TOOLS,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_SEARCH_PROVIDER,
     DEFAULT_ENABLE_ASSIST_BRIDGE,
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     TOOL_FAMILY_SHARED_SETTINGS,
@@ -93,6 +98,8 @@ class MCPServer:
         self.discovery = EntityDiscovery(hass)
         self.sse_clients = []  # Track SSE connections for notifications
         self.progress_queues = set()  # Track progress SSE clients
+        self._cached_tools_list: dict[str, Any] | None = None
+        self._cached_tools_signature: tuple[Any, ...] | None = None
 
         # Extract allowed IPs from LM Studio URL
         self.allowed_ips = ["127.0.0.1", "::1"]  # Always allow localhost
@@ -167,6 +174,8 @@ class MCPServer:
         """Get search provider (shared setting) with backward compatibility."""
         provider = self._get_shared_setting(CONF_SEARCH_PROVIDER, None)
         if provider:
+            if not self._web_search_enabled():
+                return "none"
             return provider
 
         # Backward compat: if old enable_custom_tools was True, default to "brave"
@@ -174,6 +183,16 @@ class MCPServer:
             return "brave"
 
         return "none"
+
+    def _web_search_enabled(self) -> bool:
+        """Return whether web-search tools are enabled."""
+        explicit_enabled = self._get_shared_setting(CONF_ENABLE_WEB_SEARCH, None)
+        if explicit_enabled is not None:
+            return bool(explicit_enabled)
+        provider = self._get_shared_setting(CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER)
+        if provider and str(provider).strip().casefold() != DEFAULT_SEARCH_PROVIDER:
+            return True
+        return bool(self._get_shared_setting(CONF_ENABLE_CUSTOM_TOOLS, False))
 
     def _music_assistant_support_enabled(self) -> bool:
         """Return whether Music Assistant-specific MCP support is enabled."""
@@ -234,6 +253,21 @@ class MCPServer:
             )
         )
 
+    def _unit_conversion_tools_enabled(self) -> bool:
+        """Return whether unit-conversion tools are enabled."""
+        explicit_enabled = self._get_shared_setting(
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+            None,
+        )
+        if explicit_enabled is not None:
+            return bool(explicit_enabled)
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_CALCULATOR_TOOLS,
+                DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+            )
+        )
+
     def _device_tools_enabled(self) -> bool:
         """Return whether Home Assistant device tools are enabled."""
         return bool(
@@ -265,6 +299,8 @@ class MCPServer:
         """Return whether an optional tool is enabled by settings."""
         if tool_name == "get_weather_forecast":
             return self._weather_forecast_tool_enabled()
+        if tool_name == "convert_unit":
+            return self._unit_conversion_tools_enabled()
 
         family = get_optional_tool_family(tool_name)
         if family is None:
@@ -272,6 +308,29 @@ class MCPServer:
 
         setting_key, default = TOOL_FAMILY_SHARED_SETTINGS[family]
         return bool(self._get_shared_setting(setting_key, default))
+
+    def _get_tools_list_signature(self, max_limit: int) -> tuple[Any, ...]:
+        """Return a cache signature for the current MCP tool surface."""
+        custom_tool_names: tuple[str, ...] = ()
+        if self.custom_tools:
+            custom_tool_store = getattr(self.custom_tools, "tools", {})
+            if isinstance(custom_tool_store, dict):
+                custom_tool_names = tuple(sorted(custom_tool_store.keys()))
+
+        return (
+            max_limit,
+            self._get_search_provider(),
+            self._web_search_enabled(),
+            self._assist_bridge_enabled(),
+            self._response_service_tools_enabled(),
+            self._weather_forecast_tool_enabled(),
+            self._recorder_tools_enabled(),
+            self._calculator_tools_enabled(),
+            self._unit_conversion_tools_enabled(),
+            self._device_tools_enabled(),
+            self._music_assistant_support_enabled(),
+            custom_tool_names,
+        )
 
     async def start(self) -> None:
         """Start the MCP server."""
@@ -816,10 +875,15 @@ class MCPServer:
                 max_limit = entry.data.get(CONF_MAX_ENTITIES_PER_DISCOVERY, DEFAULT_MAX_ENTITIES_PER_DISCOVERY)
                 break
 
+        signature = self._get_tools_list_signature(max_limit)
+        if self._cached_tools_list is not None and self._cached_tools_signature == signature:
+            _LOGGER.debug("Returning cached MCP tools/list response")
+            return {"tools": list(self._cached_tools_list)}
+
         tools = [
             {
                 "name": "discover_entities",
-                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, current state, or aliases. Prefer this for most direct control and status checks, including entities that do not belong to any device. This returns a compact summary; call get_entity_details for full entity attributes.",
+                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, current state, or aliases. Prefer this for most direct control and status checks, including entities that do not belong to any device. This returns a compact summary plus paging metadata; call get_entity_details for full entity attributes.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -869,8 +933,13 @@ class MCPServer:
                         },
                         "limit": {
                             "type": "integer",
-                            "description": f"Maximum number of entities to return (default: 20, max: {max_limit})",
+                            "description": f"Maximum number of entities to return for this page (default: 20, max: {max_limit})",
                             "default": 20,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Zero-based pagination offset. Use the next_offset from a previous discovery response to fetch more results.",
+                            "default": 0,
                         },
                     },
                     "required": [],
@@ -879,7 +948,7 @@ class MCPServer:
             },
             {
                 "name": "discover_devices",
-                "description": "Find and list Home Assistant devices by criteria like area, floor, label, related entity domain, manufacturer, model, name, or aliases. Use this when the user is referring to a physical device or when you want to inspect related entities on the same device.",
+                "description": "Find and list Home Assistant devices by criteria like area, floor, label, related entity domain, manufacturer, model, name, or aliases. Use this when the user is referring to a physical device or when you want to inspect related entities on the same device. This returns compact results plus paging metadata.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -914,8 +983,13 @@ class MCPServer:
                         },
                         "limit": {
                             "type": "integer",
-                            "description": f"Maximum number of devices to return (default: 20, max: {max_limit})",
+                            "description": f"Maximum number of devices to return for this page (default: 20, max: {max_limit})",
                             "default": 20,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Zero-based pagination offset. Use the next_offset from a previous device discovery response to fetch more results.",
+                            "default": 0,
                         },
                     },
                     "required": [],
@@ -1728,6 +1802,8 @@ class MCPServer:
                 _LOGGER.error(f"Failed to get custom tool definitions: {e}")
 
         tools = [tool for tool in tools if self._is_tool_enabled(tool["name"])]
+        self._cached_tools_list = list(tools)
+        self._cached_tools_signature = signature
 
         # nextCursor is optional - omit if not paginating
         return {"tools": tools}
@@ -1809,6 +1885,19 @@ class MCPServer:
 
     async def tool_discover_entities(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Discover entities based on criteria with progress notifications."""
+        limit = self._coerce_int_arg(
+            args.get("limit"),
+            default=20,
+            minimum=1,
+            maximum=MAX_ENTITIES_PER_DISCOVERY,
+        )
+        offset = self._coerce_int_arg(
+            args.get("offset"),
+            default=0,
+            minimum=0,
+            maximum=10000,
+        )
+
         # Notify start
         self.publish_progress(
             "tool_start",
@@ -1817,7 +1906,7 @@ class MCPServer:
             args=args,
         )
 
-        entities = await self.discovery.discover_entities(
+        page = await self.discovery.discover_entities_page(
             entity_type=args.get("entity_type"),
             area=args.get("area"),
             floor=args.get("floor"),
@@ -1825,25 +1914,44 @@ class MCPServer:
             domain=args.get("domain"),
             state=args.get("state"),
             name_contains=args.get("name_contains"),
-            limit=args.get("limit", 20),
+            limit=limit,
+            offset=offset,
             device_class=args.get("device_class"),
             name_pattern=args.get("name_pattern"),
             inferred_type=args.get("inferred_type"),
         )
+        entities = page["items"]
 
         # Notify completion
         self.publish_progress(
             "tool_complete",
-            f"Discovery complete: found {len(entities)} entities",
+            (
+                "Discovery complete: "
+                f"returned {page['returned_count']} of {page['total_found']} entities"
+            ),
             tool="discover_entities",
-            count=len(entities),
+            count=page["returned_count"],
+            total=page["total_found"],
         )
 
         # Format results based on whether it's smart discovery or general
-        return self._format_discovery_results(entities, args)
+        return self._format_discovery_results(entities, args, page)
 
     async def tool_discover_devices(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Discover devices based on criteria."""
+        limit = self._coerce_int_arg(
+            args.get("limit"),
+            default=20,
+            minimum=1,
+            maximum=MAX_ENTITIES_PER_DISCOVERY,
+        )
+        offset = self._coerce_int_arg(
+            args.get("offset"),
+            default=0,
+            minimum=0,
+            maximum=10000,
+        )
+
         self.publish_progress(
             "tool_start",
             "Starting device discovery",
@@ -1851,7 +1959,7 @@ class MCPServer:
             args=args,
         )
 
-        devices = await self.discovery.discover_devices(
+        page = await self.discovery.discover_devices_page(
             area=args.get("area"),
             floor=args.get("floor"),
             label=args.get("label"),
@@ -1859,17 +1967,41 @@ class MCPServer:
             name_contains=args.get("name_contains"),
             manufacturer=args.get("manufacturer"),
             model=args.get("model"),
-            limit=args.get("limit", 20),
+            limit=limit,
+            offset=offset,
         )
+        devices = page["items"]
 
         self.publish_progress(
             "tool_complete",
-            f"Device discovery complete: found {len(devices)} devices",
+            (
+                "Device discovery complete: "
+                f"returned {page['returned_count']} of {page['total_found']} devices"
+            ),
             tool="discover_devices",
-            count=len(devices),
+            count=page["returned_count"],
+            total=page["total_found"],
         )
 
         if not devices:
+            if page["total_found"] > 0:
+                page_header = self._build_paging_header(
+                    noun="devices",
+                    total_found=page["total_found"],
+                    returned_count=page["returned_count"],
+                    offset=page["offset"],
+                    next_offset=page["next_offset"],
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"{page_header}. No devices were returned for this page.",
+                        }
+                    ],
+                    "devices": [],
+                    "pagination": page,
+                }
             return {
                 "content": [
                     {
@@ -1879,8 +2011,18 @@ class MCPServer:
                 ]
             }
 
+        header = self._build_paging_header(
+            noun="devices",
+            total_found=page["total_found"],
+            returned_count=page["returned_count"],
+            offset=page["offset"],
+            next_offset=page["next_offset"],
+        )
         text_parts = [
-            f"Found {len(devices)} devices (use get_device_details to inspect attached entities; prefer entity targets for most direct control):"
+            (
+                f"{header} (use get_device_details to inspect attached entities; "
+                "prefer entity targets for most direct control):"
+            )
         ]
         for device in devices:
             detail_parts = [f"{device['entity_count']} entities"]
@@ -1911,13 +2053,74 @@ class MCPServer:
                 f"- {device['device_id']}: {device['name']} ({', '.join(detail_parts)})"
             )
 
-        return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+        return {
+            "content": [{"type": "text", "text": "\n".join(text_parts)}],
+            "devices": devices,
+            "pagination": page,
+        }
+
+    def _build_paging_header(
+        self,
+        *,
+        noun: str,
+        total_found: int,
+        returned_count: int,
+        offset: int,
+        next_offset: int | None,
+    ) -> str:
+        """Build a compact human-readable paging header."""
+        if total_found <= 0:
+            return f"Found 0 {noun}"
+
+        if returned_count <= 0:
+            return f"No {noun} at offset {offset}; {total_found} total available"
+
+        start_number = offset + 1
+        end_number = offset + returned_count
+
+        if total_found > returned_count or offset > 0:
+            header = f"Showing {start_number}-{end_number} of {total_found} {noun}"
+        else:
+            header = f"Found {total_found} {noun}"
+
+        if next_offset is not None:
+            header += f"; {total_found - end_number} more available (next_offset={next_offset})"
+
+        return header
 
     def _format_discovery_results(
-        self, entities: List[Dict[str, Any]], args: Dict[str, Any]
+        self,
+        entities: List[Dict[str, Any]],
+        args: Dict[str, Any],
+        pagination: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Format discovery results for the LLM, handling both smart and general discovery."""
+        pagination = pagination or {
+            "total_found": len(entities),
+            "returned_count": len(entities),
+            "offset": 0,
+            "next_offset": None,
+        }
+
         if not entities:
+            if pagination.get("total_found", 0) > 0:
+                page_header = self._build_paging_header(
+                    noun="entities",
+                    total_found=pagination["total_found"],
+                    returned_count=pagination.get("returned_count", 0),
+                    offset=pagination.get("offset", 0),
+                    next_offset=pagination.get("next_offset"),
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"{page_header}. No entities were returned for this page.",
+                        }
+                    ],
+                    "entities": [],
+                    "pagination": pagination,
+                }
             return {
                 "content": [
                     {
@@ -1953,7 +2156,17 @@ class MCPServer:
             else:
                 text_parts.append("🔍 Discovery Results")
 
-            text_parts.append(f"Found {summary.get('total_found', 0)} total entities")
+            text_parts.append(
+                self._build_paging_header(
+                    noun="entities",
+                    total_found=summary.get("total_found", 0),
+                    returned_count=summary.get(
+                        "returned_count", len(actual_entities)
+                    ),
+                    offset=summary.get("offset", 0),
+                    next_offset=summary.get("next_offset"),
+                )
+            )
 
             # Group entities by relationship
             primary = [e for e in actual_entities if e.get("relationship") == "primary"]
@@ -2019,26 +2232,51 @@ class MCPServer:
                             f"    • {entity['entity_id']}: {entity['state']}{location_text}{labels}{aliases}"
                         )
 
-            return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+            return {
+                "content": [{"type": "text", "text": "\n".join(text_parts)}],
+                "entities": actual_entities,
+                "pagination": pagination,
+            }
         else:
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": self._format_general_discovery_results(entities),
+                        "text": self._format_general_discovery_results(
+                            entities,
+                            pagination=pagination,
+                        ),
                     }
-                ]
+                ],
+                "entities": entities,
+                "pagination": pagination,
             }
 
-    def _format_general_discovery_results(self, entities: List[Dict[str, Any]]) -> str:
+    def _format_general_discovery_results(
+        self,
+        entities: List[Dict[str, Any]],
+        *,
+        pagination: Dict[str, Any] | None = None,
+    ) -> str:
         """Format general discovery results in a stable, readable order."""
         sorted_entities = sorted(entities, key=self._discovery_entity_sort_key)
         grouped_entities = self._group_entities_for_display(sorted_entities)
+        pagination = pagination or {
+            "total_found": len(sorted_entities),
+            "returned_count": len(sorted_entities),
+            "offset": 0,
+            "next_offset": None,
+        }
+        header = self._build_paging_header(
+            noun="entities",
+            total_found=pagination["total_found"],
+            returned_count=pagination["returned_count"],
+            offset=pagination["offset"],
+            next_offset=pagination.get("next_offset"),
+        )
 
         if len(grouped_entities) > 1:
-            text_parts = [
-                f"Found {len(sorted_entities)} entities across {len(grouped_entities)} groups:"
-            ]
+            text_parts = [f"{header} across {len(grouped_entities)} groups:"]
             for group_name, group_items in grouped_entities:
                 text_parts.append(f"\n{group_name} ({len(group_items)}):")
                 for entity in group_items:
@@ -2047,7 +2285,7 @@ class MCPServer:
                     )
             return "\n".join(text_parts)
 
-        text_parts = [f"Found {len(sorted_entities)} entities:"]
+        text_parts = [f"{header}:"]
         for entity in sorted_entities:
             text_parts.append(f"- {self._format_general_discovery_entity(entity)}")
         return "\n".join(text_parts)
@@ -3753,11 +3991,14 @@ class MCPServer:
         target_states = self._normalize_history_targets(
             args.get("state"), args.get("event")
         )
-        history_entity_id, resolution_note = self._resolve_history_entity_for_request(
+        history_candidates = self._history_resolution_candidates(
             entity_id,
             args.get("state"),
             args.get("event"),
         )
+        selected_candidate = history_candidates[0]
+        history_entity_id = selected_candidate["entity_id"]
+        resolution_note = selected_candidate["note"]
         current_state = self.hass.states.get(history_entity_id)
         friendly_name = current_state.attributes.get("friendly_name", history_entity_id)
         end_time = dt_util.utcnow()
@@ -3772,21 +4013,38 @@ class MCPServer:
         try:
             if target_states:
                 matched_state = None
-                for window_hours in self._build_history_search_windows(hours):
-                    entity_states = await self._fetch_entity_history_states(
-                        history_entity_id,
-                        hours=window_hours,
-                        end_time=end_time,
-                        descending=True,
-                    )
-                    matched_state = next(
-                        (
-                            state
-                            for state in entity_states
-                            if state.state.casefold() in target_states
-                        ),
-                        None,
-                    )
+                for candidate in history_candidates:
+                    candidate_entity_id = candidate["entity_id"]
+                    candidate_target_states = target_states
+                    for window_hours in self._build_history_search_windows(hours):
+                        entity_states = await self._fetch_entity_history_states(
+                            candidate_entity_id,
+                            hours=window_hours,
+                            end_time=end_time,
+                            descending=True,
+                        )
+                        candidate_target_states = self._choose_history_count_states(
+                            entity_states,
+                            args.get("state"),
+                            args.get("event"),
+                        )
+                        matched_state = next(
+                            (
+                                state
+                                for state in entity_states
+                                if state.state.casefold() in candidate_target_states
+                            ),
+                            None,
+                        )
+                        if matched_state is not None:
+                            history_entity_id = candidate_entity_id
+                            resolution_note = candidate["note"]
+                            current_state = self.hass.states.get(history_entity_id)
+                            friendly_name = current_state.attributes.get(
+                                "friendly_name", history_entity_id
+                            )
+                            target_states = candidate_target_states
+                            break
                     if matched_state is not None:
                         break
             else:
@@ -3882,11 +4140,14 @@ class MCPServer:
         hours = self._coerce_int_arg(
             args.get("hours"), default=default_hours, minimum=1, maximum=8760
         )
-        history_entity_id, resolution_note = self._resolve_history_entity_for_request(
+        history_candidates = self._history_resolution_candidates(
             entity_id,
             args.get("state"),
             args.get("event"),
         )
+        selected_candidate = history_candidates[0]
+        history_entity_id = selected_candidate["entity_id"]
+        resolution_note = selected_candidate["note"]
         current_state = self.hass.states.get(history_entity_id)
 
         if not current_state:
@@ -3910,15 +4171,43 @@ class MCPServer:
 
         query_end_time = dt_util.utcnow()
         query_start_time = query_end_time - timedelta(hours=hours)
+        include_start_time_state = analysis in {"duration", "streak", "stats"}
 
-        try:
-            entity_states = await self._fetch_entity_history_states(
-                history_entity_id,
+        async def _load_candidate_history(candidate: Dict[str, Any]) -> Dict[str, Any] | None:
+            candidate_entity_id = candidate["entity_id"]
+            candidate_current_state = self.hass.states.get(candidate_entity_id)
+            if candidate_current_state is None:
+                return None
+
+            candidate_entity_states = await self._fetch_entity_history_states(
+                candidate_entity_id,
                 hours=hours,
                 end_time=query_end_time,
                 descending=False,
-                include_start_time_state=analysis in {"duration", "streak", "stats"},
+                include_start_time_state=include_start_time_state,
             )
+            if target_states:
+                candidate_target_filter_states = self._choose_history_count_states(
+                    candidate_entity_states,
+                    args.get("state"),
+                    args.get("event"),
+                )
+            else:
+                candidate_target_filter_states = []
+
+            return {
+                "candidate": candidate,
+                "entity_id": candidate_entity_id,
+                "current_state": candidate_current_state,
+                "friendly_name": candidate_current_state.attributes.get(
+                    "friendly_name", candidate_entity_id
+                ),
+                "entity_states": candidate_entity_states,
+                "target_filter_states": candidate_target_filter_states,
+            }
+
+        try:
+            candidate_history = await _load_candidate_history(selected_candidate)
         except Exception as err:
             _LOGGER.error(
                 "Failed to analyze history for %s: %s", history_entity_id, err
@@ -3932,14 +4221,19 @@ class MCPServer:
                 ]
             }
 
-        if target_states:
-            target_filter_states = self._choose_history_count_states(
-                entity_states,
-                args.get("state"),
-                args.get("event"),
-            )
-        else:
-            target_filter_states = []
+        if candidate_history is None:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Entity '{history_entity_id}' not found."}
+                ]
+            }
+
+        history_entity_id = candidate_history["entity_id"]
+        current_state = candidate_history["current_state"]
+        friendly_name = candidate_history["friendly_name"]
+        entity_states = candidate_history["entity_states"]
+
+        target_filter_states = candidate_history["target_filter_states"]
 
         if analysis == "duration":
             if not target_filter_states:
@@ -3961,6 +4255,35 @@ class MCPServer:
                 query_start_time,
                 query_end_time,
             )
+            if duration_result["interval_count"] == 0 and len(history_candidates) > 1:
+                for candidate in history_candidates[1:]:
+                    candidate_history = await _load_candidate_history(candidate)
+                    if candidate_history is None:
+                        continue
+                    candidate_duration_result = self._calculate_state_duration(
+                        candidate_history["entity_states"],
+                        candidate_history["target_filter_states"],
+                        query_start_time,
+                        query_end_time,
+                    )
+                    candidate_current_state = candidate_history["current_state"]
+                    if (
+                        candidate_duration_result["interval_count"] > 0
+                        or (
+                            candidate_history["target_filter_states"]
+                            and candidate_current_state.state.casefold()
+                            in candidate_history["target_filter_states"]
+                        )
+                    ):
+                        history_entity_id = candidate_history["entity_id"]
+                        current_state = candidate_current_state
+                        friendly_name = candidate_history["friendly_name"]
+                        entity_states = candidate_history["entity_states"]
+                        target_filter_states = candidate_history["target_filter_states"]
+                        resolution_note = candidate["note"]
+                        duration_result = candidate_duration_result
+                        break
+
             total_duration = duration_result["total_duration"]
             interval_count = duration_result["interval_count"]
             search_label = self._describe_history_target(
@@ -4024,6 +4347,28 @@ class MCPServer:
             search_label = self._describe_history_target(
                 args.get("state"), args.get("event")
             )
+            if (
+                current_state.state.casefold() not in target_filter_states
+                and len(history_candidates) > 1
+            ):
+                for candidate in history_candidates[1:]:
+                    candidate_history = await _load_candidate_history(candidate)
+                    if candidate_history is None:
+                        continue
+                    candidate_current_state = candidate_history["current_state"]
+                    if (
+                        candidate_history["target_filter_states"]
+                        and candidate_current_state.state.casefold()
+                        in candidate_history["target_filter_states"]
+                    ):
+                        history_entity_id = candidate_history["entity_id"]
+                        current_state = candidate_current_state
+                        friendly_name = candidate_history["friendly_name"]
+                        entity_states = candidate_history["entity_states"]
+                        target_filter_states = candidate_history["target_filter_states"]
+                        resolution_note = candidate["note"]
+                        break
+
             if current_state.state.casefold() not in target_filter_states:
                 text_parts = [
                     f"{friendly_name} ({history_entity_id})",
@@ -4167,6 +4512,26 @@ class MCPServer:
             ]
         else:
             matched_states = entity_states
+
+        if target_filter_states and not matched_states and len(history_candidates) > 1:
+            for candidate in history_candidates[1:]:
+                candidate_history = await _load_candidate_history(candidate)
+                if candidate_history is None:
+                    continue
+                candidate_matched_states = [
+                    state
+                    for state in candidate_history["entity_states"]
+                    if state.state.casefold() in candidate_history["target_filter_states"]
+                ]
+                if candidate_matched_states:
+                    history_entity_id = candidate_history["entity_id"]
+                    current_state = candidate_history["current_state"]
+                    friendly_name = candidate_history["friendly_name"]
+                    entity_states = candidate_history["entity_states"]
+                    target_filter_states = candidate_history["target_filter_states"]
+                    matched_states = candidate_matched_states
+                    resolution_note = candidate["note"]
+                    break
 
         match_count = len(matched_states)
 
@@ -4609,36 +4974,194 @@ class MCPServer:
 
         return score
 
+    def _history_relation_tokens(self, value: Any) -> List[str]:
+        """Normalize an entity-related name into meaningful comparison tokens."""
+        if value in (None, ""):
+            return []
+
+        stopwords = {
+            "a",
+            "an",
+            "the",
+            "entity",
+            "device",
+            "binary",
+            "sensor",
+            "contact",
+            "contacts",
+            "lock",
+            "locks",
+            "locked",
+            "unlock",
+            "unlocked",
+            "deadbolt",
+            "bolt",
+        }
+        raw_tokens = re.findall(r"[a-z0-9]+", str(value).casefold())
+        filtered = [
+            token
+            for token in raw_tokens
+            if len(token) > 1 and token not in stopwords
+        ]
+        return filtered or [token for token in raw_tokens if len(token) > 1]
+
+    def _history_relation_texts(self, state_obj: Any) -> List[str]:
+        """Collect stable entity name variants for related-entity matching."""
+        if state_obj is None:
+            return []
+
+        texts: List[str] = []
+        for value in (
+            getattr(state_obj, "name", None),
+            state_obj.attributes.get("friendly_name"),
+            state_obj.entity_id.split(".", 1)[1].replace("_", " "),
+        ):
+            text = str(value).strip() if value not in (None, "") else ""
+            if text and text not in texts:
+                texts.append(text)
+        return texts
+
+    def _history_entity_location_signature(
+        self, entity_id: str
+    ) -> Tuple[str | None, str | None, str | None]:
+        """Return device, area, and floor identifiers for an entity."""
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+
+        entity_entry = entity_registry.async_get(entity_id)
+        if entity_entry is None:
+            return None, None, None
+
+        device_entry = (
+            device_registry.async_get(entity_entry.device_id)
+            if entity_entry.device_id
+            else None
+        )
+        area_id = entity_entry.area_id or (device_entry.area_id if device_entry else None)
+        area_entry = area_registry.async_get_area(area_id) if area_id else None
+        floor_id = getattr(area_entry, "floor_id", None) if area_entry else None
+        if floor_id and floor_registry is not None:
+            floor_entry = floor_registry.async_get_floor(floor_id)
+            floor_id = floor_entry.floor_id if floor_entry else floor_id
+
+        return entity_entry.device_id, area_id, floor_id
+
+    def _score_history_entity_relatedness(
+        self, current_state: Any, candidate_state: Any
+    ) -> Tuple[int, bool]:
+        """Score how likely two entities describe the same real-world thing."""
+        if current_state is None or candidate_state is None:
+            return 0, False
+
+        current_device_id, current_area_id, current_floor_id = (
+            self._history_entity_location_signature(current_state.entity_id)
+        )
+        candidate_device_id, candidate_area_id, candidate_floor_id = (
+            self._history_entity_location_signature(candidate_state.entity_id)
+        )
+
+        best_name_score = 0
+        for current_text in self._history_relation_texts(current_state):
+            current_tokens = self._history_relation_tokens(current_text)
+            current_canonical = " ".join(current_tokens)
+            if not current_tokens:
+                continue
+
+            for candidate_text in self._history_relation_texts(candidate_state):
+                candidate_tokens = self._history_relation_tokens(candidate_text)
+                candidate_canonical = " ".join(candidate_tokens)
+                if not candidate_tokens:
+                    continue
+
+                overlap = set(current_tokens) & set(candidate_tokens)
+                if not overlap:
+                    continue
+
+                score = len(overlap) * 22
+                coverage = len(overlap) / min(len(current_tokens), len(candidate_tokens))
+                score += int(coverage * 55)
+
+                if current_canonical and current_canonical == candidate_canonical:
+                    score += 80
+                elif (
+                    current_canonical
+                    and candidate_canonical
+                    and min(len(current_canonical), len(candidate_canonical)) >= 5
+                    and (
+                        current_canonical in candidate_canonical
+                        or candidate_canonical in current_canonical
+                    )
+                ):
+                    score += 40
+
+                best_name_score = max(best_name_score, score)
+
+        same_device = bool(
+            current_device_id
+            and candidate_device_id
+            and current_device_id == candidate_device_id
+        )
+        if same_device:
+            best_name_score += 120
+        elif best_name_score:
+            if current_area_id and candidate_area_id and current_area_id == candidate_area_id:
+                best_name_score += 10
+            if (
+                current_floor_id
+                and candidate_floor_id
+                and current_floor_id == candidate_floor_id
+            ):
+                best_name_score += 5
+
+        return best_name_score, same_device
+
     def _resolve_history_entity_for_request(
         self,
         entity_id: str,
         raw_state: Any,
         raw_event: Any,
     ) -> tuple[str, str | None]:
-        """Resolve a better sibling entity for semantic history requests when needed."""
+        """Resolve the best entity for semantic history requests when needed."""
+        candidates = self._history_resolution_candidates(entity_id, raw_state, raw_event)
+        best_candidate = candidates[0]
+        return best_candidate["entity_id"], best_candidate["note"]
+
+    def _history_resolution_candidates(
+        self,
+        entity_id: str,
+        raw_state: Any,
+        raw_event: Any,
+        *,
+        max_candidates: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """Return strong related-entity candidates for a semantic history request."""
         requested_values = self._normalize_history_request_values(raw_state, raw_event)
         if not requested_values:
-            return entity_id, None
+            return [{"entity_id": entity_id, "note": None}]
 
         target_states = self._normalize_history_targets(raw_state, raw_event)
         current_state = self.hass.states.get(entity_id)
         if current_state is None:
-            return entity_id, None
+            return [{"entity_id": entity_id, "note": None}]
 
         current_score = self._score_entity_for_history_request(
             current_state,
             requested_values,
             target_states,
         )
+        candidates: List[Dict[str, Any]] = [
+            {
+                "entity_id": entity_id,
+                "note": None,
+                "priority": current_score + 150,
+                "semantic_score": current_score,
+                "relation_score": 0,
+            }
+        ]
 
-        entity_registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
-        entity_entry = entity_registry.async_get(entity_id)
-        if not entity_entry or not entity_entry.device_id:
-            return entity_id, None
-
-        best_entity_id = entity_id
-        best_score = current_score
+        requested_label = self._describe_history_target(raw_state, raw_event)
 
         for sibling_state in self.hass.states.async_all():
             sibling_entity_id = sibling_state.entity_id
@@ -4646,33 +5169,63 @@ class MCPServer:
                 continue
             if not async_should_expose(self.hass, "conversation", sibling_entity_id):
                 continue
-
-            sibling_entry = entity_registry.async_get(sibling_entity_id)
-            if not sibling_entry or sibling_entry.device_id != entity_entry.device_id:
-                continue
-            if device_registry.async_get(sibling_entry.device_id) is None:
-                continue
-
             sibling_score = self._score_entity_for_history_request(
                 sibling_state,
                 requested_values,
                 target_states,
             )
-            if sibling_score > best_score:
-                best_entity_id = sibling_entity_id
-                best_score = sibling_score
+            if sibling_score <= 0:
+                continue
 
-        if best_entity_id == entity_id or best_score < current_score + 20:
-            return entity_id, None
+            relation_score, same_device = self._score_history_entity_relatedness(
+                current_state,
+                sibling_state,
+            )
+            if relation_score <= 0:
+                continue
 
-        requested_label = self._describe_history_target(raw_state, raw_event)
-        return (
-            best_entity_id,
-            (
-                f"Using related entity {best_entity_id} because {entity_id} is on the same device, "
-                f"and the requested {requested_label} history applies more directly to that entity."
-            ),
+            total_score = sibling_score + relation_score
+            if same_device:
+                if (
+                    sibling_score <= current_score
+                    or total_score < current_score + 40
+                ):
+                    continue
+            else:
+                if (
+                    sibling_score < current_score + 20
+                    or relation_score < 90
+                    or total_score < current_score + 100
+                ):
+                    continue
+
+            reason_text = (
+                "is on the same device and"
+                if same_device
+                else "strongly matches the same named thing and"
+            )
+            candidates.append(
+                {
+                    "entity_id": sibling_entity_id,
+                    "note": (
+                        f"Using related entity {sibling_entity_id} because it {reason_text} "
+                        f"the requested {requested_label} history applies more directly to that entity "
+                        f"than {entity_id}."
+                    ),
+                    "priority": total_score + (40 if same_device else 0),
+                    "semantic_score": sibling_score,
+                    "relation_score": relation_score,
+                }
+            )
+
+        candidates.sort(
+            key=lambda item: (
+                -int(item["priority"]),
+                -int(item["semantic_score"]),
+                item["entity_id"],
+            )
         )
+        return candidates[:max_candidates]
 
     def _prepend_resolution_note(
         self, text_parts: List[str], resolution_note: str | None

@@ -50,15 +50,20 @@ from .const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
     CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
     CONF_OLLAMA_KEEP_ALIVE,
@@ -97,13 +102,17 @@ from .const import (
     DEFAULT_DEBUG_MODE,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_INCLUDE_CURRENT_USER,
+    DEFAULT_INCLUDE_HOME_LOCATION,
     DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_ENABLE_ASSIST_BRIDGE,
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     DEFAULT_OLLAMA_KEEP_ALIVE,
@@ -119,7 +128,9 @@ from .const import (
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
+    TOOL_FAMILY_UNIT_CONVERSION,
     TOOL_FAMILY_WEATHER_FORECAST,
+    TOOL_FAMILY_WEB_SEARCH,
     TOOL_FAMILY_SHARED_SETTINGS,
     OPENAI_BASE_URL,
     OPENROUTER_BASE_URL,
@@ -245,6 +256,7 @@ def _optional_with_suggested_value(key: str, suggested_value: str | None) -> vol
 
 TOOLS_SECTION_KEY = "tools"
 DISCOVERY_SECTION_KEY = "discovery"
+CONTEXT_SECTION_KEY = "context"
 PROFILE_SECTION_KEY = "profile"
 CONNECTION_SECTION_KEY = "connection"
 MODEL_SECTION_KEY = "model_fields"
@@ -259,7 +271,9 @@ DISABLE_DEVICE_FIELD = "disable_device"
 DISABLE_MUSIC_ASSISTANT_FIELD = "disable_music_assistant"
 DISABLE_RECORDER_FIELD = "disable_recorder"
 DISABLE_RESPONSE_SERVICE_FIELD = "disable_response_service"
+DISABLE_UNIT_CONVERSION_FIELD = "disable_unit_conversion"
 DISABLE_WEATHER_FORECAST_FIELD = "disable_weather_forecast"
+DISABLE_WEB_SEARCH_FIELD = "disable_web_search"
 
 TOOL_FAMILY_ALPHABETICAL = [
     TOOL_FAMILY_ASSIST_BRIDGE,
@@ -268,7 +282,9 @@ TOOL_FAMILY_ALPHABETICAL = [
     TOOL_FAMILY_MUSIC_ASSISTANT,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
+    TOOL_FAMILY_UNIT_CONVERSION,
     TOOL_FAMILY_WEATHER_FORECAST,
+    TOOL_FAMILY_WEB_SEARCH,
 ]
 
 PROFILE_DISABLE_FIELD_BY_FAMILY = {
@@ -278,7 +294,9 @@ PROFILE_DISABLE_FIELD_BY_FAMILY = {
     TOOL_FAMILY_MUSIC_ASSISTANT: DISABLE_MUSIC_ASSISTANT_FIELD,
     TOOL_FAMILY_RECORDER: DISABLE_RECORDER_FIELD,
     TOOL_FAMILY_RESPONSE_SERVICE: DISABLE_RESPONSE_SERVICE_FIELD,
+    TOOL_FAMILY_UNIT_CONVERSION: DISABLE_UNIT_CONVERSION_FIELD,
     TOOL_FAMILY_WEATHER_FORECAST: DISABLE_WEATHER_FORECAST_FIELD,
+    TOOL_FAMILY_WEB_SEARCH: DISABLE_WEB_SEARCH_FIELD,
 }
 
 
@@ -311,6 +329,11 @@ def _profile_tool_disabled_default(
 
     setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
     stored_value = options.get(setting_key, data.get(setting_key))
+    if stored_value is None and family == TOOL_FAMILY_UNIT_CONVERSION:
+        stored_value = options.get(
+            CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
+            data.get(CONF_PROFILE_ENABLE_CALCULATOR_TOOLS),
+        )
     return stored_value is False
 
 
@@ -325,6 +348,46 @@ def _apply_profile_tool_disables(user_input: dict[str, Any]) -> dict[str, Any]:
             normalized[setting_key] = False
         else:
             normalized.pop(setting_key, None)
+
+    return normalized
+
+
+def _normalize_search_provider(value: Any) -> str:
+    """Normalize a stored search provider value."""
+    normalized = str(value or "").strip().casefold()
+    return normalized or DEFAULT_SEARCH_PROVIDER
+
+
+def _infer_web_search_enabled(
+    explicit_enabled: Any,
+    search_provider: Any,
+    legacy_enable_custom_tools: Any = False,
+) -> bool:
+    """Infer whether web search should be enabled."""
+    if explicit_enabled is not None:
+        return bool(explicit_enabled)
+
+    provider = _normalize_search_provider(search_provider)
+    if provider != DEFAULT_SEARCH_PROVIDER:
+        return True
+
+    return bool(legacy_enable_custom_tools)
+
+
+def _normalize_shared_tool_inputs(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Normalize shared tool-family settings before storing."""
+    normalized = dict(user_input)
+    web_search_enabled = bool(
+        normalized.get(CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH)
+    )
+    search_provider = _normalize_search_provider(
+        normalized.get(CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER)
+    )
+
+    if web_search_enabled and search_provider == DEFAULT_SEARCH_PROVIDER:
+        normalized[CONF_SEARCH_PROVIDER] = "duckduckgo"
+    else:
+        normalized[CONF_SEARCH_PROVIDER] = search_provider
 
     return normalized
 
@@ -371,6 +434,7 @@ def _build_shared_tools_section(
     return section(
         vol.Schema(
             {
+                **shared_tool_fields,
                 vol.Required(
                     CONF_SEARCH_PROVIDER,
                     default=_get_form_value(
@@ -379,7 +443,6 @@ def _build_shared_tools_section(
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
-                            {"value": "none", "label": "Disabled"},
                             {"value": "duckduckgo", "label": "DuckDuckGo"},
                             {
                                 "value": "brave",
@@ -395,7 +458,6 @@ def _build_shared_tools_section(
                         defaults, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
                     ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-                **shared_tool_fields,
             }
         ),
         {"collapsed": False},
@@ -415,6 +477,25 @@ def _build_shared_discovery_section(defaults: dict[str, Any]) -> section:
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
                     default=defaults[CONF_MAX_ENTITIES_PER_DISCOVERY],
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_context_section(defaults: dict[str, Any]) -> section:
+    """Build the shared AI-context settings section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_INCLUDE_CURRENT_USER,
+                    default=defaults[CONF_INCLUDE_CURRENT_USER],
+                ): bool,
+                vol.Optional(
+                    CONF_INCLUDE_HOME_LOCATION,
+                    default=defaults[CONF_INCLUDE_HOME_LOCATION],
+                ): bool,
             }
         ),
         {"collapsed": False},
@@ -1114,6 +1195,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_ALLOWED_IPS: existing_entry.data.get(
                                 CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
                             ),
+                            CONF_INCLUDE_CURRENT_USER: existing_entry.data.get(
+                                CONF_INCLUDE_CURRENT_USER,
+                                DEFAULT_INCLUDE_CURRENT_USER,
+                            ),
+                            CONF_INCLUDE_HOME_LOCATION: existing_entry.data.get(
+                                CONF_INCLUDE_HOME_LOCATION,
+                                DEFAULT_INCLUDE_HOME_LOCATION,
+                            ),
                             CONF_ENABLE_GAP_FILLING: existing_entry.data.get(
                                 CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
                             ),
@@ -1136,6 +1225,13 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_ENABLE_CALCULATOR_TOOLS: existing_entry.data.get(
                                 CONF_ENABLE_CALCULATOR_TOOLS,
                                 DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                            ),
+                            CONF_ENABLE_UNIT_CONVERSION_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                                existing_entry.data.get(
+                                    CONF_ENABLE_CALCULATOR_TOOLS,
+                                    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                                ),
                             ),
                             CONF_ENABLE_DEVICE_TOOLS: existing_entry.data.get(
                                 CONF_ENABLE_DEVICE_TOOLS,
@@ -1314,8 +1410,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input, CONTEXT_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
             )
+            user_input = _normalize_shared_tool_inputs(user_input)
             current_values = user_input
 
             # Validate MCP port
@@ -1395,10 +1492,28 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_SEARCH_PROVIDER,
                 DEFAULT_SEARCH_PROVIDER,
             ),
+            CONF_ENABLE_WEB_SEARCH: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEB_SEARCH,
+                _infer_web_search_enabled(
+                    current_values.get(CONF_ENABLE_WEB_SEARCH),
+                    current_values.get(CONF_SEARCH_PROVIDER),
+                ),
+            ),
             CONF_BRAVE_API_KEY: _get_form_value(
                 current_values,
                 CONF_BRAVE_API_KEY,
                 DEFAULT_BRAVE_API_KEY,
+            ),
+            CONF_INCLUDE_CURRENT_USER: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER,
+                DEFAULT_INCLUDE_CURRENT_USER,
+            ),
+            CONF_INCLUDE_HOME_LOCATION: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION,
+                DEFAULT_INCLUDE_HOME_LOCATION,
             ),
             CONF_ENABLE_GAP_FILLING: _get_form_value(
                 current_values,
@@ -1435,6 +1550,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ENABLE_CALCULATOR_TOOLS,
                 DEFAULT_ENABLE_CALCULATOR_TOOLS,
             ),
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                _get_form_value(
+                    current_values,
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                ),
+            ),
             CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
                 current_values,
                 CONF_ENABLE_DEVICE_TOOLS,
@@ -1462,6 +1586,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         current_values, CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
                     ),
                 ): str,
+                CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
             }
@@ -2065,8 +2190,9 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input, CONTEXT_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
             )
+            user_input = _normalize_shared_tool_inputs(user_input)
             current_values = user_input
 
             # Validate allowed IPs
@@ -2140,12 +2266,49 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 CONF_SEARCH_PROVIDER,
                 self._get_search_provider_default(sys_options, sys_data),
             ),
+            CONF_ENABLE_WEB_SEARCH: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEB_SEARCH,
+                _infer_web_search_enabled(
+                    sys_options.get(
+                        CONF_ENABLE_WEB_SEARCH,
+                        sys_data.get(CONF_ENABLE_WEB_SEARCH),
+                    ),
+                    self._get_search_provider_default(sys_options, sys_data),
+                    sys_options.get(
+                        CONF_ENABLE_CUSTOM_TOOLS,
+                        sys_data.get(CONF_ENABLE_CUSTOM_TOOLS, False),
+                    ),
+                ),
+            ),
             CONF_BRAVE_API_KEY: _get_form_value(
                 current_values,
                 CONF_BRAVE_API_KEY,
                 sys_options.get(
                     CONF_BRAVE_API_KEY,
                     sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
+                ),
+            ),
+            CONF_INCLUDE_CURRENT_USER: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER,
+                sys_options.get(
+                    CONF_INCLUDE_CURRENT_USER,
+                    sys_data.get(
+                        CONF_INCLUDE_CURRENT_USER,
+                        DEFAULT_INCLUDE_CURRENT_USER,
+                    ),
+                ),
+            ),
+            CONF_INCLUDE_HOME_LOCATION: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION,
+                sys_options.get(
+                    CONF_INCLUDE_HOME_LOCATION,
+                    sys_data.get(
+                        CONF_INCLUDE_HOME_LOCATION,
+                        DEFAULT_INCLUDE_HOME_LOCATION,
+                    ),
                 ),
             ),
             CONF_ENABLE_GAP_FILLING: _get_form_value(
@@ -2210,6 +2373,23 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ),
             ),
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                        sys_options.get(
+                            CONF_ENABLE_CALCULATOR_TOOLS,
+                            sys_data.get(
+                                CONF_ENABLE_CALCULATOR_TOOLS,
+                                DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
             CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
                 current_values,
                 CONF_ENABLE_DEVICE_TOOLS,
@@ -2269,6 +2449,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): str,
+                CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
             }

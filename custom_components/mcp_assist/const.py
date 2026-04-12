@@ -37,20 +37,26 @@ CONF_DEBUG_MODE = "debug_mode"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
+CONF_INCLUDE_CURRENT_USER = "include_current_user"
+CONF_INCLUDE_HOME_LOCATION = "include_home_location"
 CONF_SEARCH_PROVIDER = "search_provider"
+CONF_ENABLE_WEB_SEARCH = "enable_web_search"
 CONF_ENABLE_GAP_FILLING = "enable_gap_filling"
 CONF_ENABLE_ASSIST_BRIDGE = "enable_assist_bridge"
 CONF_ENABLE_RESPONSE_SERVICE_TOOLS = "enable_response_service_tools"
 CONF_ENABLE_WEATHER_FORECAST_TOOL = "enable_weather_forecast_tool"
 CONF_ENABLE_RECORDER_TOOLS = "enable_recorder_tools"
 CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
+CONF_ENABLE_UNIT_CONVERSION_TOOLS = "enable_unit_conversion_tools"
 CONF_ENABLE_DEVICE_TOOLS = "enable_device_tools"
 CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT = "enable_music_assistant_support"
+CONF_PROFILE_ENABLE_WEB_SEARCH = "profile_enable_web_search"
 CONF_PROFILE_ENABLE_ASSIST_BRIDGE = "profile_enable_assist_bridge"
 CONF_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = "profile_enable_response_service_tools"
 CONF_PROFILE_ENABLE_WEATHER_FORECAST_TOOL = "profile_enable_weather_forecast_tool"
 CONF_PROFILE_ENABLE_RECORDER_TOOLS = "profile_enable_recorder_tools"
 CONF_PROFILE_ENABLE_CALCULATOR_TOOLS = "profile_enable_calculator_tools"
+CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS = "profile_enable_unit_conversion_tools"
 CONF_PROFILE_ENABLE_DEVICE_TOOLS = "profile_enable_device_tools"
 CONF_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT = "profile_enable_music_assistant_support"
 CONF_OLLAMA_KEEP_ALIVE = "ollama_keep_alive"
@@ -97,20 +103,26 @@ DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_ALLOWED_IPS = ""
+DEFAULT_INCLUDE_CURRENT_USER = True
+DEFAULT_INCLUDE_HOME_LOCATION = True
 DEFAULT_SEARCH_PROVIDER = "none"
+DEFAULT_ENABLE_WEB_SEARCH = False
 DEFAULT_ENABLE_GAP_FILLING = True
 DEFAULT_ENABLE_ASSIST_BRIDGE = False
 DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS = True
 DEFAULT_ENABLE_WEATHER_FORECAST_TOOL = True
 DEFAULT_ENABLE_RECORDER_TOOLS = True
 DEFAULT_ENABLE_CALCULATOR_TOOLS = False
+DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS = False
 DEFAULT_ENABLE_DEVICE_TOOLS = True
 DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT = False
+DEFAULT_PROFILE_ENABLE_WEB_SEARCH = True
 DEFAULT_PROFILE_ENABLE_ASSIST_BRIDGE = True
 DEFAULT_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = True
 DEFAULT_PROFILE_ENABLE_WEATHER_FORECAST_TOOL = True
 DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS = True
 DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS = True
+DEFAULT_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS = True
 DEFAULT_PROFILE_ENABLE_DEVICE_TOOLS = True
 DEFAULT_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT = True
 DEFAULT_OLLAMA_KEEP_ALIVE = "5m"  # 5 minutes
@@ -132,7 +144,9 @@ TOOL_FAMILY_RESPONSE_SERVICE = "response_service"
 TOOL_FAMILY_WEATHER_FORECAST = "weather_forecast"
 TOOL_FAMILY_RECORDER = "recorder"
 TOOL_FAMILY_CALCULATOR = "calculator"
+TOOL_FAMILY_UNIT_CONVERSION = "unit_conversion"
 TOOL_FAMILY_MUSIC_ASSISTANT = "music_assistant"
+TOOL_FAMILY_WEB_SEARCH = "web_search"
 
 OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
     TOOL_FAMILY_DEVICE: frozenset({"discover_devices", "get_device_details"}),
@@ -171,10 +185,10 @@ OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
             "average",
             "min_value",
             "max_value",
-            "convert_unit",
             "evaluate_expression",
         }
     ),
+    TOOL_FAMILY_UNIT_CONVERSION: frozenset({"convert_unit"}),
     TOOL_FAMILY_MUSIC_ASSISTANT: frozenset(
         {
             "list_music_assistant_players",
@@ -185,6 +199,7 @@ OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
             "get_music_assistant_queue",
         }
     ),
+    TOOL_FAMILY_WEB_SEARCH: frozenset({"search", "read_url"}),
 }
 
 OPTIONAL_TOOL_NAME_TO_FAMILY = {
@@ -218,9 +233,17 @@ TOOL_FAMILY_SHARED_SETTINGS = {
         CONF_ENABLE_CALCULATOR_TOOLS,
         DEFAULT_ENABLE_CALCULATOR_TOOLS,
     ),
+    TOOL_FAMILY_UNIT_CONVERSION: (
+        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+        DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+    ),
     TOOL_FAMILY_MUSIC_ASSISTANT: (
         CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
         DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    ),
+    TOOL_FAMILY_WEB_SEARCH: (
+        CONF_ENABLE_WEB_SEARCH,
+        DEFAULT_ENABLE_WEB_SEARCH,
     ),
 }
 
@@ -249,9 +272,17 @@ TOOL_FAMILY_PROFILE_SETTINGS = {
         CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
         DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
     ),
+    TOOL_FAMILY_UNIT_CONVERSION: (
+        CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
+        DEFAULT_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
+    ),
     TOOL_FAMILY_MUSIC_ASSISTANT: (
         CONF_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT,
         DEFAULT_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    ),
+    TOOL_FAMILY_WEB_SEARCH: (
+        CONF_PROFILE_ENABLE_WEB_SEARCH,
+        DEFAULT_PROFILE_ENABLE_WEB_SEARCH,
     ),
 }
 
@@ -311,7 +342,9 @@ Responses:
 
 {response_mode}
 
+{current_user_context}
 Current area: {current_area}
+{home_location_context}
 Current time: {time}
 Current date: {date}"""
 
@@ -346,7 +379,12 @@ Assist bridge tools are enabled.
 
 CALCULATOR_TECHNICAL_INSTRUCTIONS = """
 Calculator tools are enabled.
-- Use calculator tools for exact arithmetic, unit conversion, and compound expressions instead of mental math.
+- Use calculator tools for exact arithmetic and compound expressions instead of mental math.
+"""
+
+UNIT_CONVERSION_TECHNICAL_INSTRUCTIONS = """
+Unit conversion tools are enabled.
+- Use convert_unit for temperatures, measurements, data sizes, rates, and other exact unit conversions.
 """
 
 MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS = """

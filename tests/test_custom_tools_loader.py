@@ -11,6 +11,8 @@ from custom_components.mcp_assist.const import (
     CONF_BRAVE_API_KEY,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_SEARCH_PROVIDER,
 )
 from custom_components.mcp_assist.custom_tools import CustomToolsLoader
@@ -51,6 +53,25 @@ async def test_initialize_skips_calculator_when_disabled(
 
 
 @pytest.mark.asyncio
+async def test_initialize_loads_calculator_bundle_when_only_unit_conversion_enabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Unit conversion should still load the shared calculator tool bundle."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
+        }
+    )
+    loader = CustomToolsLoader(hass, profile_entry)
+
+    await loader.initialize()
+
+    assert "calculator" in loader.tools
+
+
+@pytest.mark.asyncio
 async def test_initialize_loads_search_and_read_url_for_brave(
     hass, profile_entry_factory, system_entry_factory, monkeypatch
 ) -> None:
@@ -58,6 +79,7 @@ async def test_initialize_loads_search_and_read_url_for_brave(
     profile_entry = profile_entry_factory()
     system_entry_factory(
         data={
+            CONF_ENABLE_WEB_SEARCH: True,
             CONF_SEARCH_PROVIDER: "brave",
             CONF_BRAVE_API_KEY: "secret",
             CONF_ENABLE_CALCULATOR_TOOLS: False,
@@ -81,6 +103,28 @@ async def test_initialize_loads_search_and_read_url_for_brave(
     await loader.initialize()
 
     assert set(loader.tools) == {"search", "read_url"}
+
+
+@pytest.mark.asyncio
+async def test_initialize_skips_search_when_web_search_disabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Search tools should not load when the web-search tool family is disabled."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_WEB_SEARCH: False,
+            CONF_SEARCH_PROVIDER: "brave",
+            CONF_BRAVE_API_KEY: "secret",
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert "search" not in loader.tools
+    assert "read_url" not in loader.tools
 
 
 def test_get_search_provider_keeps_backward_compatibility(

@@ -10,6 +10,7 @@ from homeassistant.data_entry_flow import FlowResultType, section
 from custom_components.mcp_assist.config_flow import (
     ADVANCED_SECTION_KEY,
     CONVERSATION_SECTION_KEY,
+    CONTEXT_SECTION_KEY,
     DISCOVERY_SECTION_KEY,
     DISABLE_ASSIST_BRIDGE_FIELD,
     DISABLE_CALCULATOR_FIELD,
@@ -17,6 +18,8 @@ from custom_components.mcp_assist.config_flow import (
     DISABLE_MUSIC_ASSISTANT_FIELD,
     DISABLE_RECORDER_FIELD,
     DISABLE_RESPONSE_SERVICE_FIELD,
+    DISABLE_UNIT_CONVERSION_FIELD,
+    DISABLE_WEB_SEARCH_FIELD,
     DISABLE_WEATHER_FORECAST_FIELD,
     MCPAssistConfigFlow,
     MCPAssistOptionsFlow,
@@ -36,7 +39,11 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_DEVICE_TOOLS,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RECORDER_TOOLS,
@@ -271,25 +278,32 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
         DISABLE_MUSIC_ASSISTANT_FIELD,
         DISABLE_RECORDER_FIELD,
         DISABLE_RESPONSE_SERVICE_FIELD,
+        DISABLE_UNIT_CONVERSION_FIELD,
         DISABLE_WEATHER_FORECAST_FIELD,
+        DISABLE_WEB_SEARCH_FIELD,
     ]
     assert all(value is bool for value in tools_section.schema.schema.values())
 
 
-async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> None:
-    """Shared MCP settings should group discovery and tools fields into sections."""
+async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
+    """Shared MCP settings should group context, discovery, and tools fields into sections."""
     flow = MCPAssistConfigFlow()
     flow.hass = hass
     flow.context = {"source": "user"}
 
     result = await flow.async_step_mcp_server()
 
+    context_section = result["data_schema"].schema[CONTEXT_SECTION_KEY]
     discovery_section = result["data_schema"].schema[DISCOVERY_SECTION_KEY]
     tools_section = result["data_schema"].schema[TOOLS_SECTION_KEY]
 
+    assert isinstance(context_section, section)
     assert isinstance(discovery_section, section)
     assert isinstance(tools_section, section)
 
+    context_keys = {
+        getattr(key, "schema", key) for key in context_section.schema.schema.keys()
+    }
     discovery_keys = {
         getattr(key, "schema", key) for key in discovery_section.schema.schema.keys()
     }
@@ -297,20 +311,26 @@ async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> Non
         getattr(key, "schema", key) for key in tools_section.schema.schema.keys()
     ]
 
+    assert context_keys == {
+        CONF_INCLUDE_CURRENT_USER,
+        CONF_INCLUDE_HOME_LOCATION,
+    }
     assert discovery_keys == {
         CONF_ENABLE_GAP_FILLING,
         CONF_MAX_ENTITIES_PER_DISCOVERY,
     }
     assert tool_keys == [
-        CONF_SEARCH_PROVIDER,
-        CONF_BRAVE_API_KEY,
         CONF_ENABLE_ASSIST_BRIDGE,
         CONF_ENABLE_CALCULATOR_TOOLS,
         CONF_ENABLE_DEVICE_TOOLS,
         CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
         CONF_ENABLE_RECORDER_TOOLS,
         CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
         CONF_ENABLE_WEATHER_FORECAST_TOOL,
+        CONF_ENABLE_WEB_SEARCH,
+        CONF_SEARCH_PROVIDER,
+        CONF_BRAVE_API_KEY,
     ]
 
 

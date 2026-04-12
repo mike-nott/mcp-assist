@@ -92,3 +92,44 @@ def test_create_entity_info_includes_weather_forecast_hints(hass) -> None:
         {"datetime": "2026-04-12", "condition": "rainy", "temperature": 58},
         {"datetime": "2026-04-13", "condition": "sunny", "temperature": 62},
     ]
+
+
+def test_format_smart_results_page_includes_paging_metadata(hass) -> None:
+    """Smart discovery pagination should expose counts and the next offset."""
+    discovery = SmartDiscovery(hass)
+
+    page = discovery._format_smart_results_page(
+        {
+            "query": "alex",
+            "query_type": "person",
+            "primary_entities": [
+                {"entity_id": "person.alex", "name": "Alex", "state": "home"},
+            ],
+            "related_entities": {
+                "presence": [
+                    {
+                        "entity_id": "binary_sensor.alex_home",
+                        "name": "Alex Home",
+                        "state": "on",
+                    }
+                ],
+                "room_tracking": [
+                    {
+                        "entity_id": "input_text.alex_room",
+                        "name": "Alex Room",
+                        "state": "Office",
+                    }
+                ],
+            },
+        },
+        limit=2,
+        offset=0,
+    )
+
+    assert page["total_found"] == 3
+    assert page["returned_count"] == 2
+    assert page["remaining_count"] == 1
+    assert page["next_offset"] == 2
+    assert page["items"][0]["entity_id"] == "_summary"
+    assert page["items"][0]["next_offset"] == 2
+    assert len(page["items"]) == 3

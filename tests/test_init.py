@@ -21,9 +21,13 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_GAP_FILLING,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_MCP_PORT,
     CONF_PROFILE_NAME,
@@ -78,15 +82,19 @@ async def test_ensure_system_entry_copies_shared_settings_from_first_profile(
         },
         options={
             CONF_MCP_PORT: 8124,
+            CONF_ENABLE_WEB_SEARCH: True,
             CONF_SEARCH_PROVIDER: "duckduckgo",
             CONF_BRAVE_API_KEY: "abc123",
             CONF_ALLOWED_IPS: "10.0.0.0/24",
+            CONF_INCLUDE_CURRENT_USER: False,
+            CONF_INCLUDE_HOME_LOCATION: False,
             CONF_ENABLE_GAP_FILLING: False,
             CONF_ENABLE_ASSIST_BRIDGE: False,
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
             CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
             CONF_ENABLE_DEVICE_TOOLS: False,
             CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: True,
         },
@@ -100,13 +108,17 @@ async def test_ensure_system_entry_copies_shared_settings_from_first_profile(
 
     assert system_entry.unique_id == SYSTEM_ENTRY_UNIQUE_ID
     assert system_entry.data[CONF_MCP_PORT] == 8124
+    assert system_entry.data[CONF_ENABLE_WEB_SEARCH] is True
     assert system_entry.data[CONF_SEARCH_PROVIDER] == "duckduckgo"
     assert system_entry.data[CONF_BRAVE_API_KEY] == "abc123"
     assert system_entry.data[CONF_ALLOWED_IPS] == "10.0.0.0/24"
+    assert system_entry.data[CONF_INCLUDE_CURRENT_USER] is False
+    assert system_entry.data[CONF_INCLUDE_HOME_LOCATION] is False
     assert system_entry.data[CONF_ENABLE_GAP_FILLING] is False
     assert system_entry.data[CONF_ENABLE_DEVICE_TOOLS] is False
     assert system_entry.data[CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT] is True
     assert system_entry.data[CONF_ENABLE_WEATHER_FORECAST_TOOL] is False
+    assert system_entry.data[CONF_ENABLE_UNIT_CONVERSION_TOOLS] is True
 
 
 @pytest.mark.asyncio
@@ -120,8 +132,12 @@ async def test_ensure_system_entry_uses_defaults_without_profiles(hass) -> None:
 
     assert system_entry.unique_id == SYSTEM_ENTRY_UNIQUE_ID
     assert system_entry.data[CONF_MCP_PORT] == DEFAULT_MCP_PORT
+    assert CONF_ENABLE_WEB_SEARCH in system_entry.data
+    assert CONF_INCLUDE_CURRENT_USER in system_entry.data
+    assert CONF_INCLUDE_HOME_LOCATION in system_entry.data
     assert system_entry.data[CONF_ENABLE_DEVICE_TOOLS] == DEFAULT_ENABLE_DEVICE_TOOLS
     assert CONF_ENABLE_WEATHER_FORECAST_TOOL in system_entry.data
+    assert CONF_ENABLE_UNIT_CONVERSION_TOOLS in system_entry.data
 
 
 @pytest.mark.asyncio

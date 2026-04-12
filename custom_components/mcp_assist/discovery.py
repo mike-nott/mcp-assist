@@ -84,6 +84,40 @@ class SmartDiscovery:
         self._entity_cache = None
         self._cache_time = None
 
+    def _get_configured_max_limit(self) -> int:
+        """Return the configured per-call discovery cap."""
+        from .const import DOMAIN, CONF_MAX_ENTITIES_PER_DISCOVERY
+
+        max_limit = MAX_ENTITIES_PER_DISCOVERY
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.source == "system":
+                return entry.data.get(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    MAX_ENTITIES_PER_DISCOVERY,
+                )
+        return max_limit
+
+    def _build_page_metadata(
+        self,
+        *,
+        total_found: int,
+        limit: int,
+        offset: int,
+        returned_count: int,
+    ) -> Dict[str, Any]:
+        """Build standard paging metadata for discovery results."""
+        remaining_count = max(total_found - (offset + returned_count), 0)
+        has_more = remaining_count > 0
+        return {
+            "total_found": total_found,
+            "returned_count": returned_count,
+            "remaining_count": remaining_count,
+            "offset": offset,
+            "limit": limit,
+            "has_more": has_more,
+            "next_offset": (offset + returned_count) if has_more else None,
+        }
+
     async def discover_entities(
         self,
         entity_type: Optional[str] = None,
@@ -94,6 +128,7 @@ class SmartDiscovery:
         state: Optional[str] = None,
         name_contains: Optional[str] = None,
         limit: int = 20,
+        offset: int = 0,
         device_class: Optional[Union[str, List[str]]] = None,
         name_pattern: Optional[str] = None,
         inferred_type: Optional[str] = None,
@@ -111,12 +146,45 @@ class SmartDiscovery:
             state: State to filter by (e.g., 'on', 'off')
             name_contains: Substring to search for in entity names
             limit: Maximum number of entities to return
+            offset: Zero-based pagination offset
             device_class: Device class to filter by (e.g., 'temperature', 'motion')
                          Can be a single string or list of strings for OR logic
             name_pattern: Wildcard pattern to match entity IDs (e.g., '*_person_detected')
             inferred_type: Inferred entity type from the index (e.g., 'person_detection')
                           Looks up the pattern from the index and applies it
         """
+        page = await self.discover_entities_page(
+            entity_type=entity_type,
+            area=area,
+            floor=floor,
+            label=label,
+            domain=domain,
+            state=state,
+            name_contains=name_contains,
+            limit=limit,
+            offset=offset,
+            device_class=device_class,
+            name_pattern=name_pattern,
+            inferred_type=inferred_type,
+        )
+        return page["items"]
+
+    async def discover_entities_page(
+        self,
+        entity_type: Optional[str] = None,
+        area: Optional[str] = None,
+        floor: Optional[str] = None,
+        label: Optional[str] = None,
+        domain: Optional[str] = None,
+        state: Optional[str] = None,
+        name_contains: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+        device_class: Optional[Union[str, List[str]]] = None,
+        name_pattern: Optional[str] = None,
+        inferred_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Discover entities with paging metadata."""
         # Detect query type and intent
         query_type = self._detect_query_type(
             entity_type, area or floor, domain, state, name_contains
@@ -143,7 +211,9 @@ class SmartDiscovery:
                 ]
             )
         ):
-            return await self._discover_person_entities(name_contains, limit)
+            return await self._discover_person_entities_page(
+                name_contains, limit, offset
+            )
         elif (
             query_type == QueryType.PET
             and name_contains
@@ -161,7 +231,9 @@ class SmartDiscovery:
                 ]
             )
         ):
-            return await self._discover_pet_entities(name_contains, limit)
+            return await self._discover_pet_entities_page(
+                name_contains, limit, offset
+            )
         elif (
             query_type == QueryType.AGGREGATE
             and not any(
@@ -176,12 +248,16 @@ class SmartDiscovery:
                 ]
             )
         ):
-            return await self._discover_aggregate_entities(domain, state, limit)
+            return await self._discover_aggregate_entities_page(
+                domain, state, limit, offset
+            )
         elif area and not floor and not label and not device_class and not name_pattern and not inferred_type:
-            return await self._discover_area_entities(area, domain, state, limit)
+            return await self._discover_area_entities_page(
+                area, domain, state, limit, offset
+            )
         else:
             # Fall back to general discovery (handles device_class, name_pattern, and inferred_type)
-            return await self._discover_general_entities(
+            return await self._discover_general_entities_page(
                 entity_type,
                 area,
                 floor,
@@ -190,6 +266,7 @@ class SmartDiscovery:
                 state,
                 name_contains,
                 limit,
+                offset,
                 device_class,
                 name_pattern,
                 inferred_type,
@@ -924,9 +1001,17 @@ class SmartDiscovery:
         return device_info
 
     async def _discover_person_entities(
-        self, name: str, limit: int
+        self, name: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Discover entities related to a person with smart grouping."""
+        return (
+            await self._discover_person_entities_page(name, limit, offset)
+        )["items"]
+
+    async def _discover_person_entities_page(
+        self, name: str, limit: int, offset: int = 0
+    ) -> Dict[str, Any]:
+        """Discover entities related to a person with smart grouping and paging."""
         name_lower = name.lower()
         results = {
             "query": name,
@@ -984,12 +1069,18 @@ class SmartDiscovery:
                                 break
 
         # Format results for return
-        return self._format_smart_results(results, limit)
+        return self._format_smart_results_page(results, limit, offset)
 
     async def _discover_pet_entities(
-        self, name: str, limit: int
+        self, name: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Discover entities related to a pet with smart grouping."""
+        return (await self._discover_pet_entities_page(name, limit, offset))["items"]
+
+    async def _discover_pet_entities_page(
+        self, name: str, limit: int, offset: int = 0
+    ) -> Dict[str, Any]:
+        """Discover entities related to a pet with smart grouping and paging."""
         name_lower = name.lower()
         results = {
             "query": name,
@@ -1046,12 +1137,20 @@ class SmartDiscovery:
                                 break
 
         # Format results for return
-        return self._format_smart_results(results, limit)
+        return self._format_smart_results_page(results, limit, offset)
 
     async def _discover_aggregate_entities(
-        self, domain: Optional[str], state: Optional[str], limit: int
+        self, domain: Optional[str], state: Optional[str], limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Discover entities for aggregate queries like 'who is home'."""
+        return (
+            await self._discover_aggregate_entities_page(domain, state, limit, offset)
+        )["items"]
+
+    async def _discover_aggregate_entities_page(
+        self, domain: Optional[str], state: Optional[str], limit: int, offset: int = 0
+    ) -> Dict[str, Any]:
+        """Discover entities for aggregate queries with paging."""
         results = {
             "query": f"{'all ' + domain if domain else 'entities'} {'with state ' + state if state else ''}",
             "query_type": "aggregate",
@@ -1089,12 +1188,20 @@ class SmartDiscovery:
                 category = entity_domain.replace("_", " ").title()
                 results["related_entities"].setdefault(category, []).append(entity_info)
 
-        return self._format_smart_results(results, limit)
+        return self._format_smart_results_page(results, limit, offset)
 
     async def _discover_area_entities(
-        self, area: str, domain: Optional[str], state: Optional[str], limit: int
+        self, area: str, domain: Optional[str], state: Optional[str], limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Discover entities in a specific area with smart grouping."""
+        return (
+            await self._discover_area_entities_page(area, domain, state, limit, offset)
+        )["items"]
+
+    async def _discover_area_entities_page(
+        self, area: str, domain: Optional[str], state: Optional[str], limit: int, offset: int = 0
+    ) -> Dict[str, Any]:
+        """Discover entities in a specific area with smart grouping and paging."""
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
@@ -1114,7 +1221,7 @@ class SmartDiscovery:
         if not area_id:
             floor_entry = self._resolve_floor_entry(area, floor_registry)
             if floor_entry:
-                return await self._discover_general_entities(
+                return await self._discover_general_entities_page(
                     entity_type=None,
                     area=None,
                     floor=floor_entry.name,
@@ -1123,8 +1230,9 @@ class SmartDiscovery:
                     state=state,
                     name_contains=None,
                     limit=limit,
+                    offset=offset,
                 )
-            return []
+            return {"items": [], **self._build_page_metadata(total_found=0, limit=limit, offset=offset, returned_count=0)}
 
         results = {
             "query": f"{area} area",
@@ -1182,7 +1290,7 @@ class SmartDiscovery:
             domain_key = entity_domain.replace("_", " ").title()
             results["related_entities"].setdefault(domain_key, []).append(entity_info)
 
-        return self._format_smart_results(results, limit)
+        return self._format_smart_results_page(results, limit, offset)
 
     async def _discover_general_entities(
         self,
@@ -1194,11 +1302,45 @@ class SmartDiscovery:
         state: Optional[str],
         name_contains: Optional[str],
         limit: int,
+        offset: int = 0,
         device_class: Optional[Union[str, List[str]]] = None,
         name_pattern: Optional[str] = None,
         inferred_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """General entity discovery with enhanced search."""
+        return (
+            await self._discover_general_entities_page(
+                entity_type,
+                area,
+                floor,
+                label,
+                domain,
+                state,
+                name_contains,
+                limit,
+                offset,
+                device_class,
+                name_pattern,
+                inferred_type,
+            )
+        )["items"]
+
+    async def _discover_general_entities_page(
+        self,
+        entity_type: Optional[str],
+        area: Optional[str],
+        floor: Optional[str],
+        label: Optional[str],
+        domain: Optional[str],
+        state: Optional[str],
+        name_contains: Optional[str],
+        limit: int,
+        offset: int = 0,
+        device_class: Optional[Union[str, List[str]]] = None,
+        name_pattern: Optional[str] = None,
+        inferred_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """General entity discovery with enhanced search and paging."""
         # Handle inferred_type by looking up pattern from index
         if inferred_type and not name_pattern:
             from .const import DOMAIN
@@ -1237,38 +1379,57 @@ class SmartDiscovery:
                 if floor_entry:
                     floor_id = floor_entry.floor_id
                 else:
-                    return []
+                    return {
+                        "items": [],
+                        **self._build_page_metadata(
+                            total_found=0,
+                            limit=min(limit, self._get_configured_max_limit()),
+                            offset=max(0, offset),
+                            returned_count=0,
+                        ),
+                    }
             else:
-                return []
+                return {
+                    "items": [],
+                    **self._build_page_metadata(
+                        total_found=0,
+                        limit=min(limit, self._get_configured_max_limit()),
+                        offset=max(0, offset),
+                        returned_count=0,
+                    ),
+                }
 
         if floor:
             floor_entry = self._resolve_floor_entry(floor, floor_registry)
             if not floor_entry:
-                return []
+                return {
+                    "items": [],
+                    **self._build_page_metadata(
+                        total_found=0,
+                        limit=min(limit, self._get_configured_max_limit()),
+                        offset=max(0, offset),
+                        returned_count=0,
+                    ),
+                }
             floor_id = floor_entry.floor_id
 
         if label:
             label_entry = self._resolve_label_entry(label, label_registry)
             if not label_entry:
-                return []
+                return {
+                    "items": [],
+                    **self._build_page_metadata(
+                        total_found=0,
+                        limit=min(limit, self._get_configured_max_limit()),
+                        offset=max(0, offset),
+                        returned_count=0,
+                    ),
+                }
             label_id = label_entry.label_id
 
-        # Limit to prevent excessive results
-        # Read max limit from system entry config, fallback to constant
-        from .const import DOMAIN, CONF_MAX_ENTITIES_PER_DISCOVERY
-        max_limit = MAX_ENTITIES_PER_DISCOVERY  # Default fallback
-
-        # Try to get configured limit from system entry
-        system_entry = None
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.source == "system":
-                system_entry = entry
-                break
-
-        if system_entry:
-            max_limit = system_entry.data.get(CONF_MAX_ENTITIES_PER_DISCOVERY, MAX_ENTITIES_PER_DISCOVERY)
-
-        limit = min(limit, max_limit)
+        max_limit = self._get_configured_max_limit()
+        limit = max(1, min(limit, max_limit))
+        offset = max(0, offset)
 
         # Search through all entities
         for state_obj in self.hass.states.async_all():
@@ -1369,24 +1530,31 @@ class SmartDiscovery:
                 )
             )
 
-            if not collect_all_matches and len(entities_with_score) >= limit:
-                break
-
         if collect_all_matches:
             entities_with_score.sort(
                 key=lambda item: (-item[0], item[1])
             )
-            entities = [entity for _, _, entity in entities_with_score[:limit]]
         else:
-            entities = [entity for _, _, entity in entities_with_score]
+            entities_with_score.sort(key=lambda item: item[1])
+
+        all_entities = [entity for _, _, entity in entities_with_score]
+        paged_entities = all_entities[offset : offset + limit]
 
         _LOGGER.debug(
-            f"General discovery found {len(entities)} entities with filters: "
+            f"General discovery found {len(all_entities)} entities with filters: "
             f"type={entity_type}, area={area}, floor={floor}, label={label}, "
             f"domain={domain}, state={state}, name_contains={name_contains}"
         )
 
-        return entities
+        return {
+            "items": paged_entities,
+            **self._build_page_metadata(
+                total_found=len(all_entities),
+                limit=limit,
+                offset=offset,
+                returned_count=len(paged_entities),
+            ),
+        }
 
     def _create_entity_info(
         self,
@@ -1479,44 +1647,54 @@ class SmartDiscovery:
         return entity_info
 
     def _format_smart_results(
-        self, results: Dict[str, Any], limit: int
+        self, results: Dict[str, Any], limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Format smart discovery results for the LLM."""
-        # Flatten the results into a list while preserving structure information
-        formatted = []
+        return self._format_smart_results_page(results, limit, offset)["items"]
 
-        # Add primary entities first
-        for entity in results.get("primary_entities", [])[:limit]:
-            entity["relationship"] = "primary"
-            formatted.append(entity)
+    def _format_smart_results_page(
+        self, results: Dict[str, Any], limit: int, offset: int = 0
+    ) -> Dict[str, Any]:
+        """Format smart discovery results with paging metadata."""
+        max_limit = self._get_configured_max_limit()
+        limit = max(1, min(limit, max_limit))
+        offset = max(0, offset)
 
-        # Add related entities with their categories
-        remaining_limit = limit - len(formatted)
+        flattened: List[Dict[str, Any]] = []
+
+        for entity in results.get("primary_entities", []):
+            flattened.append({**entity, "relationship": "primary"})
+
         for category, entities in results.get("related_entities", {}).items():
-            if remaining_limit <= 0:
-                break
-            for entity in entities[:remaining_limit]:
-                entity["relationship"] = category
-                formatted.append(entity)
-                remaining_limit -= 1
-                if remaining_limit <= 0:
-                    break
+            for entity in entities:
+                flattened.append({**entity, "relationship": category})
 
-        # Add metadata about the query
-        if formatted:
-            # Add a summary as the first item
-            summary = {
-                "entity_id": "_summary",
-                "query_type": results.get("query_type", "general"),
-                "query": results.get("query", ""),
-                "total_found": len(results.get("primary_entities", [])) +
-                              sum(len(v) for v in results.get("related_entities", {}).values()),
-                "primary_count": len(results.get("primary_entities", [])),
-                "related_count": sum(len(v) for v in results.get("related_entities", {}).values()),
-            }
-            formatted.insert(0, summary)
+        total_found = len(flattened)
+        paged_entities = flattened[offset : offset + limit]
+        metadata = self._build_page_metadata(
+            total_found=total_found,
+            limit=limit,
+            offset=offset,
+            returned_count=len(paged_entities),
+        )
 
-        return formatted
+        if not total_found:
+            return {"items": [], **metadata}
+
+        summary = {
+            "entity_id": "_summary",
+            "query_type": results.get("query_type", "general"),
+            "query": results.get("query", ""),
+            "primary_count": len(results.get("primary_entities", [])),
+            "related_count": sum(
+                len(v) for v in results.get("related_entities", {}).values()
+            ),
+            **metadata,
+        }
+        if results.get("area_name"):
+            summary["area_name"] = results["area_name"]
+
+        return {"items": [summary, *paged_entities], **metadata}
 
     @staticmethod
     def _serialize_attribute_value(value: Any) -> Any:
@@ -1629,8 +1807,35 @@ class SmartDiscovery:
         manufacturer: Optional[str] = None,
         model: Optional[str] = None,
         limit: int = 20,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Discover Home Assistant devices."""
+        page = await self.discover_devices_page(
+            area=area,
+            floor=floor,
+            label=label,
+            domain=domain,
+            name_contains=name_contains,
+            manufacturer=manufacturer,
+            model=model,
+            limit=limit,
+            offset=offset,
+        )
+        return page["items"]
+
+    async def discover_devices_page(
+        self,
+        area: Optional[str] = None,
+        floor: Optional[str] = None,
+        label: Optional[str] = None,
+        domain: Optional[str] = None,
+        name_contains: Optional[str] = None,
+        manufacturer: Optional[str] = None,
+        model: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Discover Home Assistant devices with paging metadata."""
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
@@ -1650,41 +1855,60 @@ class SmartDiscovery:
                 if floor_entry:
                     floor_id = floor_entry.floor_id
                 else:
-                    return []
+                    return {
+                        "items": [],
+                        **self._build_page_metadata(
+                            total_found=0,
+                            limit=min(limit, self._get_configured_max_limit()),
+                            offset=max(0, offset),
+                            returned_count=0,
+                        ),
+                    }
             else:
-                return []
+                return {
+                    "items": [],
+                    **self._build_page_metadata(
+                        total_found=0,
+                        limit=min(limit, self._get_configured_max_limit()),
+                        offset=max(0, offset),
+                        returned_count=0,
+                    ),
+                }
 
         if floor:
             floor_entry = self._resolve_floor_entry(floor, floor_registry)
             if not floor_entry:
-                return []
+                return {
+                    "items": [],
+                    **self._build_page_metadata(
+                        total_found=0,
+                        limit=min(limit, self._get_configured_max_limit()),
+                        offset=max(0, offset),
+                        returned_count=0,
+                    ),
+                }
             floor_id = floor_entry.floor_id
 
         if label:
             label_entry = self._resolve_label_entry(label, label_registry)
             if not label_entry:
-                return []
+                return {
+                    "items": [],
+                    **self._build_page_metadata(
+                        total_found=0,
+                        limit=min(limit, self._get_configured_max_limit()),
+                        offset=max(0, offset),
+                        returned_count=0,
+                    ),
+                }
             label_id = label_entry.label_id
 
-        from .const import DOMAIN, CONF_MAX_ENTITIES_PER_DISCOVERY
-        max_limit = MAX_ENTITIES_PER_DISCOVERY
-        system_entry = None
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.source == "system":
-                system_entry = entry
-                break
-
-        if system_entry:
-            max_limit = system_entry.data.get(
-                CONF_MAX_ENTITIES_PER_DISCOVERY,
-                MAX_ENTITIES_PER_DISCOVERY,
-            )
-
-        limit = min(limit, max_limit)
+        max_limit = self._get_configured_max_limit()
+        limit = max(1, min(limit, max_limit))
+        offset = max(0, offset)
 
         device_entities_map = self._build_device_entity_map(entity_registry, device_registry)
         devices_with_score: List[Tuple[int, str, Dict[str, Any]]] = []
-        collect_all_matches = bool(name_contains)
 
         for device_entry in device_registry.devices.values():
             device_entities = device_entities_map.get(device_entry.id, [])
@@ -1743,15 +1967,13 @@ class SmartDiscovery:
                 device_info["match_reasons"] = match_reasons
 
             devices_with_score.append((match_score, device_entry.id, device_info))
-
-            if not collect_all_matches and len(devices_with_score) >= limit:
-                break
-
-        if collect_all_matches:
+        if name_contains:
             devices_with_score.sort(key=lambda item: (-item[0], item[1]))
-            devices = [device for _, _, device in devices_with_score[:limit]]
         else:
-            devices = [device for _, _, device in devices_with_score]
+            devices_with_score.sort(key=lambda item: item[1])
+
+        all_devices = [device for _, _, device in devices_with_score]
+        devices = all_devices[offset : offset + limit]
 
         _LOGGER.debug(
             "Device discovery found %d devices with filters: area=%s, floor=%s, "
@@ -1766,7 +1988,15 @@ class SmartDiscovery:
             model,
         )
 
-        return devices
+        return {
+            "items": devices,
+            **self._build_page_metadata(
+                total_found=len(all_devices),
+                limit=limit,
+                offset=offset,
+                returned_count=len(devices),
+            ),
+        }
 
     async def get_device_details(self, device_ids: List[str]) -> Dict[str, Any]:
         """Get detailed information about specific devices."""

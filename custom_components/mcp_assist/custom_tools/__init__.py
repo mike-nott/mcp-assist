@@ -18,25 +18,47 @@ class CustomToolsLoader:
         # Load calculator tools when enabled (no external provider required)
         from ..const import (
             CONF_ENABLE_CALCULATOR_TOOLS,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+            CONF_ENABLE_WEB_SEARCH,
             DEFAULT_ENABLE_CALCULATOR_TOOLS,
+            DEFAULT_ENABLE_WEB_SEARCH,
         )
 
-        if self._get_shared_setting(
+        calculator_enabled = self._get_shared_setting(
             CONF_ENABLE_CALCULATOR_TOOLS, DEFAULT_ENABLE_CALCULATOR_TOOLS
-        ):
+        )
+        unit_conversion_enabled = self._get_shared_setting(
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS, None
+        )
+        if unit_conversion_enabled is None:
+            unit_conversion_enabled = calculator_enabled
+
+        if calculator_enabled or unit_conversion_enabled:
             try:
                 from .calculator import CalculatorTool
 
                 self.tools["calculator"] = CalculatorTool(self.hass)
                 await self.tools["calculator"].initialize()
-                _LOGGER.debug("✅ Calculator tools initialized")
+                _LOGGER.debug("✅ Calculator and/or unit-conversion tools initialized")
             except Exception as e:
-                _LOGGER.error(f"Failed to initialize calculator tools: {e}")
+                _LOGGER.error(
+                    f"Failed to initialize calculator/unit-conversion tools: {e}"
+                )
         else:
-            _LOGGER.debug("Calculator tools disabled in shared MCP settings")
+            _LOGGER.debug(
+                "Calculator and unit-conversion tools disabled in shared MCP settings"
+            )
 
         # Determine search provider
         search_provider = self._get_search_provider()
+        web_search_enabled = self._get_shared_setting(
+            CONF_ENABLE_WEB_SEARCH,
+            DEFAULT_ENABLE_WEB_SEARCH,
+        )
+
+        if not web_search_enabled:
+            _LOGGER.debug("Web search tools disabled in shared MCP settings")
+            return
 
         # Load search tool based on provider
         if search_provider == "brave":
@@ -92,10 +114,17 @@ class CustomToolsLoader:
 
     def _get_search_provider(self) -> str:
         """Get search provider (shared setting) with backward compatibility."""
-        from ..const import CONF_SEARCH_PROVIDER, CONF_ENABLE_CUSTOM_TOOLS
+        from ..const import (
+            CONF_SEARCH_PROVIDER,
+            CONF_ENABLE_CUSTOM_TOOLS,
+            CONF_ENABLE_WEB_SEARCH,
+        )
 
         provider = self._get_shared_setting(CONF_SEARCH_PROVIDER)
         if provider:
+            explicit_enabled = self._get_shared_setting(CONF_ENABLE_WEB_SEARCH)
+            if explicit_enabled is False:
+                return "none"
             return provider
 
         # Backward compat: if old enable_custom_tools was True, default to "brave"
