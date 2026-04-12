@@ -542,6 +542,8 @@ class MCPAssistConversationEntity(ConversationEntity):
             )
             if not parameters:
                 parameters = {"type": "object", "properties": {}}
+            elif parameters.get("type") == "object" and "properties" not in parameters:
+                parameters["properties"] = {}
 
             openai_tools.append(
                 {

@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from aiohttp import ClientSession
 import pytest
 
 from custom_components.mcp_assist.const import (
@@ -36,6 +37,33 @@ def test_server_collects_allowed_ips_from_url_and_shared_settings(
     assert "192.168.50.12" in server.allowed_ips
     assert "10.0.0.0/24" in server.allowed_ips
     assert "192.168.1.25" in server.allowed_ips
+
+
+@pytest.mark.asyncio
+async def test_server_start_serves_health_endpoint(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Starting the MCP server should expose a working health endpoint."""
+    system_entry_factory()
+    server = MCPServer(hass, 0, profile_entry_factory())
+
+    await server.start()
+    try:
+        assert server.site is not None
+        sockets = server.site._server.sockets  # type: ignore[attr-defined]
+        assert sockets
+        bound_port = sockets[0].getsockname()[1]
+
+        async with ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{bound_port}/health") as response:
+                assert response.status == 200
+                payload = await response.json()
+
+        assert payload["status"] == "healthy"
+        assert payload["server"] == "ha-entity-discovery"
+        assert payload["tools_available"] > 0
+    finally:
+        await server.stop()
 
 
 def test_tool_enablement_follows_shared_settings(

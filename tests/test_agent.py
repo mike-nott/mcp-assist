@@ -233,3 +233,30 @@ def test_convert_mcp_tools_to_llm_tools_compacts_schema(
     assert "required" not in parameters
     assert "description" not in parameters["properties"]["area"]
     assert "default" not in parameters["properties"]["limit"]
+
+
+def test_convert_mcp_tools_to_llm_tools_keeps_empty_object_properties(
+    hass, profile_entry_factory
+) -> None:
+    """OpenAI requires object schemas to include properties, even when empty."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    tools = [
+        {
+            "name": "list_music_assistant_instances",
+            "description": "List configured Music Assistant instances.",
+            "inputSchema": {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        }
+    ]
+
+    compact_tools = agent._convert_mcp_tools_to_llm_tools(tools)
+    parameters = compact_tools[0]["function"]["parameters"]
+
+    assert parameters == {"type": "object", "properties": {}}
