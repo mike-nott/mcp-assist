@@ -94,33 +94,35 @@ CONF_MAX_ENTITIES_PER_DISCOVERY = "max_entities_per_discovery"
 DEFAULT_MAX_ENTITIES_PER_DISCOVERY = 50
 
 RESPONSE_MODE_INSTRUCTIONS = {
-    "none": """## Follow-up Questions
-Do NOT ask follow-up questions. Complete the task and end immediately.
-
-## Ending Conversations
-Always end after completing the task.""",
-    "default": """## Follow-up Questions
-Generate contextually appropriate follow-up questions naturally:
-- After single device actions: Create a natural follow-up asking if the user needs help with anything else (vary phrasing each time)
-- When reporting adjustable status: Spontaneously suggest adjusting it in a natural way
-- For partial completions: Ask if the user wants you to complete the remaining tasks
-Always vary your phrasing - never repeat the same question twice in a conversation.
-
-Do NOT ask generic "anything else?" or "can I help with anything else?" questions without specific context.
-When asking a question, use the set_conversation_state tool to indicate you're expecting a response.
-
-## Ending Conversations
-After completing the task, end the conversation unless a natural follow-up is relevant.""",
-    "always": """## Follow-up Questions
-Generate contextually appropriate follow-up questions naturally:
-- After single device actions: Create a natural follow-up asking if the user needs help with anything else (vary phrasing each time)
-- When reporting adjustable status: Spontaneously suggest adjusting it in a natural way
-- For partial completions: Ask if the user wants you to complete the remaining tasks
-Always vary your phrasing - never repeat the same question twice in a conversation.
-When asking a question, use the set_conversation_state tool to indicate you're expecting a response.
-
-## Ending Conversations
-When user indicates they're done, acknowledge and end naturally.""",
+    "none": (
+        "## Follow-up Questions\n"
+        "Do NOT ask follow-up questions. Complete the task and end immediately.\n\n"
+        "## Ending Conversations\n"
+        "Always end after completing the task."
+    ),
+    "default": (
+        "## Follow-up Questions\n"
+        "Generate contextually appropriate follow-up questions naturally:\n"
+        "- After single device actions: Create a natural follow-up asking if the user needs help with anything else (vary phrasing each time)\n"
+        "- When reporting adjustable status: Spontaneously suggest adjusting it in a natural way\n"
+        "- For partial completions: Ask if the user wants you to complete the remaining tasks\n"
+        "Always vary your phrasing - never repeat the same question twice in a conversation.\n\n"
+        'Do NOT ask generic "anything else?" or "can I help with anything else?" questions without specific context.\n'
+        "When asking a question, use the set_conversation_state tool to indicate you're expecting a response.\n\n"
+        "## Ending Conversations\n"
+        "After completing the task, end the conversation unless a natural follow-up is relevant."
+    ),
+    "always": (
+        "## Follow-up Questions\n"
+        "Generate contextually appropriate follow-up questions naturally:\n"
+        "- After single device actions: Create a natural follow-up asking if the user needs help with anything else (vary phrasing each time)\n"
+        "- When reporting adjustable status: Spontaneously suggest adjusting it in a natural way\n"
+        "- For partial completions: Ask if the user wants you to complete the remaining tasks\n"
+        "Always vary your phrasing - never repeat the same question twice in a conversation.\n\n"
+        "When asking a question, use the set_conversation_state tool to indicate you're expecting a response.\n\n"
+        "## Ending Conversations\n"
+        "When user indicates they're done, acknowledge and end naturally."
+    ),
 }
 
 DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home system. You have access to sensors, lights, switches, and other devices throughout the home.
@@ -140,9 +142,10 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 - **perform_action**: control Home Assistant using discovered entity IDs or device IDs. Prefer entity IDs for most direct control.
 - **get_entity_details**: check states using discovered entity IDs, including area/floor/label context
 - **get_device_details**: inspect Home Assistant devices, their metadata, and their attached entities so you can choose the right entity target
-- **get_entity_history**: get recorder-backed historical state changes for an entity when the user wants a recent timeline
-- **get_last_entity_event**: query recorder history for when an entity was last opened/closed/on/off/locked/unlocked/etc.
-- **analyze_entity_history**: analyze recorder history for counts and summaries, such as how many times an entity was opened in a time window
+- **get_entity_history**: get recorder-backed entity history, either as a recent timeline or with `mode="last_event"` for the most recent matching event
+- **get_last_entity_event**: compatibility alias for `get_entity_history(mode="last_event")`
+- **analyze_entity_history**: analyze recorder history for counts, durations, and numeric summaries in a time window
+- **get_entity_state_at_time**: look up an entity's recorder state at a specific date/time
 - **list_areas/list_domains**: list available areas with floor/label context and device types
 - **run_script**: execute scripts that return data (e.g., camera analysis, calculations)
 - **run_automation**: trigger automations manually
@@ -189,17 +192,30 @@ Example:
 
 ## Recorder History
 Use recorder-backed tools for time-based questions.
-- Use **get_last_entity_event** for questions like "when was the gate last opened?" or "when did the front door last close?"
-- Use **analyze_entity_history** for questions like "how many times was the door opened in the last hour?" or "how often did it trigger today?"
+- Use **get_entity_history** with `mode="last_event"` for questions like "when was the gate last opened?" or "when did the front door last close?"
+- Use **analyze_entity_history** for questions like "how many times was the door opened in the last hour?", "how long was it open today?", or "what was the highest temperature today?"
+- Use **get_entity_state_at_time** for questions like "was the gate open at 2 PM?" or "what was the temperature at 9 this morning?"
 - Use **get_entity_history** when the user wants a broader recent timeline of changes.
 
 Example - "When was the gate last opened?":
   1. discover_entities(name_contains="gate")
-  2. get_last_entity_event(entity_id="cover.driveway_gate", event="opened")
+  2. get_entity_history(entity_id="cover.driveway_gate", mode="last_event", event="opened")
 
 Example - "How many times was the door opened in the last hour?":
   1. discover_entities(name_contains="door")
   2. analyze_entity_history(entity_id="binary_sensor.front_door", event="opened", hours=1, analysis="count")
+
+Example - "How long was the garage door open today?":
+  1. discover_entities(name_contains="garage door")
+  2. analyze_entity_history(entity_id="cover.garage_door", event="opened", hours=24, analysis="duration")
+
+Example - "What was the highest temperature today?":
+  1. discover_entities(domain="sensor", device_class="temperature")
+  2. analyze_entity_history(entity_id="sensor.living_room_temperature", hours=24, analysis="stats")
+
+Example - "Was the gate open at 2 PM?":
+  1. discover_entities(name_contains="gate")
+  2. get_entity_state_at_time(entity_id="cover.driveway_gate", datetime="2026-04-11T14:00:00")
 
 ## Math (use calculator tools)
 For arithmetic, prefer calculator tools over mental math so results stay exact.

@@ -979,7 +979,7 @@ class MCPServer:
             },
             {
                 "name": "get_entity_history",
-                "description": "Get recorder-backed historical state changes for a specific entity over a time period. Shows when the entity changed state with timestamps. Useful when the user wants a recent timeline instead of just the latest matching event.",
+                "description": "Get recorder-backed history for a specific entity. By default this returns a recent timeline, and with mode='last_event' it returns only the most recent matching event or change.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -988,16 +988,36 @@ class MCPServer:
                             "type": "string",
                             "description": "The entity ID to get history for (e.g., 'binary_sensor.front_door', 'sensor.temperature')",
                         },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["timeline", "last_event"],
+                            "default": "timeline",
+                            "description": "timeline returns recent history entries; last_event returns only the most recent matching event or change.",
+                        },
+                        "event": {
+                            "type": "string",
+                            "description": "Optional semantic event filter for last_event mode, such as opened, closed, on, off, locked, unlocked, detected, cleared, home, or away.",
+                        },
+                        "state": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            ],
+                            "description": "Optional target state or states to filter by. Most useful with mode='last_event'.",
+                        },
                         "hours": {
                             "type": "integer",
-                            "description": "Number of hours of history to retrieve (default: 24, max: 168 for 1 week)",
+                            "description": "Number of hours of recorder history to search (default: 24, max: 8760 for 1 year).",
                             "default": 24,
                             "minimum": 1,
-                            "maximum": 168,
+                            "maximum": 8760,
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of state changes to return (default: 50, max: 100). Most recent changes shown first.",
+                            "description": "Maximum number of timeline entries to return in timeline mode (default: 50, max: 100). Most recent changes shown first.",
                             "default": 50,
                             "minimum": 1,
                             "maximum": 100,
@@ -1009,7 +1029,7 @@ class MCPServer:
             },
             {
                 "name": "get_last_entity_event",
-                "description": "Query the Home Assistant recorder database to find when an entity last changed, or last changed to a specific state/event. Use this for questions like 'when was the gate last opened?' or 'when was the front door last closed?'",
+                "description": "Compatibility alias for get_entity_history(mode='last_event'). Finds when an entity last changed, or last changed to a specific state/event.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1078,12 +1098,32 @@ class MCPServer:
                         },
                         "analysis": {
                             "type": "string",
-                            "enum": ["count", "summary"],
+                            "enum": ["count", "summary", "duration", "stats"],
                             "default": "count",
-                            "description": "count returns how many matching events occurred; summary also includes the first and last matching times in the window.",
+                            "description": "count returns how many matching events occurred; summary also includes the first and last matching times in the window; duration reports total time spent in the matching state; stats reports numeric min/max/average over the window.",
                         },
                     },
                     "required": ["entity_id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "get_entity_state_at_time",
+                "description": "Look up the recorder state of an entity at a specific date/time. Use this for questions like 'was the gate open at 2 PM?' or 'what was the temperature at 9 this morning?'",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID to inspect in recorder history.",
+                        },
+                        "datetime": {
+                            "type": "string",
+                            "description": "The target date/time to inspect, preferably as an ISO 8601 timestamp. If no timezone is included, Home Assistant local time is assumed.",
+                        },
+                    },
+                    "required": ["entity_id", "datetime"],
                     "additionalProperties": False,
                 },
             },
@@ -1135,6 +1175,8 @@ class MCPServer:
             return await self.tool_get_last_entity_event(arguments)
         elif tool_name == "analyze_entity_history":
             return await self.tool_analyze_entity_history(arguments)
+        elif tool_name == "get_entity_state_at_time":
+            return await self.tool_get_entity_state_at_time(arguments)
         else:
             # Check if it's a custom tool
             if self.custom_tools and self.custom_tools.is_custom_tool(tool_name):
@@ -1750,8 +1792,15 @@ class MCPServer:
 
     async def tool_get_entity_history(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Get entity history with human-readable formatting."""
+        mode = args.get("mode", "timeline")
+        if mode == "last_event":
+            return await self._tool_get_last_entity_event_impl(
+                args,
+                tool_name="get_entity_history",
+            )
+
         entity_id = args.get("entity_id")
-        hours = min(args.get("hours", 24), 168)  # Max 1 week
+        hours = min(args.get("hours", 24), 8760)  # Max 1 year
         limit = min(args.get("limit", 50), 100)  # Max 100 changes
 
         _LOGGER.info(f"📜 Getting history for {entity_id}: {hours} hours, limit {limit}")
@@ -1833,6 +1882,15 @@ class MCPServer:
 
     async def tool_get_last_entity_event(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Find the latest recorder event for an entity."""
+        return await self._tool_get_last_entity_event_impl(
+            args,
+            tool_name="get_last_entity_event",
+        )
+
+    async def _tool_get_last_entity_event_impl(
+        self, args: Dict[str, Any], *, tool_name: str
+    ) -> Dict[str, Any]:
+        """Shared implementation for latest-event recorder lookups."""
         entity_id = args.get("entity_id")
         hours = min(args.get("hours", 720), 8760)  # Max 1 year
         current_state = self.hass.states.get(entity_id)
@@ -1853,7 +1911,7 @@ class MCPServer:
         self.publish_progress(
             "tool_start",
             f"Searching recorder history for {entity_id}",
-            tool="get_last_entity_event",
+            tool=tool_name,
             entity_id=entity_id,
         )
 
@@ -1900,7 +1958,7 @@ class MCPServer:
         self.publish_progress(
             "tool_complete",
             "Recorder history search complete",
-            tool="get_last_entity_event",
+            tool=tool_name,
             success=True,
             found=matched_state is not None,
         )
@@ -1969,11 +2027,16 @@ class MCPServer:
             entity_id=entity_id,
         )
 
+        query_end_time = dt_util.utcnow()
+        query_start_time = query_end_time - timedelta(hours=hours)
+
         try:
             entity_states = await self._fetch_entity_history_states(
                 entity_id,
                 hours=hours,
+                end_time=query_end_time,
                 descending=False,
+                include_start_time_state=analysis in {"duration", "stats"},
             )
         except Exception as err:
             _LOGGER.error("Failed to analyze history for %s: %s", entity_id, err)
@@ -1987,16 +2050,136 @@ class MCPServer:
             }
 
         if target_states:
-            count_states = self._choose_history_count_states(
+            target_filter_states = self._choose_history_count_states(
                 entity_states,
                 args.get("state"),
                 args.get("event"),
             )
+        else:
+            target_filter_states = []
+
+        if analysis == "duration":
+            if not target_filter_states:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{friendly_name} ({entity_id})\n"
+                                "Duration analysis requires a target event or state, such as opened, closed, on, or off."
+                            ),
+                        }
+                    ]
+                }
+
+            duration_result = self._calculate_state_duration(
+                entity_states,
+                target_filter_states,
+                query_start_time,
+                query_end_time,
+            )
+            total_duration = duration_result["total_duration"]
+            interval_count = duration_result["interval_count"]
+            search_label = self._describe_history_target(
+                args.get("state"), args.get("event")
+            )
+
+            self.publish_progress(
+                "tool_complete",
+                "Recorder history duration analysis complete",
+                tool="analyze_entity_history",
+                success=True,
+                seconds=int(total_duration.total_seconds()),
+            )
+
+            text_parts = [
+                f"{friendly_name} ({entity_id})",
+                f"Current state: {current_state.state}",
+                f"Total time in {search_label} state during the last {hours} hour{'s' if hours != 1 else ''}: {self._format_duration(total_duration)}",
+                f"Matching interval{'s' if interval_count != 1 else ''}: {interval_count}",
+            ]
+
+            if interval_count:
+                first_start = duration_result.get("first_start")
+                last_end = duration_result.get("last_end")
+                if first_start is not None:
+                    text_parts.append(
+                        f"First matching interval in window started: {self._format_absolute_time(first_start)} ({self._format_relative_time(first_start)})"
+                    )
+                if last_end is not None and last_end < query_end_time:
+                    text_parts.append(
+                        f"Last matching interval ended: {self._format_absolute_time(last_end)} ({self._format_relative_time(last_end)})"
+                    )
+
+            if current_state.state.casefold() in target_filter_states:
+                streak_start = current_state.last_changed or current_state.last_updated
+                text_parts.append(
+                    f"Current ongoing {search_label} streak: {self._format_duration(query_end_time - streak_start)}"
+                )
+
+            if not interval_count:
+                text_parts.append("No matching recorder intervals were found in that window.")
+
+            return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+        if analysis == "stats":
+            stats_result = self._calculate_numeric_history_stats(
+                entity_states,
+                query_start_time,
+                query_end_time,
+            )
+
+            if stats_result is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{friendly_name} ({entity_id})\n"
+                                "Recorder history did not contain numeric states in that window, so min/max/average could not be calculated."
+                            ),
+                        }
+                    ]
+                }
+
+            self.publish_progress(
+                "tool_complete",
+                "Recorder history numeric analysis complete",
+                tool="analyze_entity_history",
+                success=True,
+            )
+
+            min_time = stats_result["min_time"]
+            max_time = stats_result["max_time"]
+            text_parts = [
+                f"{friendly_name} ({entity_id})",
+                f"Current state: {current_state.state}",
+                f"Numeric recorder stats for the last {hours} hour{'s' if hours != 1 else ''}:",
+                f"Minimum: {self._format_number(stats_result['min'])}"
+                + (
+                    f" at {self._format_absolute_time(min_time)} ({self._format_relative_time(min_time)})"
+                    if min_time is not None
+                    else ""
+                ),
+                f"Maximum: {self._format_number(stats_result['max'])}"
+                + (
+                    f" at {self._format_absolute_time(max_time)} ({self._format_relative_time(max_time)})"
+                    if max_time is not None
+                    else ""
+                ),
+                f"Average: {self._format_number(stats_result['average'])} (time-weighted)",
+                f"Numeric state samples: {stats_result['sample_count']}",
+            ]
+
+            return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+        if target_filter_states:
             matched_states = [
-                state for state in entity_states if state.state.casefold() in count_states
+                state
+                for state in entity_states
+                if state.state.casefold() in target_filter_states
             ]
         else:
-            count_states = []
             matched_states = entity_states
 
         match_count = len(matched_states)
@@ -2020,9 +2203,9 @@ class MCPServer:
             f"Recorded {noun}{'s' if match_count != 1 else ''} in the last {hours} hour{'s' if hours != 1 else ''}: {match_count}",
         ]
 
-        if count_states:
+        if target_filter_states:
             text_parts.append(
-                f"Counted using recorder state{'s' if len(count_states) != 1 else ''}: {', '.join(count_states)}"
+                f"Counted using recorder state{'s' if len(target_filter_states) != 1 else ''}: {', '.join(target_filter_states)}"
             )
 
         if analysis == "summary" and matched_states:
@@ -2041,6 +2224,96 @@ class MCPServer:
             text_parts.append("No matching recorder events were found in that window.")
 
         return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+    async def tool_get_entity_state_at_time(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return an entity's recorder state at a specific point in time."""
+        entity_id = args.get("entity_id")
+        raw_datetime = args.get("datetime")
+        current_state = self.hass.states.get(entity_id)
+
+        if not current_state:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Entity '{entity_id}' not found."}
+                ]
+            }
+
+        target_time = self._parse_history_datetime(raw_datetime)
+        if target_time is None:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Invalid datetime. Use an ISO 8601 timestamp or a Home Assistant-local datetime string.",
+                    }
+                ]
+            }
+
+        friendly_name = current_state.attributes.get("friendly_name", entity_id)
+        lookup_start = target_time + timedelta(microseconds=1)
+
+        self.publish_progress(
+            "tool_start",
+            f"Looking up recorder state for {entity_id} at {raw_datetime}",
+            tool="get_entity_state_at_time",
+            entity_id=entity_id,
+        )
+
+        try:
+            entity_states = await self._fetch_entity_history_states(
+                entity_id,
+                start_time=lookup_start,
+                end_time=lookup_start + timedelta(seconds=1),
+                descending=False,
+                include_start_time_state=True,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to look up recorder state for %s: %s", entity_id, err)
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Failed to retrieve recorder state: {err}",
+                    }
+                ]
+            }
+
+        state_at_time = entity_states[0] if entity_states else None
+
+        self.publish_progress(
+            "tool_complete",
+            "Recorder point-in-time lookup complete",
+            tool="get_entity_state_at_time",
+            success=True,
+            found=state_at_time is not None,
+        )
+
+        target_local = self._format_absolute_time(target_time)
+        if state_at_time is None:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"{friendly_name} ({entity_id})\n"
+                            f"No recorder state was available for {target_local}."
+                        ),
+                    }
+                ]
+            }
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"{friendly_name} ({entity_id})\n"
+                        f"State at {target_local}: {state_at_time.state}\n"
+                        f"Current state: {current_state.state}"
+                    ),
+                }
+            ]
+        }
 
     def _extract_history_states(
         self, history_result: Dict[str, Any], entity_id: str
@@ -2122,6 +2395,158 @@ class MCPServer:
 
         return chosen or self._normalize_history_targets(raw_state, raw_event)
 
+    def _calculate_state_duration(
+        self,
+        entity_states: List[Any],
+        target_states: List[str],
+        start_time,
+        end_time,
+    ) -> Dict[str, Any]:
+        """Calculate total time spent in the target states over a window."""
+        total_duration = timedelta(0)
+        interval_count = 0
+        first_start = None
+        last_end = None
+
+        for index, state in enumerate(entity_states):
+            state_start = self._clip_time_to_window(
+                state.last_changed or state.last_updated,
+                start_time,
+                end_time,
+            )
+
+            if index + 1 < len(entity_states):
+                next_state = entity_states[index + 1]
+                state_end = self._clip_time_to_window(
+                    next_state.last_changed or next_state.last_updated,
+                    start_time,
+                    end_time,
+                )
+            else:
+                state_end = end_time
+
+            if state_end <= state_start:
+                continue
+
+            if state.state.casefold() not in target_states:
+                continue
+
+            total_duration += state_end - state_start
+            interval_count += 1
+            if first_start is None:
+                first_start = state_start
+            last_end = state_end
+
+        return {
+            "total_duration": total_duration,
+            "interval_count": interval_count,
+            "first_start": first_start,
+            "last_end": last_end,
+        }
+
+    def _calculate_numeric_history_stats(
+        self,
+        entity_states: List[Any],
+        start_time,
+        end_time,
+    ) -> Dict[str, Any] | None:
+        """Calculate numeric min/max/average across recorder states."""
+        numeric_points: List[tuple[float, Any]] = []
+        weighted_sum = 0.0
+        weighted_seconds = 0.0
+
+        for index, state in enumerate(entity_states):
+            numeric_value = self._coerce_numeric_state(state.state)
+            if numeric_value is None:
+                continue
+
+            state_time = self._clip_time_to_window(
+                state.last_changed or state.last_updated,
+                start_time,
+                end_time,
+            )
+            numeric_points.append((numeric_value, state_time))
+
+            if index + 1 < len(entity_states):
+                next_state = entity_states[index + 1]
+                state_end = self._clip_time_to_window(
+                    next_state.last_changed or next_state.last_updated,
+                    start_time,
+                    end_time,
+                )
+            else:
+                state_end = end_time
+
+            seconds = max((state_end - state_time).total_seconds(), 0)
+            if seconds > 0:
+                weighted_sum += numeric_value * seconds
+                weighted_seconds += seconds
+
+        if not numeric_points:
+            return None
+
+        min_value, min_time = min(numeric_points, key=lambda item: item[0])
+        max_value, max_time = max(numeric_points, key=lambda item: item[0])
+
+        if weighted_seconds > 0:
+            average = weighted_sum / weighted_seconds
+        else:
+            average = sum(value for value, _ in numeric_points) / len(numeric_points)
+
+        return {
+            "min": min_value,
+            "min_time": min_time,
+            "max": max_value,
+            "max_time": max_time,
+            "average": average,
+            "sample_count": len(numeric_points),
+        }
+
+    def _clip_time_to_window(self, when, start_time, end_time):
+        """Clip a timestamp to the requested analysis window."""
+        if when < start_time:
+            return start_time
+        if when > end_time:
+            return end_time
+        return when
+
+    def _coerce_numeric_state(self, value: Any) -> float | None:
+        """Convert a recorder state value into a numeric value when possible."""
+        try:
+            number = float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+        if number != number or number in (float("inf"), float("-inf")):
+            return None
+
+        return number
+
+    def _format_duration(self, duration: timedelta) -> str:
+        """Format a duration in human-friendly units."""
+        total_seconds = max(int(duration.total_seconds()), 0)
+        days, remainder = divmod(total_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts: List[str] = []
+        if days:
+            parts.append(f"{days} day{'s' if days != 1 else ''}")
+        if hours:
+            parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        if minutes:
+            parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if seconds and not parts:
+            parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+
+        return ", ".join(parts) if parts else "0 seconds"
+
+    def _format_number(self, value: float) -> str:
+        """Format numeric values compactly for responses."""
+        if float(value).is_integer():
+            return str(int(value))
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+
     def _history_state_aliases(self, value: str) -> List[str]:
         """Map semantic event words to likely recorder states."""
         aliases = {
@@ -2184,6 +2609,20 @@ class MCPServer:
         """Format a timestamp in the user's local time zone."""
         return dt_util.as_local(when).strftime("%Y-%m-%d %H:%M:%S %Z")
 
+    def _parse_history_datetime(self, value: Any):
+        """Parse a recorder lookup datetime and assume local time if naive."""
+        if value is None:
+            return None
+
+        parsed = dt_util.parse_datetime(str(value))
+        if parsed is None:
+            return None
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_util.now().tzinfo)
+
+        return dt_util.as_utc(parsed)
+
     def _build_history_search_windows(self, max_hours: int) -> List[int]:
         """Build progressively larger recorder search windows."""
         windows = [24, 168, 720, max_hours]
@@ -2201,26 +2640,32 @@ class MCPServer:
     async def _fetch_entity_history_states(
         self,
         entity_id: str,
-        hours: int,
+        hours: int | None = None,
         *,
+        start_time=None,
         end_time=None,
         descending: bool = True,
         limit: int | None = None,
+        include_start_time_state: bool = False,
     ) -> List[Any]:
         """Fetch recorder-backed history states for a single entity."""
         query_end_time = end_time or dt_util.utcnow()
-        start_time = query_end_time - timedelta(hours=hours)
+        query_start_time = start_time
+        if query_start_time is None:
+            if hours is None:
+                raise ValueError("Either hours or start_time must be provided")
+            query_start_time = query_end_time - timedelta(hours=hours)
 
         states = await self.hass.async_add_executor_job(
             lambda: history.state_changes_during_period(
                 self.hass,
-                start_time,
+                query_start_time,
                 end_time=query_end_time,
                 entity_id=entity_id,
                 no_attributes=True,
                 descending=descending,
                 limit=limit,
-                include_start_time_state=False,
+                include_start_time_state=include_start_time_state,
             )
         )
         return self._extract_history_states(states, entity_id)

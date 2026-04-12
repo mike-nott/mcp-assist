@@ -37,8 +37,9 @@ Instead of dumping all entities, MCP Assist:
    - `get_entity_details` - Get current entity state and attributes
    - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
    - `perform_action` - Control devices, usually with entity IDs for direct control
-   - `get_last_entity_event` - Query Home Assistant recorder history for questions like "when was the gate last opened?"
-   - `analyze_entity_history` - Use recorder history for aggregate questions like "how many times was the door opened in the last hour?"
+   - `get_entity_history` - Query recorder history as a timeline or just the last matching event with `mode="last_event"`
+   - `analyze_entity_history` - Use recorder history for aggregate questions like counts, durations, and numeric summaries over time
+   - `get_entity_state_at_time` - Look up what state an entity was in at a specific time
    - `add` / `subtract` / `multiply` / `divide` / `sqrt` / `power` / `round_number` - Do exact calculator operations through tool calling
    - `run_script` - Execute scripts and return response data
    - `run_automation` - Trigger automations manually
