@@ -14,16 +14,26 @@ class CustomToolsLoader:
         self.tools = {}
 
     async def initialize(self):
-        """Initialize always-on and provider-backed custom tools."""
-        # Load calculator tools (always available, no external provider required)
-        try:
-            from .calculator import CalculatorTool
+        """Initialize enabled local and provider-backed custom tools."""
+        # Load calculator tools when enabled (no external provider required)
+        from ..const import (
+            CONF_ENABLE_CALCULATOR_TOOLS,
+            DEFAULT_ENABLE_CALCULATOR_TOOLS,
+        )
 
-            self.tools["calculator"] = CalculatorTool(self.hass)
-            await self.tools["calculator"].initialize()
-            _LOGGER.debug("✅ Calculator tools initialized")
-        except Exception as e:
-            _LOGGER.error(f"Failed to initialize calculator tools: {e}")
+        if self._get_shared_setting(
+            CONF_ENABLE_CALCULATOR_TOOLS, DEFAULT_ENABLE_CALCULATOR_TOOLS
+        ):
+            try:
+                from .calculator import CalculatorTool
+
+                self.tools["calculator"] = CalculatorTool(self.hass)
+                await self.tools["calculator"].initialize()
+                _LOGGER.debug("✅ Calculator tools initialized")
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize calculator tools: {e}")
+        else:
+            _LOGGER.debug("Calculator tools disabled in shared MCP settings")
 
         # Determine search provider
         search_provider = self._get_search_provider()

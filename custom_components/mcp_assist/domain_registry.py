@@ -243,6 +243,39 @@ DOMAIN_REGISTRY = {
         "response_services": ["browse_media", "search_media"],
         "description": "Control media players and streaming devices",
     },
+    "music_assistant": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_COMMON,
+        "services": [
+            "play_media",
+            "play_announcement",
+            "transfer_queue",
+        ],
+        "parameters": {
+            "play_media": {
+                "required": ["media_id"],
+                "optional": [
+                    "media_type",
+                    "artist",
+                    "album",
+                    "enqueue",
+                    "radio_mode",
+                ],
+            },
+            "play_announcement": {
+                "required": ["url"],
+                "optional": [
+                    "use_pre_announce",
+                    "pre_announce_url",
+                    "announce_volume",
+                ],
+            },
+            "transfer_queue": {
+                "optional": ["source_player", "auto_play"],
+            },
+        },
+        "description": "Control Music Assistant playback and queue transfer actions",
+    },
     "vacuum": {
         "type": TYPE_CONTROLLABLE,
         "priority": PRIORITY_COMMON,

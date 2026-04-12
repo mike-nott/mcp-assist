@@ -6,7 +6,6 @@ This module provides language-specific defaults for:
 - End conversation word detection patterns
 """
 
-from typing import Optional
 import logging
 
 _LOGGER = logging.getLogger(__name__)

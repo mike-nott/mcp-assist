@@ -4,7 +4,6 @@ This module provides intelligent entity discovery with relationship understandin
 pattern recognition, and structured results optimized for LLM interaction.
 """
 
-import asyncio
 import fnmatch
 import logging
 import re
@@ -257,7 +256,7 @@ class SmartDiscovery:
 
         # Check for device_tracker patterns (often indicates a person)
         for entity_id in self.hass.states.async_entity_ids():
-            if f"device_tracker" in entity_id and name in entity_id.lower():
+            if "device_tracker" in entity_id and name in entity_id.lower():
                 return True
 
         # Check for common person-related patterns
@@ -1260,7 +1259,6 @@ class SmartDiscovery:
         max_limit = MAX_ENTITIES_PER_DISCOVERY  # Default fallback
 
         # Try to get configured limit from system entry
-        domain_data = self.hass.data.get(DOMAIN, {})
         system_entry = None
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             if entry.source == "system":

@@ -21,7 +21,6 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
-    BooleanSelector,
 )
 
 from .localization import get_language_instruction, get_follow_up_phrases, get_end_words
@@ -53,6 +52,12 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
     CONF_OLLAMA_KEEP_ALIVE,
@@ -85,45 +90,42 @@ from .const import (
     DEFAULT_SYSTEM_PROMPT_MODE,
     DEFAULT_TECHNICAL_PROMPT_MODE,
     DEFAULT_CONTROL_HA,
-    DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
     DEFAULT_TEMPERATURE,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_HISTORY,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_DEBUG_MODE,
-    DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SEARCH_PROVIDER,
     DEFAULT_ENABLE_GAP_FILLING,
+    DEFAULT_ENABLE_ASSIST_BRIDGE,
+    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_DEVICE_TOOLS,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
     DEFAULT_FOLLOW_UP_PHRASES,
     DEFAULT_END_WORDS,
     DEFAULT_CLEAN_RESPONSES,
     DEFAULT_TIMEOUT,
-    DEFAULT_API_KEY,
     OPENAI_BASE_URL,
-    GEMINI_BASE_URL,
     OPENROUTER_BASE_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-PROMPT_MODE_OPTIONS = [
-    {"value": PROMPT_MODE_DEFAULT, "label": "Default"},
-    {"value": PROMPT_MODE_CUSTOM, "label": "Custom"},
-]
-
-
 def _prompt_mode_selector() -> SelectSelector:
     """Build a prompt source selector."""
     return SelectSelector(
         SelectSelectorConfig(
-            options=PROMPT_MODE_OPTIONS,
+            options=[PROMPT_MODE_DEFAULT, PROMPT_MODE_CUSTOM],
             mode=SelectSelectorMode.DROPDOWN,
+            translation_key="prompt_source_mode",
         )
     )
 
@@ -224,20 +226,22 @@ def _needs_prompt_followup(
     user_input: dict[str, Any], server_type: str
 ) -> bool:
     """Check if the form needs to be re-shown with custom prompt fields."""
-    if (
-        server_type != SERVER_TYPE_MOLTBOT
-        and user_input.get(CONF_SYSTEM_PROMPT_MODE, DEFAULT_SYSTEM_PROMPT_MODE)
-        == PROMPT_MODE_CUSTOM
-        and CONF_SYSTEM_PROMPT not in user_input
+    def _prompt_visibility_changed(mode_key: str, prompt_key: str, default_mode: str) -> bool:
+        desired_visible = user_input.get(mode_key, default_mode) == PROMPT_MODE_CUSTOM
+        currently_visible = prompt_key in user_input
+        return desired_visible != currently_visible
+
+    if server_type != SERVER_TYPE_MOLTBOT and _prompt_visibility_changed(
+        CONF_SYSTEM_PROMPT_MODE,
+        CONF_SYSTEM_PROMPT,
+        DEFAULT_SYSTEM_PROMPT_MODE,
     ):
         return True
 
-    if (
-        user_input.get(
-            CONF_TECHNICAL_PROMPT_MODE, DEFAULT_TECHNICAL_PROMPT_MODE
-        )
-        == PROMPT_MODE_CUSTOM
-        and CONF_TECHNICAL_PROMPT not in user_input
+    if _prompt_visibility_changed(
+        CONF_TECHNICAL_PROMPT_MODE,
+        CONF_TECHNICAL_PROMPT,
+        DEFAULT_TECHNICAL_PROMPT_MODE,
     ):
         return True
 
@@ -289,7 +293,7 @@ async def fetch_models_from_openai(
 
         # Only include Authorization header if API key looks valid
         # Some custom OpenAI-compatible services don't require authentication
-        if api_key and len(api_key) > 5 and not api_key.lower() in ["none", "null", "fake", "na", "n/a"]:
+        if api_key and len(api_key) > 5 and api_key.lower() not in ["none", "null", "fake", "na", "n/a"]:
             headers["Authorization"] = f"Bearer {api_key}"
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -912,6 +916,30 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_ENABLE_GAP_FILLING: existing_entry.data.get(
                                 CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
                             ),
+                            CONF_ENABLE_ASSIST_BRIDGE: existing_entry.data.get(
+                                CONF_ENABLE_ASSIST_BRIDGE,
+                                DEFAULT_ENABLE_ASSIST_BRIDGE,
+                            ),
+                            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                            ),
+                            CONF_ENABLE_RECORDER_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_RECORDER_TOOLS,
+                                DEFAULT_ENABLE_RECORDER_TOOLS,
+                            ),
+                            CONF_ENABLE_CALCULATOR_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_CALCULATOR_TOOLS,
+                                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                            ),
+                            CONF_ENABLE_DEVICE_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_DEVICE_TOOLS,
+                                DEFAULT_ENABLE_DEVICE_TOOLS,
+                            ),
+                            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: existing_entry.data.get(
+                                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                            ),
                         }
 
                     # Combine data from steps 1-4 + shared settings
@@ -1148,6 +1176,29 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
                 vol.Optional(
                     CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_ASSIST_BRIDGE, default=DEFAULT_ENABLE_ASSIST_BRIDGE
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    default=DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_RECORDER_TOOLS,
+                    default=DEFAULT_ENABLE_RECORDER_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    default=DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_DEVICE_TOOLS,
+                    default=DEFAULT_ENABLE_DEVICE_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    default=DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
                 ): bool,
                 vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
@@ -1857,6 +1908,66 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         CONF_ENABLE_GAP_FILLING,
                         sys_data.get(
                             CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_ASSIST_BRIDGE,
+                    default=sys_options.get(
+                        CONF_ENABLE_ASSIST_BRIDGE,
+                        sys_data.get(
+                            CONF_ENABLE_ASSIST_BRIDGE,
+                            DEFAULT_ENABLE_ASSIST_BRIDGE,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                            DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_RECORDER_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_RECORDER_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_RECORDER_TOOLS,
+                            DEFAULT_ENABLE_RECORDER_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_CALCULATOR_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_CALCULATOR_TOOLS,
+                            DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_DEVICE_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_DEVICE_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_DEVICE_TOOLS,
+                            DEFAULT_ENABLE_DEVICE_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    default=sys_options.get(
+                        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                        sys_data.get(
+                            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                            DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
                         ),
                     ),
                 ): bool,

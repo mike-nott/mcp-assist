@@ -4,7 +4,7 @@ import asyncio
 import ipaddress
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
 from datetime import date, datetime, time, timedelta
 
@@ -27,17 +27,38 @@ from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import history
 from homeassistant.util import dt as dt_util
 
+try:
+    from homeassistant.helpers import floor_registry as fr
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    fr = None
+
+try:
+    from homeassistant.helpers import label_registry as lr
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    lr = None
+
 from .const import (
     DOMAIN,
     MCP_SERVER_NAME,
-    MCP_PROTOCOL_VERSION,
     MAX_ENTITIES_PER_DISCOVERY,
     CONF_LMSTUDIO_URL,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_CUSTOM_TOOLS,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_ENABLE_ASSIST_BRIDGE,
+    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_DEVICE_TOOLS,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
 )
 from .discovery import EntityDiscovery
 from .domain_registry import (
@@ -48,7 +69,6 @@ from .domain_registry import (
     get_domains_by_type,
     TYPE_CONTROLLABLE,
     TYPE_READ_ONLY,
-    TYPE_SERVICE_ONLY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -150,6 +170,125 @@ class MCPServer:
 
         return "none"
 
+    def _music_assistant_support_enabled(self) -> bool:
+        """Return whether Music Assistant-specific MCP support is enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+            )
+        )
+
+    def _assist_bridge_enabled(self) -> bool:
+        """Return whether native Assist bridge tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_ASSIST_BRIDGE,
+                DEFAULT_ENABLE_ASSIST_BRIDGE,
+            )
+        )
+
+    def _response_service_tools_enabled(self) -> bool:
+        """Return whether native response-service tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+            )
+        )
+
+    def _recorder_tools_enabled(self) -> bool:
+        """Return whether recorder/history tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_RECORDER_TOOLS,
+                DEFAULT_ENABLE_RECORDER_TOOLS,
+            )
+        )
+
+    def _calculator_tools_enabled(self) -> bool:
+        """Return whether calculator tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_CALCULATOR_TOOLS,
+                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+            )
+        )
+
+    def _device_tools_enabled(self) -> bool:
+        """Return whether Home Assistant device tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_DEVICE_TOOLS,
+                DEFAULT_ENABLE_DEVICE_TOOLS,
+            )
+        )
+
+    def _get_domain_capability_error(self, domain: str) -> str | None:
+        """Return a settings-based capability error for a domain, if any."""
+        if (
+            domain == "music_assistant"
+            and not self._music_assistant_support_enabled()
+        ):
+            return (
+                "Music Assistant support is disabled in shared MCP settings. "
+                "Enable it to use Music Assistant actions or response services."
+            )
+
+        return None
+
+    def _is_tool_enabled(self, tool_name: str) -> bool:
+        """Return whether an optional tool is enabled by settings."""
+        if tool_name in {"discover_devices", "get_device_details"}:
+            return self._device_tools_enabled()
+
+        if tool_name in {
+            "list_assist_tools",
+            "call_assist_tool",
+            "get_assist_prompt",
+            "get_assist_context_snapshot",
+        }:
+            return self._assist_bridge_enabled()
+
+        if tool_name in {"list_response_services", "call_service_with_response"}:
+            return self._response_service_tools_enabled()
+
+        if tool_name in {
+            "get_entity_history",
+            "get_last_entity_event",
+            "analyze_entity_history",
+            "get_entity_state_at_time",
+        }:
+            return self._recorder_tools_enabled()
+
+        if tool_name in {
+            "list_music_assistant_players",
+            "play_music_assistant",
+            "list_music_assistant_instances",
+            "search_music_assistant",
+            "get_music_assistant_library",
+            "get_music_assistant_queue",
+        }:
+            return self._music_assistant_support_enabled()
+
+        if tool_name in {
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+            "sqrt",
+            "power",
+            "round_number",
+            "average",
+            "min_value",
+            "max_value",
+            "convert_unit",
+            "evaluate_expression",
+        }:
+            return self._calculator_tools_enabled()
+
+        return True
+
     async def start(self) -> None:
         """Start the MCP server."""
         try:
@@ -177,7 +316,7 @@ class MCPServer:
             await self.site.start()
 
             # Create and initialize custom tools after system entry exists.
-            # Calculator tools are always available; web tools depend on search provider.
+            # Calculator tools are optional; web tools depend on search provider.
             search_provider = self._get_search_provider()
             try:
                 from .custom_tools import CustomToolsLoader
@@ -581,7 +720,6 @@ class MCPServer:
     async def process_mcp_notification(self, data: Dict[str, Any]) -> None:
         """Process MCP notification (no response expected)."""
         method = data.get("method")
-        params = data.get("params", {})
 
         _LOGGER.info("Processing MCP notification: %s", method)
 
@@ -834,6 +972,289 @@ class MCPServer:
                     "additionalProperties": False,
                 },
             },
+        ]
+
+        if self._music_assistant_support_enabled():
+            tools.extend(
+                [
+                    {
+                        "name": "list_music_assistant_players",
+                        "description": "List Music Assistant media_player entities only. Use this to inspect or disambiguate valid Music Assistant playback targets by name, area, floor, or label without mixing in unrelated media_player entities.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {
+                                "area": {
+                                    "type": "string",
+                                    "description": "Optional area name or alias to filter Music Assistant players. If the value matches a floor name or alias instead, it will search that floor.",
+                                },
+                                "floor": {
+                                    "type": "string",
+                                    "description": "Optional floor name or alias to filter Music Assistant players.",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Optional label name to filter Music Assistant players.",
+                                },
+                                "name_contains": {
+                                    "type": "string",
+                                    "description": "Optional text to match against Music Assistant player names, aliases, related device names, area aliases, and floor aliases.",
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": f"Maximum number of Music Assistant players to return (default: 20, max: {max_limit})",
+                                    "default": 20,
+                                },
+                            },
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "name": "play_music_assistant",
+                        "description": "Play music using the Home Assistant Music Assistant integration. This resolves only Music Assistant players, supports area/floor/label targeting, and is safer than generic media_player playback when Music Assistant is in use.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {
+                                "media_type": {
+                                    "type": "string",
+                                    "enum": ["track", "album", "artist", "playlist", "radio"],
+                                    "description": "The type of content to play.",
+                                },
+                                "media_id": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "The Music Assistant media identifier, URI, name, or list of items to play.",
+                                },
+                                "artist": {
+                                    "type": "string",
+                                    "description": "Optional artist name to narrow track/album playback.",
+                                },
+                                "album": {
+                                    "type": "string",
+                                    "description": "Optional album name to narrow track playback.",
+                                },
+                                "media_description": {
+                                    "type": "string",
+                                    "description": "Optional natural-language description of the requested media for logging and result summaries.",
+                                },
+                                "area": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional area name or alias, resolved only to Music Assistant players in that area.",
+                                },
+                                "floor": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional floor name or alias, resolved only to Music Assistant players on that floor.",
+                                },
+                                "label": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional label name, resolved only to Music Assistant players carrying that label context.",
+                                },
+                                "media_player": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional Music Assistant player entity_id, friendly name, or alias. Only Music Assistant players are matched.",
+                                },
+                                "shuffle": {
+                                    "type": "boolean",
+                                    "description": "Optional shuffle state to apply after starting playback.",
+                                },
+                                "radio_mode": {
+                                    "type": "boolean",
+                                    "description": "Optional Music Assistant radio mode flag.",
+                                },
+                                "enqueue": {
+                                    "type": "string",
+                                    "enum": ["play", "replace", "next", "replace_next", "add"],
+                                    "description": "Optional queue behavior for Music Assistant playback.",
+                                },
+                            },
+                            "required": ["media_type", "media_id"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "name": "list_music_assistant_instances",
+                        "description": "List configured Music Assistant integration instances. Use this when multiple Music Assistant servers are configured and you need a specific instance for library discovery.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "name": "search_music_assistant",
+                        "description": "Search the Music Assistant library and providers using a resolved Music Assistant instance. Prefer this over generic service calls when you want LLM-friendly music discovery results and automatic instance resolution.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "The track, artist, album, playlist, or radio station name to search for.",
+                                },
+                                "media_type": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string",
+                                            "enum": ["track", "album", "artist", "playlist", "radio"],
+                                        },
+                                        {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "enum": ["track", "album", "artist", "playlist", "radio"],
+                                            },
+                                        },
+                                    ],
+                                    "description": "Optional Music Assistant media type or list of media types to narrow the search.",
+                                },
+                                "artist": {
+                                    "type": "string",
+                                    "description": "Optional artist constraint for track or album searches.",
+                                },
+                                "album": {
+                                    "type": "string",
+                                    "description": "Optional album constraint for track searches.",
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Optional result limit per media type (default: 10, max: 50).",
+                                    "default": 10,
+                                },
+                                "library_only": {
+                                    "type": "boolean",
+                                    "description": "When true, limit results to items already in the Music Assistant library.",
+                                },
+                                "config_entry_id": {
+                                    "type": "string",
+                                    "description": "Optional Music Assistant config entry ID. Use this when multiple Music Assistant instances exist.",
+                                },
+                                "instance": {
+                                    "type": "string",
+                                    "description": "Optional Music Assistant instance title/name. Use list_music_assistant_instances first if needed.",
+                                },
+                            },
+                            "required": ["name"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "name": "get_music_assistant_library",
+                        "description": "Browse or filter the Music Assistant library using a resolved Music Assistant instance. Use this for curated discovery like favorite artists, random tracks, or filtered library views.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {
+                                "media_type": {
+                                    "type": "string",
+                                    "enum": ["track", "album", "artist", "playlist", "radio"],
+                                    "description": "The library media type to list.",
+                                },
+                                "search": {
+                                    "type": "string",
+                                    "description": "Optional filter text to narrow the library results.",
+                                },
+                                "favorite": {
+                                    "type": "boolean",
+                                    "description": "Optional favorite filter.",
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Optional maximum number of results to return (default: 25, max: 100).",
+                                    "default": 25,
+                                },
+                                "offset": {
+                                    "type": "integer",
+                                    "description": "Optional pagination offset.",
+                                    "default": 0,
+                                },
+                                "order_by": {
+                                    "type": "string",
+                                    "description": "Optional Music Assistant sort field.",
+                                },
+                                "album_artists_only": {
+                                    "type": "boolean",
+                                    "description": "Optional Music Assistant album_artists_only flag for artist library views.",
+                                },
+                                "album_type": {
+                                    "type": "string",
+                                    "description": "Optional Music Assistant album_type filter for album library views.",
+                                },
+                                "config_entry_id": {
+                                    "type": "string",
+                                    "description": "Optional Music Assistant config entry ID. Use this when multiple Music Assistant instances exist.",
+                                },
+                                "instance": {
+                                    "type": "string",
+                                    "description": "Optional Music Assistant instance title/name. Use list_music_assistant_instances first if needed.",
+                                },
+                            },
+                            "required": ["media_type"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "name": "get_music_assistant_queue",
+                        "description": "Read the current Music Assistant queue for specific Music Assistant players. This resolves only Music Assistant players and returns queue details for one or more target players.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {
+                                "area": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional area name or alias to resolve Music Assistant players.",
+                                },
+                                "floor": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional floor name or alias to resolve Music Assistant players.",
+                                },
+                                "label": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional label name to resolve Music Assistant players.",
+                                },
+                                "media_player": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ],
+                                    "description": "Optional Music Assistant player entity_id, friendly name, or alias.",
+                                },
+                            },
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
+                ]
+            )
+
+        tools.extend(
+            [
             {
                 "name": "list_areas",
                 "description": "List all areas in the home with their aliases, entity counts, device counts, floor context, and area labels",
@@ -1116,7 +1537,7 @@ class MCPServer:
                     "properties": {
                         "script_id": {
                             "type": "string",
-                            "description": "The script entity ID (e.g., 'script.llm_camera_analysis' or just 'llm_camera_analysis')",
+                            "description": "The script entity ID discovered from Home Assistant (for example, 'script.some_script_name' or just 'some_script_name').",
                         },
                         "variables": {
                             "type": "object",
@@ -1168,7 +1589,7 @@ class MCPServer:
                     "properties": {
                         "entity_id": {
                             "type": "string",
-                            "description": "The entity ID to get history for (e.g., 'binary_sensor.front_door', 'sensor.temperature')",
+                            "description": "The entity ID to get history for. Use discover_entities first and pass the discovered entity ID here.",
                         },
                         "mode": {
                             "type": "string",
@@ -1202,43 +1623,6 @@ class MCPServer:
                             "default": 50,
                             "minimum": 1,
                             "maximum": 100,
-                        },
-                    },
-                    "required": ["entity_id"],
-                    "additionalProperties": False,
-                },
-            },
-            {
-                "name": "get_last_entity_event",
-                "description": "Compatibility alias for get_entity_history(mode='last_event'). Finds when an entity last changed, or last changed to a specific state/event.",
-                "inputSchema": {
-                    "$schema": "http://json-schema.org/draft-07/schema#",
-                    "type": "object",
-                    "properties": {
-                        "entity_id": {
-                            "type": "string",
-                            "description": "The entity ID to inspect in recorder history.",
-                        },
-                        "event": {
-                            "type": "string",
-                            "description": "Optional semantic event to search for, such as opened, closed, on, off, locked, unlocked, detected, cleared, home, or away.",
-                        },
-                        "state": {
-                            "oneOf": [
-                                {"type": "string"},
-                                {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                },
-                            ],
-                            "description": "Optional target state or states to search for in recorder history. If omitted, returns the latest recorded change for the entity.",
-                        },
-                        "hours": {
-                            "type": "integer",
-                            "description": "How far back to search in recorder history (default: 720 hours / 30 days, max: 8760 hours / 1 year).",
-                            "default": 720,
-                            "minimum": 1,
-                            "maximum": 8760,
                         },
                     },
                     "required": ["entity_id"],
@@ -1307,7 +1691,8 @@ class MCPServer:
                     "additionalProperties": False,
                 },
             },
-        ]
+            ]
+        )
 
         # Add custom tool definitions if enabled
         if self.custom_tools:
@@ -1316,6 +1701,8 @@ class MCPServer:
                 tools.extend(custom_tool_defs)
             except Exception as e:
                 _LOGGER.error(f"Failed to get custom tool definitions: {e}")
+
+        tools = [tool for tool in tools if self._is_tool_enabled(tool["name"])]
 
         # nextCursor is optional - omit if not paginating
         return {"tools": tools}
@@ -1327,6 +1714,11 @@ class MCPServer:
 
         _LOGGER.debug("Calling tool: %s with args: %s", tool_name, arguments)
 
+        if not self._is_tool_enabled(tool_name):
+            raise ValueError(
+                f"Tool '{tool_name}' is disabled in shared MCP settings."
+            )
+
         if tool_name == "discover_entities":
             return await self.tool_discover_entities(arguments)
         elif tool_name == "discover_devices":
@@ -1335,6 +1727,18 @@ class MCPServer:
             return await self.tool_get_entity_details(arguments)
         elif tool_name == "get_device_details":
             return await self.tool_get_device_details(arguments)
+        elif tool_name == "list_music_assistant_players":
+            return await self.tool_list_music_assistant_players(arguments)
+        elif tool_name == "play_music_assistant":
+            return await self.tool_play_music_assistant(arguments)
+        elif tool_name == "list_music_assistant_instances":
+            return await self.tool_list_music_assistant_instances(arguments)
+        elif tool_name == "search_music_assistant":
+            return await self.tool_search_music_assistant(arguments)
+        elif tool_name == "get_music_assistant_library":
+            return await self.tool_get_music_assistant_library(arguments)
+        elif tool_name == "get_music_assistant_queue":
+            return await self.tool_get_music_assistant_queue(arguments)
         elif tool_name == "list_areas":
             return await self.tool_list_areas()
         elif tool_name == "list_domains":
@@ -1518,9 +1922,9 @@ class MCPServer:
             elif query_type == "area":
                 text_parts.append(f"🏠 Area Discovery: '{query}'")
             elif query_type == "aggregate":
-                text_parts.append(f"📊 Aggregate Discovery")
+                text_parts.append("📊 Aggregate Discovery")
             else:
-                text_parts.append(f"🔍 Discovery Results")
+                text_parts.append("🔍 Discovery Results")
 
             text_parts.append(f"Found {summary.get('total_found', 0)} total entities")
 
@@ -1651,6 +2055,436 @@ class MCPServer:
 
         return {"content": [{"type": "text", "text": json.dumps(details, indent=2)}]}
 
+    async def tool_list_music_assistant_players(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """List Music Assistant players only."""
+        if not self._music_assistant_support_enabled():
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Music Assistant support is disabled in shared MCP settings.",
+                    }
+                ]
+            }
+
+        self.publish_progress(
+            "tool_start",
+            "Listing Music Assistant players",
+            tool="list_music_assistant_players",
+            args=args,
+        )
+
+        try:
+            players = await self._discover_music_assistant_players(
+                area=args.get("area"),
+                floor=args.get("floor"),
+                label=args.get("label"),
+                name_contains=args.get("name_contains"),
+                limit=self._coerce_int_arg(
+                    args.get("limit"),
+                    default=20,
+                    minimum=1,
+                    maximum=MAX_ENTITIES_PER_DISCOVERY,
+                ),
+            )
+        except ValueError as err:
+            return {"content": [{"type": "text", "text": f"❌ Error: {err}"}]}
+
+        self.publish_progress(
+            "tool_complete",
+            f"Music Assistant player listing complete: found {len(players)} players",
+            tool="list_music_assistant_players",
+            count=len(players),
+        )
+
+        if not players:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "No exposed Music Assistant players matched that query.",
+                    }
+                ]
+            }
+
+        payload = {"count": len(players), "players": players}
+        header = f"Found {len(players)} Music Assistant player{'s' if len(players) != 1 else ''}."
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": header + "\n\n" + json.dumps(payload, indent=2, ensure_ascii=False),
+                }
+            ]
+        }
+
+    async def tool_play_music_assistant(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Play media using the Music Assistant integration."""
+        if not self._music_assistant_support_enabled():
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Music Assistant support is disabled in shared MCP settings.",
+                    }
+                ]
+            }
+
+        if not self.hass.services.has_service("music_assistant", "play_media"):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "The Home Assistant Music Assistant integration is not available or does not expose music_assistant.play_media.",
+                    }
+                ]
+            }
+
+        media_type = str(args.get("media_type") or "").strip().lower()
+        if media_type not in {"track", "album", "artist", "playlist", "radio"}:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: media_type must be one of track, album, artist, playlist, or radio.",
+                    }
+                ]
+            }
+
+        normalized_media_id = self._normalize_music_assistant_media_id(args.get("media_id"))
+        if normalized_media_id in (None, "", []):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: media_id is required.",
+                    }
+                ]
+            }
+
+        try:
+            resolved_player_ids, resolution_text = await self._resolve_music_assistant_player_targets(
+                area=args.get("area"),
+                floor=args.get("floor"),
+                label=args.get("label"),
+                media_player=args.get("media_player"),
+            )
+        except ValueError as err:
+            return {"content": [{"type": "text", "text": f"❌ Error: {err}"}]}
+
+        service_data: Dict[str, Any] = {
+            "media_id": normalized_media_id,
+            "media_type": media_type,
+        }
+        for key in ("artist", "album", "enqueue"):
+            value = args.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, ""):
+                service_data[key] = value
+
+        radio_mode = args.get("radio_mode")
+        if isinstance(radio_mode, bool):
+            service_data["radio_mode"] = radio_mode
+
+        shuffle = args.get("shuffle")
+        shuffle_requested = isinstance(shuffle, bool)
+
+        media_description = str(args.get("media_description") or "").strip()
+
+        self.publish_progress(
+            "tool_start",
+            "Starting Music Assistant playback",
+            tool="play_music_assistant",
+            media_type=media_type,
+            target_count=len(resolved_player_ids),
+        )
+
+        try:
+            await self.hass.services.async_call(
+                domain="music_assistant",
+                service="play_media",
+                service_data={**service_data, "entity_id": resolved_player_ids},
+                blocking=True,
+                return_response=False,
+            )
+
+            if shuffle_requested and self.hass.services.has_service("media_player", "shuffle_set"):
+                await self.hass.services.async_call(
+                    domain="media_player",
+                    service="shuffle_set",
+                    service_data={
+                        "shuffle": shuffle,
+                        "entity_id": resolved_player_ids,
+                    },
+                    blocking=True,
+                    return_response=False,
+                )
+        except Exception as err:
+            error_msg = f"Music Assistant playback failed: {err}"
+            _LOGGER.exception(error_msg)
+            return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        self.publish_progress(
+            "tool_complete",
+            "Music Assistant playback started",
+            tool="play_music_assistant",
+            success=True,
+            target_count=len(resolved_player_ids),
+        )
+
+        player_names = self._friendly_names_for_entities(resolved_player_ids)
+        target_text = ", ".join(player_names)
+        description_text = media_description or (
+            ", ".join(normalized_media_id)
+            if isinstance(normalized_media_id, list)
+            else str(normalized_media_id)
+        )
+
+        text_parts = [
+            f"✅ Started Music Assistant playback for {description_text} on {target_text}.",
+            f"Media type: {media_type}",
+        ]
+        if resolution_text:
+            text_parts.append(resolution_text)
+        if shuffle_requested:
+            text_parts.append(f"Shuffle set to {'on' if shuffle else 'off'}.")
+
+        return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+    async def tool_list_music_assistant_instances(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """List configured Music Assistant instances."""
+        del args
+
+        if not self._music_assistant_support_enabled():
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Music Assistant support is disabled in shared MCP settings.",
+                    }
+                ]
+            }
+
+        instances = self._get_music_assistant_instances()
+        if not instances:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "No Music Assistant config entries are currently configured in Home Assistant.",
+                    }
+                ]
+            }
+
+        players = [
+            dict(record["entity_info"])
+            for record in self._get_music_assistant_player_catalog()
+        ]
+        player_counts: Dict[str, int] = {}
+        for player in players:
+            config_entry_id = player.get("config_entry_id")
+            if config_entry_id:
+                player_counts[config_entry_id] = player_counts.get(config_entry_id, 0) + 1
+
+        payload = {
+            "count": len(instances),
+            "instances": [
+                {
+                    "config_entry_id": entry.entry_id,
+                    "title": entry.title,
+                    "player_count": player_counts.get(entry.entry_id, 0),
+                }
+                for entry in instances
+            ],
+        }
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(payload, indent=2, ensure_ascii=False),
+                }
+            ]
+        }
+
+    async def tool_search_music_assistant(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Search Music Assistant content."""
+        if not self._music_assistant_support_enabled():
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Music Assistant support is disabled in shared MCP settings.",
+                    }
+                ]
+            }
+
+        name = str(args.get("name") or "").strip()
+        if not name:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: name is required for search_music_assistant.",
+                    }
+                ]
+            }
+
+        try:
+            config_entry = self._resolve_music_assistant_instance(
+                config_entry_id=args.get("config_entry_id"),
+                instance=args.get("instance"),
+            )
+        except ValueError as err:
+            return {"content": [{"type": "text", "text": f"❌ Error: {err}"}]}
+
+        service_data: Dict[str, Any] = {
+            "config_entry_id": config_entry.entry_id,
+            "name": name,
+            "limit": self._coerce_int_arg(
+                args.get("limit"), default=10, minimum=1, maximum=50
+            ),
+        }
+        for key in ("artist", "album"):
+            value = args.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, ""):
+                service_data[key] = value
+        media_type = args.get("media_type")
+        normalized_media_type = self._normalize_music_assistant_media_type_filter(media_type)
+        if media_type is not None and normalized_media_type is None:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: media_type must be track, album, artist, playlist, radio, or a list of those values.",
+                    }
+                ]
+            }
+        if normalized_media_type not in (None, [], ""):
+            service_data["media_type"] = normalized_media_type
+        if isinstance(args.get("library_only"), bool):
+            service_data["library_only"] = args["library_only"]
+
+        return await self._call_music_assistant_response_service(
+            service="search",
+            service_data=service_data,
+            summary_label=f"Music Assistant search for {name}",
+        )
+
+    async def tool_get_music_assistant_library(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Browse the Music Assistant library."""
+        if not self._music_assistant_support_enabled():
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Music Assistant support is disabled in shared MCP settings.",
+                    }
+                ]
+            }
+
+        media_type = str(args.get("media_type") or "").strip().lower()
+        if media_type not in {"track", "album", "artist", "playlist", "radio"}:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "❌ Error: media_type must be one of track, album, artist, playlist, or radio.",
+                    }
+                ]
+            }
+
+        try:
+            config_entry = self._resolve_music_assistant_instance(
+                config_entry_id=args.get("config_entry_id"),
+                instance=args.get("instance"),
+            )
+        except ValueError as err:
+            return {"content": [{"type": "text", "text": f"❌ Error: {err}"}]}
+
+        service_data: Dict[str, Any] = {
+            "config_entry_id": config_entry.entry_id,
+            "media_type": media_type,
+            "limit": self._coerce_int_arg(
+                args.get("limit"), default=25, minimum=1, maximum=100
+            ),
+            "offset": self._coerce_int_arg(
+                args.get("offset"), default=0, minimum=0, maximum=10000
+            ),
+        }
+        for key in ("search", "order_by", "album_type"):
+            value = args.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, ""):
+                service_data[key] = value
+        for key in ("favorite", "album_artists_only"):
+            if isinstance(args.get(key), bool):
+                service_data[key] = args[key]
+
+        return await self._call_music_assistant_response_service(
+            service="get_library",
+            service_data=service_data,
+            summary_label=f"Music Assistant {media_type} library",
+        )
+
+    async def tool_get_music_assistant_queue(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Read Music Assistant queue details for target players."""
+        if not self._music_assistant_support_enabled():
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Music Assistant support is disabled in shared MCP settings.",
+                    }
+                ]
+            }
+
+        if not self.hass.services.has_service("music_assistant", "get_queue"):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "The Home Assistant Music Assistant integration is not available or does not expose music_assistant.get_queue.",
+                    }
+                ]
+            }
+
+        try:
+            resolved_player_ids, resolution_text = await self._resolve_music_assistant_player_targets(
+                area=args.get("area"),
+                floor=args.get("floor"),
+                label=args.get("label"),
+                media_player=args.get("media_player"),
+            )
+        except ValueError as err:
+            return {"content": [{"type": "text", "text": f"❌ Error: {err}"}]}
+
+        result = await self._call_music_assistant_response_service(
+            service="get_queue",
+            service_data={"entity_id": resolved_player_ids},
+            summary_label="Music Assistant queue",
+        )
+
+        if resolution_text and result.get("content"):
+            result["content"][0]["text"] += f"\n\n{resolution_text}"
+
+        return result
+
     async def tool_list_areas(self) -> Dict[str, Any]:
         """List all areas."""
         areas = await self.discovery.list_areas()
@@ -1697,13 +2531,29 @@ class MCPServer:
     async def tool_list_domains(self) -> Dict[str, Any]:
         """List all domains with entity counts and support status."""
         # Get domains that have entities in this HA instance
-        entity_domains = await self.discovery.list_domains()
+        entity_domains = [
+            domain_info
+            for domain_info in await self.discovery.list_domains()
+            if not self._get_domain_capability_error(domain_info["domain"])
+        ]
         entity_domain_map = {d["domain"]: d["count"] for d in entity_domains}
 
         # Get all supported domains from registry
-        supported_domains = get_supported_domains()
-        controllable_domains = get_domains_by_type(TYPE_CONTROLLABLE)
-        read_only_domains = get_domains_by_type(TYPE_READ_ONLY)
+        supported_domains = [
+            domain
+            for domain in get_supported_domains()
+            if not self._get_domain_capability_error(domain)
+        ]
+        controllable_domains = {
+            domain
+            for domain in get_domains_by_type(TYPE_CONTROLLABLE)
+            if not self._get_domain_capability_error(domain)
+        }
+        read_only_domains = {
+            domain
+            for domain in get_domains_by_type(TYPE_READ_ONLY)
+            if not self._get_domain_capability_error(domain)
+        }
 
         # Build comprehensive list
         result_text = f"Home Assistant Domains (Entities: {len(entity_domains)}, Supported: {len(supported_domains)}):\n\n"
@@ -1729,7 +2579,7 @@ class MCPServer:
                 )
                 result_text += f"  ✅ {domain} ({domain_type})\n"
 
-        result_text += f"\n📈 Summary:\n"
+        result_text += "\n📈 Summary:\n"
         result_text += f"  - Total entity domains: {len(entity_domains)}\n"
         result_text += f"  - Supported domains: {len(supported_domains)}\n"
         result_text += f"  - Controllable: {len(controllable_domains)}\n"
@@ -3754,6 +4604,627 @@ class MCPServer:
         )
         return self._extract_history_states(states, entity_id)
 
+    def _get_music_assistant_instances(self) -> List[Any]:
+        """Return configured Music Assistant config entries."""
+        return list(self.hass.config_entries.async_entries("music_assistant"))
+
+    def _resolve_music_assistant_instance(
+        self,
+        *,
+        config_entry_id: Any = None,
+        instance: Any = None,
+    ) -> Any:
+        """Resolve a single Music Assistant config entry."""
+        instances = self._get_music_assistant_instances()
+        if not instances:
+            raise ValueError("No Music Assistant instances are configured in Home Assistant.")
+
+        config_entry_id_text = str(config_entry_id or "").strip()
+        instance_text = str(instance or "").strip().casefold()
+
+        matched = instances
+        if config_entry_id_text:
+            matched = [
+                entry for entry in matched if entry.entry_id == config_entry_id_text
+            ]
+            if not matched:
+                raise ValueError(
+                    f"No Music Assistant instance matched config_entry_id '{config_entry_id_text}'."
+                )
+
+        if instance_text:
+            exact_matches = [
+                entry for entry in matched if entry.title.casefold() == instance_text
+            ]
+            if exact_matches:
+                matched = exact_matches
+            else:
+                partial_matches = [
+                    entry for entry in matched if instance_text in entry.title.casefold()
+                ]
+                if partial_matches:
+                    matched = partial_matches
+                else:
+                    raise ValueError(
+                        f"No Music Assistant instance matched '{instance}'. Use list_music_assistant_instances first."
+                    )
+
+        if len(matched) == 1:
+            return matched[0]
+
+        raise ValueError(
+            "Multiple Music Assistant instances are configured. Use list_music_assistant_instances and pass config_entry_id or instance."
+        )
+
+    def _is_music_assistant_entity(self, entity_entry: Any) -> bool:
+        """Return whether an entity registry entry belongs to Music Assistant."""
+        if entity_entry is None:
+            return False
+
+        platform = str(getattr(entity_entry, "platform", "") or "").strip()
+        if platform == "music_assistant":
+            return True
+
+        config_entry_id = getattr(entity_entry, "config_entry_id", None)
+        if config_entry_id:
+            config_entry = self.hass.config_entries.async_get_entry(config_entry_id)
+            if config_entry and config_entry.domain == "music_assistant":
+                return True
+
+        return False
+
+    def _get_music_assistant_player_catalog(self) -> List[Dict[str, Any]]:
+        """Build a catalog of exposed Music Assistant players."""
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
+
+        catalog: List[Dict[str, Any]] = []
+        for state_obj in self.hass.states.async_all():
+            if state_obj.domain != "media_player":
+                continue
+            if not async_should_expose(self.hass, "conversation", state_obj.entity_id):
+                continue
+
+            entity_entry = entity_registry.async_get(state_obj.entity_id)
+            if not self._is_music_assistant_entity(entity_entry):
+                continue
+
+            entity_context = self.discovery._get_entity_context(
+                entity_entry,
+                device_registry,
+                area_registry,
+                floor_registry,
+                label_registry,
+            )
+            entity_info = self.discovery._create_entity_info(
+                state_obj,
+                entity_entry=entity_entry,
+                entity_context=entity_context,
+            )
+
+            config_entry_id = getattr(entity_entry, "config_entry_id", None)
+            config_entry = (
+                self.hass.config_entries.async_get_entry(config_entry_id)
+                if config_entry_id
+                else None
+            )
+            if config_entry_id:
+                entity_info["config_entry_id"] = config_entry_id
+            if config_entry:
+                entity_info["instance_title"] = config_entry.title
+            entity_info["integration"] = "music_assistant"
+            for attr in (
+                "media_title",
+                "media_artist",
+                "media_album_name",
+                "source",
+                "volume_level",
+                "is_volume_muted",
+            ):
+                if attr in state_obj.attributes:
+                    entity_info[attr] = self._serialize_service_response_value(
+                        state_obj.attributes.get(attr)
+                    )
+
+            catalog.append(
+                {
+                    "entity_id": state_obj.entity_id,
+                    "state_obj": state_obj,
+                    "entity_entry": entity_entry,
+                    "entity_context": entity_context,
+                    "entity_info": entity_info,
+                }
+            )
+
+        catalog.sort(
+            key=lambda record: (
+                record["entity_info"].get("name", "").casefold(),
+                record["entity_id"],
+            )
+        )
+        return catalog
+
+    def _resolve_music_assistant_area_values(
+        self,
+        area_values: List[str],
+        area_registry: Any,
+        floor_registry: Any,
+    ) -> Tuple[set[str], set[str]]:
+        """Resolve Music Assistant area selectors, with floor fallback."""
+        area_ids: set[str] = set()
+        floor_ids: set[str] = set()
+
+        for value in area_values:
+            area_entry = self.discovery._resolve_area_entry(value, area_registry)
+            if area_entry is not None:
+                area_ids.add(area_entry.id)
+                continue
+
+            floor_entry = self.discovery._resolve_floor_entry(value, floor_registry)
+            if floor_entry is not None:
+                floor_ids.add(floor_entry.floor_id)
+                continue
+
+            raise ValueError(
+                f"No Home Assistant area or floor matched '{value}' for Music Assistant targeting."
+            )
+
+        return area_ids, floor_ids
+
+    def _match_music_assistant_player_term(
+        self,
+        catalog: List[Dict[str, Any]],
+        search_term: str,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Resolve a player selector term to the strongest matching Music Assistant players."""
+        normalized_term = str(search_term or "").strip().casefold()
+        if not normalized_term:
+            return [], []
+
+        scored_matches: List[Tuple[int, Dict[str, Any], List[str]]] = []
+        for record in catalog:
+            score, reasons = self.discovery._get_entity_match_details(
+                normalized_term,
+                record["state_obj"],
+                record["entity_entry"],
+                record["entity_context"],
+            )
+            if score > 0:
+                scored_matches.append((score, record, reasons))
+
+        if not scored_matches:
+            raise ValueError(
+                f"No Music Assistant player matched '{search_term}'. Use list_music_assistant_players first."
+            )
+
+        best_score = max(score for score, _, _ in scored_matches)
+        best_matches = [
+            {
+                **record,
+                "match_score": score,
+                "match_reasons": reasons,
+            }
+            for score, record, reasons in scored_matches
+            if score == best_score
+        ]
+
+        if len(best_matches) > 5:
+            raise ValueError(
+                f"Music Assistant player selector '{search_term}' is too broad. Use list_music_assistant_players to narrow it down."
+            )
+
+        return best_matches, [match["entity_info"]["name"] for match in best_matches]
+
+    async def _discover_music_assistant_players(
+        self,
+        *,
+        area: Any = None,
+        floor: Any = None,
+        label: Any = None,
+        name_contains: Any = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Discover Music Assistant players with alias-aware filters."""
+        catalog = self._get_music_assistant_player_catalog()
+        if not catalog:
+            return []
+
+        area_values = self._normalize_target_values(area)
+        floor_values = self._normalize_target_values(floor)
+        label_values = self._normalize_target_values(label)
+
+        area_registry = ar.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
+
+        area_ids: set[str] = set()
+        floor_ids: set[str] = set()
+        if area_values:
+            resolved_area_ids, resolved_floor_ids = self._resolve_music_assistant_area_values(
+                area_values,
+                area_registry,
+                floor_registry,
+            )
+            area_ids.update(resolved_area_ids)
+            floor_ids.update(resolved_floor_ids)
+
+        for value in floor_values:
+            floor_entry = self.discovery._resolve_floor_entry(value, floor_registry)
+            if floor_entry is None:
+                raise ValueError(
+                    f"No Home Assistant floor matched '{value}' for Music Assistant filtering."
+                )
+            floor_ids.add(floor_entry.floor_id)
+
+        label_ids: set[str] = set()
+        for value in label_values:
+            label_entry = self.discovery._resolve_label_entry(value, label_registry)
+            if label_entry is None:
+                raise ValueError(
+                    f"No Home Assistant label matched '{value}' for Music Assistant filtering."
+                )
+            label_ids.add(label_entry.label_id)
+
+        filtered_records = []
+        for record in catalog:
+            info = record["entity_info"]
+            if area_ids and info.get("area_id") not in area_ids:
+                continue
+            if floor_ids and info.get("floor_id") not in floor_ids:
+                continue
+            if label_ids and not label_ids.intersection(set(info.get("label_ids", []))):
+                continue
+            filtered_records.append(record)
+
+        search_term = str(name_contains or "").strip().casefold()
+        if search_term:
+            scored_records = []
+            for record in filtered_records:
+                score, reasons = self.discovery._get_entity_match_details(
+                    search_term,
+                    record["state_obj"],
+                    record["entity_entry"],
+                    record["entity_context"],
+                )
+                if score <= 0:
+                    continue
+                entity_info = dict(record["entity_info"])
+                entity_info["match_score"] = score
+                entity_info["match_reasons"] = reasons
+                scored_records.append((score, entity_info))
+
+            scored_records.sort(
+                key=lambda item: (-item[0], item[1].get("name", "").casefold(), item[1]["entity_id"])
+            )
+            return [entity_info for _, entity_info in scored_records[:limit]]
+
+        return [dict(record["entity_info"]) for record in filtered_records[:limit]]
+
+    async def _resolve_music_assistant_player_targets(
+        self,
+        *,
+        area: Any = None,
+        floor: Any = None,
+        label: Any = None,
+        media_player: Any = None,
+    ) -> Tuple[List[str], str]:
+        """Resolve Music Assistant selectors to concrete player entity IDs."""
+        catalog = self._get_music_assistant_player_catalog()
+        if not catalog:
+            raise ValueError("No exposed Music Assistant players are available.")
+
+        area_values = self._normalize_target_values(area)
+        floor_values = self._normalize_target_values(floor)
+        label_values = self._normalize_target_values(label)
+        media_player_values = self._normalize_target_values(media_player)
+
+        area_registry = ar.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
+
+        selector_sets: List[set[str]] = []
+
+        if area_values:
+            area_ids, floor_ids = self._resolve_music_assistant_area_values(
+                area_values,
+                area_registry,
+                floor_registry,
+            )
+            matched = {
+                record["entity_id"]
+                for record in catalog
+                if (
+                    (area_ids and record["entity_info"].get("area_id") in area_ids)
+                    or (floor_ids and record["entity_info"].get("floor_id") in floor_ids)
+                )
+            }
+            if not matched:
+                raise ValueError(
+                    f"No Music Assistant players matched area selector(s): {', '.join(area_values)}"
+                )
+            selector_sets.append(matched)
+
+        if floor_values:
+            floor_ids = set()
+            for value in floor_values:
+                floor_entry = self.discovery._resolve_floor_entry(value, floor_registry)
+                if floor_entry is None:
+                    raise ValueError(
+                        f"No Home Assistant floor matched '{value}' for Music Assistant targeting."
+                    )
+                floor_ids.add(floor_entry.floor_id)
+
+            matched = {
+                record["entity_id"]
+                for record in catalog
+                if record["entity_info"].get("floor_id") in floor_ids
+            }
+            if not matched:
+                raise ValueError(
+                    f"No Music Assistant players matched floor selector(s): {', '.join(floor_values)}"
+                )
+            selector_sets.append(matched)
+
+        if label_values:
+            label_ids = set()
+            for value in label_values:
+                label_entry = self.discovery._resolve_label_entry(value, label_registry)
+                if label_entry is None:
+                    raise ValueError(
+                        f"No Home Assistant label matched '{value}' for Music Assistant targeting."
+                    )
+                label_ids.add(label_entry.label_id)
+
+            matched = {
+                record["entity_id"]
+                for record in catalog
+                if label_ids.intersection(set(record["entity_info"].get("label_ids", [])))
+            }
+            if not matched:
+                raise ValueError(
+                    f"No Music Assistant players matched label selector(s): {', '.join(label_values)}"
+                )
+            selector_sets.append(matched)
+
+        if media_player_values:
+            matched_entity_ids: set[str] = set()
+            resolved_names: List[str] = []
+            for value in media_player_values:
+                matches, match_names = self._match_music_assistant_player_term(catalog, value)
+                matched_entity_ids.update(match["entity_id"] for match in matches)
+                resolved_names.extend(match_names)
+            selector_sets.append(matched_entity_ids)
+
+        if selector_sets:
+            resolved_entity_ids = sorted(set.intersection(*selector_sets))
+            if not resolved_entity_ids:
+                raise ValueError(
+                    "No Music Assistant players matched the combined selectors."
+                )
+        else:
+            if len(catalog) == 1:
+                resolved_entity_ids = [catalog[0]["entity_id"]]
+            else:
+                raise ValueError(
+                    "Music Assistant playback needs a target player, area, floor, or label when multiple Music Assistant players are exposed."
+                )
+
+        return (
+            resolved_entity_ids,
+            "Resolved Music Assistant players: "
+            + ", ".join(self._friendly_names_for_entities(resolved_entity_ids)),
+        )
+
+    def _normalize_music_assistant_media_id(self, value: Any) -> Any:
+        """Normalize Music Assistant media_id input, including semicolon-separated lists."""
+        if value is None:
+            return None
+
+        if isinstance(value, (list, tuple, set)):
+            normalized_values = []
+            for item in value:
+                item_text = str(item).strip()
+                if item_text:
+                    normalized_values.append(item_text)
+            if not normalized_values:
+                return None
+            return normalized_values if len(normalized_values) > 1 else normalized_values[0]
+
+        value_text = str(value).strip()
+        if not value_text:
+            return None
+
+        if ";" in value_text:
+            parts = [part.strip() for part in value_text.split(";") if part.strip()]
+            if parts:
+                return parts if len(parts) > 1 else parts[0]
+
+        return value_text
+
+    def _normalize_music_assistant_media_type_filter(self, value: Any) -> Any:
+        """Normalize Music Assistant media_type filters."""
+        allowed = {"track", "album", "artist", "playlist", "radio"}
+        if value is None:
+            return None
+
+        if isinstance(value, (list, tuple, set)):
+            normalized = []
+            for item in value:
+                item_text = str(item).strip().lower()
+                if item_text in allowed and item_text not in normalized:
+                    normalized.append(item_text)
+            return normalized or None
+
+        value_text = str(value).strip().lower()
+        if not value_text:
+            return None
+        if "," in value_text:
+            parts = [
+                part.strip()
+                for part in value_text.replace(";", ",").split(",")
+                if part.strip()
+            ]
+            normalized = [part for part in parts if part in allowed]
+            return normalized or None
+        return value_text if value_text in allowed else None
+
+    async def _call_music_assistant_response_service(
+        self,
+        *,
+        service: str,
+        service_data: Dict[str, Any],
+        summary_label: str,
+    ) -> Dict[str, Any]:
+        """Call a Music Assistant response service and format the result."""
+        if not self.hass.services.has_service("music_assistant", service):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"The Home Assistant Music Assistant integration does not expose music_assistant.{service}.",
+                    }
+                ]
+            }
+
+        self.publish_progress(
+            "tool_start",
+            f"Calling Music Assistant {service}",
+            tool=f"music_assistant.{service}",
+        )
+
+        try:
+            response = await self.hass.services.async_call(
+                domain="music_assistant",
+                service=service,
+                service_data=service_data,
+                blocking=True,
+                return_response=True,
+            )
+        except Exception as err:
+            error_msg = f"Music Assistant {service} failed: {err}"
+            _LOGGER.exception(error_msg)
+            return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        self.publish_progress(
+            "tool_complete",
+            f"Music Assistant {service} completed",
+            tool=f"music_assistant.{service}",
+            success=True,
+        )
+
+        serialized_response = self._serialize_service_response_value(response)
+        text_parts = [f"✅ Retrieved {summary_label}."]
+        summary_lines = self._summarize_music_assistant_response(service, serialized_response)
+        if summary_lines:
+            text_parts.append("")
+            text_parts.extend(summary_lines)
+        text_parts.append("")
+        text_parts.append("Response:")
+        text_parts.append(json.dumps(serialized_response, indent=2, ensure_ascii=False))
+
+        return {
+            "content": [{"type": "text", "text": "\n".join(text_parts)}],
+            "response": serialized_response,
+        }
+
+    def _summarize_music_assistant_response(
+        self, service: str, response: Any
+    ) -> List[str]:
+        """Build concise summaries for Music Assistant response payloads."""
+        if service in {"search", "get_library"}:
+            return self._summarize_music_assistant_collection_response(response)
+        if service == "get_queue":
+            return self._summarize_music_assistant_queue_response(response)
+        return []
+
+    def _summarize_music_assistant_collection_response(self, response: Any) -> List[str]:
+        """Summarize Music Assistant search/library payloads."""
+        if not isinstance(response, dict):
+            return []
+
+        collections: List[Tuple[str, Dict[str, Any]]] = []
+        if isinstance(response.get("items"), list):
+            collections.append(("items", response))
+        else:
+            for key, value in response.items():
+                if isinstance(value, dict) and isinstance(value.get("items"), list):
+                    collections.append((str(key), value))
+
+        if not collections:
+            return []
+
+        lines = ["Summary:"]
+        for key, payload in collections:
+            items = payload.get("items") or []
+            preview = self._describe_music_assistant_item(items[0]) if items else None
+            line = f"- {key}: {len(items)} item{'s' if len(items) != 1 else ''}"
+            if preview:
+                line += f"; first: {preview}"
+            lines.append(line)
+        return lines
+
+    def _summarize_music_assistant_queue_response(self, response: Any) -> List[str]:
+        """Summarize Music Assistant queue payloads."""
+        if not isinstance(response, dict):
+            return []
+
+        queue_payloads: List[Tuple[str, Dict[str, Any]]] = []
+        if "items" in response or "current_item" in response:
+            queue_payloads.append(("queue", response))
+        else:
+            for key, value in response.items():
+                if isinstance(value, dict) and (
+                    "items" in value or "current_item" in value
+                ):
+                    queue_payloads.append((str(key), value))
+
+        if not queue_payloads:
+            return []
+
+        lines = ["Summary:"]
+        for key, payload in queue_payloads:
+            items = payload.get("items") or []
+            current_item = payload.get("current_item")
+            detail_parts = [f"{len(items)} queued item{'s' if len(items) != 1 else ''}"]
+            current_preview = self._describe_music_assistant_item(current_item)
+            if current_preview:
+                detail_parts.append(f"current: {current_preview}")
+            lines.append(f"- {key}: {'; '.join(detail_parts)}")
+        return lines
+
+    def _describe_music_assistant_item(self, item: Any) -> str | None:
+        """Build a compact description for a Music Assistant media item."""
+        if not isinstance(item, dict):
+            return str(item) if item is not None else None
+
+        name = item.get("name") or item.get("title") or item.get("uri")
+        artist = item.get("artist")
+        if isinstance(artist, dict):
+            artist = artist.get("name")
+        elif isinstance(artist, list) and artist:
+            first_artist = artist[0]
+            artist = first_artist.get("name") if isinstance(first_artist, dict) else str(first_artist)
+
+        if name and artist and str(artist).strip().casefold() not in str(name).casefold():
+            return f"{artist} - {name}"
+        if name:
+            return str(name)
+        return None
+
+    def _friendly_names_for_entities(self, entity_ids: List[str]) -> List[str]:
+        """Resolve entity IDs to friendly names."""
+        names = []
+        for entity_id in entity_ids:
+            state = self.hass.states.get(entity_id)
+            if state and state.name:
+                names.append(state.name)
+            else:
+                names.append(entity_id)
+        return names
+
     def validate_service(self, domain: str, action: str) -> str:
         """Validate that a domain/action combination is allowed.
 
@@ -3763,6 +5234,10 @@ class MCPServer:
         Raises:
             ValueError: If domain or action is invalid
         """
+        capability_error = self._get_domain_capability_error(domain)
+        if capability_error:
+            raise ValueError(capability_error)
+
         valid, result = validate_domain_action(domain, action)
         if valid:
             _LOGGER.debug(
@@ -3794,6 +5269,9 @@ class MCPServer:
         catalog: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
         for domain, services in self.hass.services.async_services().items():
+            if self._get_domain_capability_error(domain):
+                continue
+
             for service_name in services:
                 supports_response = self.hass.services.supports_response(
                     domain, service_name
@@ -3815,6 +5293,10 @@ class MCPServer:
         self, domain: str, service: str
     ) -> tuple[Dict[str, Any], str | None]:
         """Get dynamic metadata for a response-capable HA service."""
+        capability_error = self._get_domain_capability_error(domain)
+        if capability_error:
+            return {}, capability_error
+
         if not self.hass.services.has_service(domain, service):
             domain_info = get_domain_info(domain)
             if domain_info is None:
@@ -4004,6 +5486,8 @@ class MCPServer:
         self, domain: str, service: str, response: Any
     ) -> List[str]:
         """Build a concise summary for structured service responses."""
+        if domain == "music_assistant":
+            return self._summarize_music_assistant_response(service, response)
         if domain == "weather" and service in {"get_forecast", "get_forecasts"}:
             return self._summarize_weather_response(response)
         if domain == "calendar" and service == "get_events":

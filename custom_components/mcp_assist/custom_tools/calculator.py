@@ -875,7 +875,7 @@ class CalculatorTool:
                 raise ValueError("expression may only contain numeric constants")
             return value
 
-        if isinstance(node, ast.Num):  # pragma: no cover - compat for older Python ASTs
+        if type(node).__name__ == "Num":  # pragma: no cover - compat for older Python ASTs
             return node.n
 
         if isinstance(node, ast.BinOp):

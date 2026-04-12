@@ -6,7 +6,6 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.components import conversation
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
@@ -21,11 +20,22 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_GAP_FILLING,
-    DEFAULT_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SEARCH_PROVIDER,
     DEFAULT_ENABLE_GAP_FILLING,
+    DEFAULT_ENABLE_ASSIST_BRIDGE,
+    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_DEVICE_TOOLS,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
 )
 from .mcp_server import MCPServer
 from .index_manager import IndexManager
@@ -111,6 +121,46 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     CONF_ENABLE_GAP_FILLING,
                     first_profile.data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING)
                 ),
+                CONF_ENABLE_ASSIST_BRIDGE: first_profile.options.get(
+                    CONF_ENABLE_ASSIST_BRIDGE,
+                    first_profile.data.get(
+                        CONF_ENABLE_ASSIST_BRIDGE, DEFAULT_ENABLE_ASSIST_BRIDGE
+                    ),
+                ),
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                        DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_RECORDER_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_RECORDER_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_RECORDER_TOOLS, DEFAULT_ENABLE_RECORDER_TOOLS
+                    ),
+                ),
+                CONF_ENABLE_CALCULATOR_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_CALCULATOR_TOOLS,
+                        DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_DEVICE_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_DEVICE_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_DEVICE_TOOLS,
+                        DEFAULT_ENABLE_DEVICE_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: first_profile.options.get(
+                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    first_profile.data.get(
+                        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                        DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    ),
+                ),
             }
         else:
             # No profiles exist yet (shouldn't happen in normal flow), use defaults
@@ -121,6 +171,12 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_BRAVE_API_KEY: DEFAULT_BRAVE_API_KEY,
                 CONF_ALLOWED_IPS: DEFAULT_ALLOWED_IPS,
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
+                CONF_ENABLE_ASSIST_BRIDGE: DEFAULT_ENABLE_ASSIST_BRIDGE,
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS: DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                CONF_ENABLE_RECORDER_TOOLS: DEFAULT_ENABLE_RECORDER_TOOLS,
+                CONF_ENABLE_CALCULATOR_TOOLS: DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                CONF_ENABLE_DEVICE_TOOLS: DEFAULT_ENABLE_DEVICE_TOOLS,
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
             }
 
         # Create system entry with extracted/default settings

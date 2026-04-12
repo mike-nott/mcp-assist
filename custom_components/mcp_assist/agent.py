@@ -1,6 +1,5 @@
 """LM Studio MCP conversation agent."""
 
-import asyncio
 import json
 import logging
 import re
@@ -11,21 +10,18 @@ import aiohttp
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation import (
-    AbstractConversationAgent,
     ConversationEntity,
     ConversationEntityFeature,
     ConversationInput,
     ConversationResult,
 )
 from homeassistant.components.conversation import chat_log
-from homeassistant.components.conversation.const import DOMAIN as CONVERSATION_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import (
     intent,
     area_registry as ar,
     device_registry as dr,
-    entity_registry as er,
     llm,
     chat_session,
 )
@@ -54,9 +50,12 @@ from .const import (
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
     CONF_SEARCH_PROVIDER,
-    CONF_BRAVE_API_KEY,
-    CONF_ALLOWED_IPS,
-    CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_FOLLOW_UP_PHRASES,
     CONF_END_WORDS,
@@ -70,13 +69,14 @@ from .const import (
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
-    DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
     DEFAULT_MCP_PORT,
-    DEFAULT_SEARCH_PROVIDER,
-    DEFAULT_BRAVE_API_KEY,
-    DEFAULT_ALLOWED_IPS,
-    DEFAULT_ENABLE_GAP_FILLING,
+    DEFAULT_ENABLE_ASSIST_BRIDGE,
+    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_DEVICE_TOOLS,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
     DEFAULT_CONTROL_HA,
@@ -87,6 +87,12 @@ from .const import (
     DEFAULT_CLEAN_RESPONSES,
     DEFAULT_TIMEOUT,
     RESPONSE_MODE_INSTRUCTIONS,
+    DEVICE_TECHNICAL_INSTRUCTIONS,
+    RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS,
+    RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS,
+    ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS,
+    CALCULATOR_TECHNICAL_INSTRUCTIONS,
+    MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -184,7 +190,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         if self.debug_mode:
             _LOGGER.debug(f"🔍 Server Type: {self.server_type}")
             _LOGGER.debug(f"🔍 Base URL: {self.base_url_dynamic}")
-            _LOGGER.debug(f"🔍 Debug mode: ON")
+            _LOGGER.debug("🔍 Debug mode: ON")
             _LOGGER.debug(f"🔍 Max iterations: {self.max_iterations}")
 
         _LOGGER.info(
@@ -336,6 +342,128 @@ class MCPAssistConversationEntity(ConversationEntity):
             return "brave"
 
         return "none"
+
+    @property
+    def music_assistant_support_enabled(self) -> bool:
+        """Get Music Assistant support setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+            )
+        )
+
+    @property
+    def assist_bridge_enabled(self) -> bool:
+        """Get Assist bridge setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_ASSIST_BRIDGE,
+                DEFAULT_ENABLE_ASSIST_BRIDGE,
+            )
+        )
+
+    @property
+    def native_response_service_tools_enabled(self) -> bool:
+        """Get response-service tool setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+            )
+        )
+
+    @property
+    def recorder_tools_enabled(self) -> bool:
+        """Get recorder tool setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_RECORDER_TOOLS,
+                DEFAULT_ENABLE_RECORDER_TOOLS,
+            )
+        )
+
+    @property
+    def calculator_tools_enabled(self) -> bool:
+        """Get calculator tool setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_CALCULATOR_TOOLS,
+                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+            )
+        )
+
+    @property
+    def device_tools_enabled(self) -> bool:
+        """Get device tool setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_DEVICE_TOOLS,
+                DEFAULT_ENABLE_DEVICE_TOOLS,
+            )
+        )
+
+    def _build_disabled_tool_family_instructions(self) -> str:
+        """Build prompt instructions for disabled optional tool families."""
+        lines: list[str] = []
+
+        if not self.device_tools_enabled:
+            lines.append(
+                "- Device tools are disabled. Do not call discover_devices or get_device_details. Use discover_entities and get_entity_details instead."
+            )
+
+        if not self.assist_bridge_enabled:
+            lines.append(
+                "- Native Assist bridge tools are disabled. Do not call list_assist_tools, call_assist_tool, get_assist_prompt, or get_assist_context_snapshot."
+            )
+
+        if not self.native_response_service_tools_enabled:
+            lines.append(
+                "- Native response-service tools are disabled. Do not call list_response_services or call_service_with_response. Use entity details or other MCP tools instead."
+            )
+
+        if not self.recorder_tools_enabled:
+            lines.append(
+                "- Recorder history analysis tools are disabled. Do not call analyze_entity_history or get_entity_state_at_time."
+            )
+
+        if not self.calculator_tools_enabled:
+            lines.append(
+                "- Calculator tools are disabled. Do not call arithmetic, unit conversion, or expression-evaluation tools."
+            )
+
+        if not lines:
+            return ""
+
+        return "## Disabled Optional Tool Families\n" + "\n".join(lines)
+
+    def _build_optional_technical_instructions(self, current_area: str) -> str:
+        """Build optional prompt sections for enabled capability families."""
+        sections: list[str] = []
+
+        if self.device_tools_enabled:
+            sections.append(DEVICE_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.native_response_service_tools_enabled:
+            sections.append(RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.recorder_tools_enabled:
+            sections.append(RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.assist_bridge_enabled:
+            sections.append(ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.calculator_tools_enabled:
+            sections.append(CALCULATOR_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.music_assistant_support_enabled:
+            sections.append(
+                MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS.replace(
+                    "{current_area}", current_area
+                ).strip()
+            )
+
+        return "\n\n".join(section for section in sections if section)
 
     @property
     def attribution(self) -> str:
@@ -1039,6 +1167,23 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Replace {index} placeholder
             technical_prompt = technical_prompt.replace("{index}", index_json)
 
+            optional_instructions = self._build_optional_technical_instructions(
+                current_area
+            )
+            if optional_instructions:
+                technical_prompt = (
+                    f"{technical_prompt.rstrip()}\n\n{optional_instructions}"
+                )
+
+            disabled_tool_family_instructions = (
+                self._build_disabled_tool_family_instructions().strip()
+            )
+            if disabled_tool_family_instructions:
+                technical_prompt = (
+                    f"{technical_prompt.rstrip()}\n\n"
+                    f"{disabled_tool_family_instructions}"
+                )
+
             # Combine: system prompt + technical prompt
             return f"{system_prompt}\n\n{technical_prompt}"
 
@@ -1101,6 +1246,23 @@ class MCPAssistConversationEntity(ConversationEntity):
             technical_prompt = technical_prompt.replace("{date}", current_date)
             technical_prompt = technical_prompt.replace("{current_area}", "Unknown")
             technical_prompt = technical_prompt.replace("{index}", "{}")
+
+            optional_instructions = self._build_optional_technical_instructions(
+                "Unknown"
+            )
+            if optional_instructions:
+                technical_prompt = (
+                    f"{technical_prompt.rstrip()}\n\n{optional_instructions}"
+                )
+
+            disabled_tool_family_instructions = (
+                self._build_disabled_tool_family_instructions().strip()
+            )
+            if disabled_tool_family_instructions:
+                technical_prompt = (
+                    f"{technical_prompt.rstrip()}\n\n"
+                    f"{disabled_tool_family_instructions}"
+                )
 
             # Combine prompts
             return f"{system_prompt}\n\n{technical_prompt}"
@@ -1537,7 +1699,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         if self.server_type == SERVER_TYPE_OPENAI:
             # OpenAI uses Bearer token
             # For custom OpenAI-compatible URLs, only send auth if key looks valid
-            if self.api_key and len(self.api_key) > 5 and not self.api_key.lower() in ["none", "null", "fake", "na", "n/a"]:
+            if self.api_key and len(self.api_key) > 5 and self.api_key.lower() not in ["none", "null", "fake", "na", "n/a"]:
                 return {"Authorization": f"Bearer {self.api_key}"}
             else:
                 return {}  # No auth for custom services that don't require it
@@ -1813,7 +1975,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                             try:
                                 error_data = await response.json()
                                 error_text = json.dumps(error_data, indent=2)
-                            except:
+                            except Exception:
                                 error_text = await response.text()
                             # Fallback to non-streaming
                             _LOGGER.error(
@@ -2103,7 +2265,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                         # Parse content as JSON if possible, otherwise use as-is
                         try:
                             tool_result_data = json.loads(result.get("content", "{}"))
-                        except:
+                        except Exception:
                             tool_result_data = {"result": result.get("content", "")}
                         self._record_tool_result_to_chatlog(
                             tool_call_id, tool_name, tool_result_data
@@ -2305,7 +2467,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                                     tool_result_data = json.loads(
                                         result.get("content", "{}")
                                     )
-                                except:
+                                except Exception:
                                     tool_result_data = {
                                         "result": result.get("content", "")
                                     }

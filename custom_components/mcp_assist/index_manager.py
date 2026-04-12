@@ -17,10 +17,9 @@ The index includes:
 
 import asyncio
 import logging
-import re
 from typing import Any, Dict, List, Optional, Set
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from homeassistant.core import HomeAssistant, callback, Event, Context
 from homeassistant.helpers import (
