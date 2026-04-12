@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from aiohttp import ClientSession
+from homeassistant.components.weather import WeatherEntityFeature
 import pytest
 from pytest_socket import disable_socket, enable_socket
 
@@ -17,6 +18,7 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_LMSTUDIO_URL,
 )
 from custom_components.mcp_assist.mcp_server import MCPServer
@@ -89,9 +91,29 @@ def test_tool_enablement_follows_shared_settings(
     assert server._is_tool_enabled("discover_devices") is False
     assert server._is_tool_enabled("list_assist_tools") is False
     assert server._is_tool_enabled("call_service_with_response") is False
+    assert server._is_tool_enabled("get_weather_forecast") is False
     assert server._is_tool_enabled("analyze_entity_history") is False
     assert server._is_tool_enabled("add") is False
     assert server._is_tool_enabled("play_music_assistant") is False
+
+
+def test_weather_forecast_tool_and_weather_services_can_be_disabled_independently(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Weather forecast capability should be hideable without disabling all response services."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: True,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
+        }
+    )
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    assert server._is_tool_enabled("call_service_with_response") is True
+    assert server._is_tool_enabled("get_weather_forecast") is False
+    assert "Weather forecast support is disabled" in (
+        server._get_domain_capability_error("weather") or ""
+    )
 
 
 @pytest.mark.asyncio
@@ -122,6 +144,7 @@ async def test_handle_tools_list_filters_disabled_tool_families(
     assert "discover_devices" not in tool_names
     assert "list_assist_tools" not in tool_names
     assert "call_service_with_response" not in tool_names
+    assert "get_weather_forecast" not in tool_names
     assert "get_entity_history" not in tool_names
     assert "play_music_assistant" not in tool_names
     assert "add" not in tool_names
@@ -271,3 +294,175 @@ def test_general_discovery_results_keep_no_area_bucket_last(
     assert text.index("Kitchen (Downstairs) (1):") < text.index(
         "No area (Upstairs) (1):"
     )
+
+
+def test_prepare_response_service_data_uses_supported_weather_forecast_type(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Weather response calls should default to a supported forecast type."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "weather.home",
+        "sunny",
+        {
+            "supported_features": int(
+                WeatherEntityFeature.FORECAST_HOURLY
+                | WeatherEntityFeature.FORECAST_TWICE_DAILY
+            )
+        },
+    )
+
+    prepared = server._prepare_response_service_data(
+        "weather",
+        "get_forecasts",
+        {},
+        resolved_target={"entity_id": ["weather.home"]},
+    )
+
+    assert prepared["type"] == "twice_daily"
+
+
+def test_prepare_response_service_data_adjusts_unsupported_weather_forecast_type(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Weather response calls should correct unsupported forecast types."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "weather.home",
+        "sunny",
+        {
+            "supported_features": int(
+                WeatherEntityFeature.FORECAST_HOURLY
+                | WeatherEntityFeature.FORECAST_TWICE_DAILY
+            )
+        },
+    )
+
+    prepared = server._prepare_response_service_data(
+        "weather",
+        "get_forecasts",
+        {"type": "daily"},
+        resolved_target={"entity_id": ["weather.home"]},
+    )
+
+    assert prepared["type"] == "twice_daily"
+
+
+@pytest.mark.asyncio
+async def test_call_service_with_response_uses_supported_weather_forecast_type(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Weather response-service calls should use the entity's supported type."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "weather.home",
+        "sunny",
+        {
+            "supported_features": int(
+                WeatherEntityFeature.FORECAST_HOURLY
+                | WeatherEntityFeature.FORECAST_TWICE_DAILY
+            )
+        },
+    )
+
+    server._get_response_service_info = AsyncMock(
+        return_value=(
+            {
+                "fields": {"type": {"required": True}},
+                "target": {"entity": {"domain": "weather"}},
+            },
+            None,
+        )
+    )
+    server.resolve_target = AsyncMock(return_value={"entity_id": ["weather.home"]})
+    async_call_mock = AsyncMock(
+        return_value={
+            "weather.home": {
+                "forecast": [
+                    {
+                        "datetime": "2026-04-13T08:00:00-07:00",
+                        "condition": "sunny",
+                        "temperature": 72,
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setattr(type(hass.services), "async_call", async_call_mock)
+
+    result = await server.tool_call_service_with_response(
+        {
+            "domain": "weather",
+            "service": "get_forecasts",
+            "target": {"entity_id": "weather.home"},
+            "data": {},
+        }
+    )
+
+    async_call_mock.assert_awaited_once()
+    service_data = async_call_mock.await_args.kwargs["service_data"]
+    assert service_data["type"] == "twice_daily"
+    assert "Forecast type used: twice_daily." in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_get_weather_forecast_discovers_entity_and_summarizes_tomorrow(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Weather forecast helper should use an HA weather entity instead of acting source-less."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "weather.home",
+        "sunny",
+        {
+            "friendly_name": "Weather",
+            "supported_features": int(WeatherEntityFeature.FORECAST_TWICE_DAILY),
+        },
+    )
+    server.discovery.discover_entities = AsyncMock(
+        return_value=[
+            {
+                "entity_id": "weather.home",
+                "name": "Weather",
+                "forecast_service_supported": True,
+            }
+        ]
+    )
+    server.tool_call_service_with_response = AsyncMock(
+        return_value={
+            "content": [{"type": "text", "text": "ok"}],
+            "response": {
+                "weather.home": {
+                    "forecast": [
+                        {
+                            "datetime": "2026-04-13T09:00:00-07:00",
+                            "condition": "sunny",
+                            "temperature": 72,
+                            "is_daytime": True,
+                        },
+                        {
+                            "datetime": "2026-04-13T21:00:00-07:00",
+                            "condition": "cloudy",
+                            "temperature": 61,
+                            "is_daytime": False,
+                        },
+                    ]
+                }
+            },
+        }
+    )
+
+    result = await server.tool_get_weather_forecast({"when": "tomorrow"})
+
+    server.tool_call_service_with_response.assert_awaited_once()
+    request_args = server.tool_call_service_with_response.await_args.args[0]
+    assert request_args["domain"] == "weather"
+    assert request_args["service"] == "get_forecasts"
+    assert request_args["target"] == {"entity_id": ["weather.home"]}
+    assert request_args["data"]["type"] == "twice_daily"
+    assert "Tomorrow for Weather:" in result["content"][0]["text"]
+    assert "morning: sunny, around 72" in result["content"][0]["text"]

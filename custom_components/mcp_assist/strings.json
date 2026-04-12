@@ -190,11 +190,13 @@
             "data": {
               "search_provider": "Web Search",
               "brave_api_key": "Brave Search API Key",
+              "enable_weather_forecast_tool": "Weather Forecast Tool",
               "enabled_tools": "Available Tool Families"
             },
             "data_description": {
               "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
               "brave_api_key": "Required only when Brave Search is selected.",
+              "enable_weather_forecast_tool": "Expose the dedicated Home Assistant weather forecast tool. When disabled, weather forecast questions will not use the weather MCP endpoint or weather response services.",
               "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
             }
           }
@@ -391,11 +393,13 @@
             "data": {
               "search_provider": "Web Search",
               "brave_api_key": "Brave Search API Key",
+              "enable_weather_forecast_tool": "Weather Forecast Tool",
               "enabled_tools": "Available Tool Families"
             },
             "data_description": {
               "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
               "brave_api_key": "Required only when Brave Search is selected.",
+              "enable_weather_forecast_tool": "Expose the dedicated Home Assistant weather forecast tool. When disabled, weather forecast questions will not use the weather MCP endpoint or weather response services.",
               "enabled_tools": "Choose which optional tool families the shared MCP server exposes to profiles and external MCP clients. Device tools add physical-device discovery. Response service tools add native HA service-response reads. Recorder tools add history analysis. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add rich music search and playback."
             }
           }

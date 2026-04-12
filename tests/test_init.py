@@ -24,6 +24,7 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_MCP_PORT,
     CONF_PROFILE_NAME,
     CONF_SEARCH_PROVIDER,
@@ -83,6 +84,7 @@ async def test_ensure_system_entry_copies_shared_settings_from_first_profile(
             CONF_ENABLE_GAP_FILLING: False,
             CONF_ENABLE_ASSIST_BRIDGE: False,
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
             CONF_ENABLE_DEVICE_TOOLS: False,
@@ -104,6 +106,7 @@ async def test_ensure_system_entry_copies_shared_settings_from_first_profile(
     assert system_entry.data[CONF_ENABLE_GAP_FILLING] is False
     assert system_entry.data[CONF_ENABLE_DEVICE_TOOLS] is False
     assert system_entry.data[CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT] is True
+    assert system_entry.data[CONF_ENABLE_WEATHER_FORECAST_TOOL] is False
 
 
 @pytest.mark.asyncio
@@ -118,6 +121,7 @@ async def test_ensure_system_entry_uses_defaults_without_profiles(hass) -> None:
     assert system_entry.unique_id == SYSTEM_ENTRY_UNIQUE_ID
     assert system_entry.data[CONF_MCP_PORT] == DEFAULT_MCP_PORT
     assert system_entry.data[CONF_ENABLE_DEVICE_TOOLS] == DEFAULT_ENABLE_DEVICE_TOOLS
+    assert CONF_ENABLE_WEATHER_FORECAST_TOOL in system_entry.data
 
 
 @pytest.mark.asyncio

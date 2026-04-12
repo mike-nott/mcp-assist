@@ -10,6 +10,7 @@ from custom_components.mcp_assist.agent import MCPAssistConversationEntity
 from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_CLEAN_RESPONSES,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_MAX_HISTORY,
     CONF_TECHNICAL_PROMPT,
@@ -260,3 +261,17 @@ def test_convert_mcp_tools_to_llm_tools_keeps_empty_object_properties(
     parameters = compact_tools[0]["function"]["parameters"]
 
     assert parameters == {"type": "object", "properties": {}}
+
+
+def test_clean_text_for_tts_removes_spaces_before_punctuation(
+    hass, profile_entry_factory
+) -> None:
+    """Final speech text should not keep stray spaces before punctuation."""
+    entry = profile_entry_factory(data={CONF_CLEAN_RESPONSES: False})
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    cleaned = agent._clean_text_for_tts(
+        "I can use it , the weather entity is available ."
+    )
+
+    assert cleaned == "I can use it, the weather entity is available."

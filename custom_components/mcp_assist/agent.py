@@ -1595,6 +1595,12 @@ class MCPAssistConversationEntity(ConversationEntity):
         text = text.replace("…", "...")  # U+2026 HORIZONTAL ELLIPSIS
         text = text.replace("•", "-")  # U+2022 BULLET
 
+        # Normalize stray spaces before punctuation so spoken/displayed text
+        # does not come out as "it , the weather entity is available."
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"([(\[{])\s+", r"\1", text)
+        text = re.sub(r"\s+([)\]}])", r"\1", text)
+
         # ONLY apply aggressive cleaning if clean_responses enabled
         if not self.clean_responses:
             return text

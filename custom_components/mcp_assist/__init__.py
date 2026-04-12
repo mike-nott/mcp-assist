@@ -22,6 +22,7 @@ from .const import (
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_ENABLE_ASSIST_BRIDGE,
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
@@ -134,6 +136,13 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                         DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
                     ),
                 ),
+                CONF_ENABLE_WEATHER_FORECAST_TOOL: first_profile.options.get(
+                    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                    first_profile.data.get(
+                        CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                    ),
+                ),
                 CONF_ENABLE_RECORDER_TOOLS: first_profile.options.get(
                     CONF_ENABLE_RECORDER_TOOLS,
                     first_profile.data.get(
@@ -173,6 +182,7 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
                 CONF_ENABLE_ASSIST_BRIDGE: DEFAULT_ENABLE_ASSIST_BRIDGE,
                 CONF_ENABLE_RESPONSE_SERVICE_TOOLS: DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                CONF_ENABLE_WEATHER_FORECAST_TOOL: DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
                 CONF_ENABLE_RECORDER_TOOLS: DEFAULT_ENABLE_RECORDER_TOOLS,
                 CONF_ENABLE_CALCULATOR_TOOLS: DEFAULT_ENABLE_CALCULATOR_TOOLS,
                 CONF_ENABLE_DEVICE_TOOLS: DEFAULT_ENABLE_DEVICE_TOOLS,

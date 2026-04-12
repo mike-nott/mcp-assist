@@ -54,6 +54,7 @@ from .const import (
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_DEVICE_TOOLS,
@@ -100,6 +101,7 @@ from .const import (
     DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_ENABLE_ASSIST_BRIDGE,
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
@@ -406,6 +408,14 @@ def _build_shared_tools_section(
                         defaults, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
                     ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+                vol.Optional(
+                    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                    default=_get_form_value(
+                        defaults,
+                        CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                    ),
+                ): bool,
                 vol.Optional(
                     ENABLED_TOOLS_FIELD,
                     default=_selected_tool_families(
@@ -1145,6 +1155,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
                                 DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
                             ),
+                            CONF_ENABLE_WEATHER_FORECAST_TOOL: existing_entry.data.get(
+                                CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                                DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                            ),
                             CONF_ENABLE_RECORDER_TOOLS: existing_entry.data.get(
                                 CONF_ENABLE_RECORDER_TOOLS,
                                 DEFAULT_ENABLE_RECORDER_TOOLS,
@@ -1437,6 +1451,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 current_values,
                 CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
                 DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+            ),
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
             ),
             CONF_ENABLE_RECORDER_TOOLS: _get_form_value(
                 current_values,
@@ -2194,6 +2213,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     sys_data.get(
                         CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
                         DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                sys_options.get(
+                    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                    sys_data.get(
+                        CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
                     ),
                 ),
             ),

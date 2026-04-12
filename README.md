@@ -154,7 +154,7 @@ If you leave the prompt text effectively unchanged, MCP Assist continues using t
 - MCP Server Port: Port for the shared MCP server (default: 8090)
 - Additional Allowed IPs/Ranges: Optional allowlist for external MCP clients
 - Discovery: Smart Entity Index and Max Entities Per Discovery
-- Tools: Web Search Provider, Brave Search API Key, and shared optional tool families
+- Tools: Web Search Provider, Brave Search API Key, Weather Forecast Tool toggle, and shared optional tool families
 
 ### 3. Set as Voice Assistant
 
@@ -218,6 +218,18 @@ If you leave the prompt text effectively unchanged, MCP Assist continues using t
 
 For weather, calendar, and to-do queries, the assistant can use Home Assistant's native response-capable services before falling back to web search.
 
+### Weather Forecast Setup
+
+To answer questions like "What is the weather forecast for tomorrow?" from Home Assistant instead of the web:
+
+- Make sure Home Assistant has at least one exposed `weather.` entity.
+- The weather integration must support one or more forecast types such as `daily`, `twice_daily`, or `hourly`.
+- If you use entity exposure controls, expose the weather entity to the conversation assistant.
+- If you have multiple weather entities, use room/floor/label context or a specific entity to disambiguate.
+- In shared MCP server settings, keep **Weather Forecast Tool** enabled if you want the assistant to answer weather questions through Home Assistant.
+
+MCP Assist does not assume every Home Assistant setup supports daily forecasts. It automatically falls back to a supported forecast type and summarizes that result.
+
 ## Configuration Options
 
 ### Profile Settings
@@ -253,6 +265,7 @@ For weather, calendar, and to-do queries, the assistant can use Home Assistant's
 - **Additional Allowed IPs/Ranges**: Whitelist Docker containers (e.g., `172.30.0.0/16`) or specific IPs for external MCP clients like Claude Code add-on
 - **Enable Smart Entity Index**: Context-aware entity discovery with automatic gap-filling for uncommon devices (default: enabled)
 - **Max Entities Per Discovery**: Cap how many entities a single discovery call may return
+- **Weather Forecast Tool**: Enables the dedicated Home Assistant weather forecast endpoint. Disable this if you do not want weather questions handled through the MCP server.
 - **Tools**: Shared optional capabilities exposed by the MCP server, including web search and optional tool families
 
 ### Web Search
@@ -406,6 +419,7 @@ One of MCP Assist's features is **dynamic model switching** - you can change mod
 - Check that entities are exposed (Settings → Voice Assistants → Expose)
 - Look for MCP server errors in logs
 - Ensure Max Tool Iterations isn't set too low
+- For local forecasts, confirm a `weather.` entity exists, is exposed, and the shared **Weather Forecast Tool** is enabled
 
 ## Entity Exposure
 

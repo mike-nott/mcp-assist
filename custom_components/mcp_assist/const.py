@@ -41,6 +41,7 @@ CONF_SEARCH_PROVIDER = "search_provider"
 CONF_ENABLE_GAP_FILLING = "enable_gap_filling"
 CONF_ENABLE_ASSIST_BRIDGE = "enable_assist_bridge"
 CONF_ENABLE_RESPONSE_SERVICE_TOOLS = "enable_response_service_tools"
+CONF_ENABLE_WEATHER_FORECAST_TOOL = "enable_weather_forecast_tool"
 CONF_ENABLE_RECORDER_TOOLS = "enable_recorder_tools"
 CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
 CONF_ENABLE_DEVICE_TOOLS = "enable_device_tools"
@@ -99,6 +100,7 @@ DEFAULT_SEARCH_PROVIDER = "none"
 DEFAULT_ENABLE_GAP_FILLING = True
 DEFAULT_ENABLE_ASSIST_BRIDGE = False
 DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS = True
+DEFAULT_ENABLE_WEATHER_FORECAST_TOOL = True
 DEFAULT_ENABLE_RECORDER_TOOLS = True
 DEFAULT_ENABLE_CALCULATOR_TOOLS = False
 DEFAULT_ENABLE_DEVICE_TOOLS = True
@@ -140,7 +142,11 @@ OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
         }
     ),
     TOOL_FAMILY_RESPONSE_SERVICE: frozenset(
-        {"list_response_services", "call_service_with_response"}
+        {
+            "list_response_services",
+            "call_service_with_response",
+            "get_weather_forecast",
+        }
     ),
     TOOL_FAMILY_RECORDER: frozenset(
         {
@@ -308,6 +314,9 @@ RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS = """
 Response-service tools are enabled.
 - Use list_response_services / call_service_with_response for structured Home Assistant reads such as forecasts, calendar events, todo items, or integration-specific query data.
 - Prefer native service responses over web search when the answer already exists in Home Assistant.
+- Prefer get_weather_forecast for user weather questions. It discovers the weather entity, chooses a supported forecast type, and summarizes the result in one call.
+- For weather forecasts, discover the weather entity first. If forecast_types are available, use a supported type and never assume daily is supported.
+- For a general "tomorrow" forecast, prefer daily if supported, otherwise twice_daily, otherwise hourly, and summarize the supported result instead of asking again.
 """
 
 RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS = """

@@ -28,6 +28,7 @@ from custom_components.mcp_assist.config_flow import (
 from custom_components.mcp_assist.const import (
     CONF_BRAVE_API_KEY,
     CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_MCP_PORT,
@@ -298,6 +299,7 @@ async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> Non
     assert tool_keys == {
         CONF_SEARCH_PROVIDER,
         CONF_BRAVE_API_KEY,
+        CONF_ENABLE_WEATHER_FORECAST_TOOL,
         ENABLED_TOOLS_FIELD,
     }
 
