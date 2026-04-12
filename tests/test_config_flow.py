@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResultType, section
 
 from custom_components.mcp_assist.config_flow import (
+    DISCOVERY_SECTION_KEY,
     ENABLED_TOOLS_FIELD,
     MCPAssistConfigFlow,
+    SEARCH_SECTION_KEY,
     TOOLS_SECTION_KEY,
     _apply_tool_family_selection,
     _infer_prompt_mode,
@@ -17,11 +20,15 @@ from custom_components.mcp_assist.config_flow import (
     validate_allowed_ips,
 )
 from custom_components.mcp_assist.const import (
+    CONF_BRAVE_API_KEY,
+    CONF_ENABLE_GAP_FILLING,
+    CONF_MAX_ENTITIES_PER_DISCOVERY,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_MCP_PORT,
     CONF_LMSTUDIO_URL,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
     CONF_PROFILE_ENABLE_DEVICE_TOOLS,
+    CONF_SEARCH_PROVIDER,
     CONF_SERVER_TYPE,
     CONF_SYSTEM_PROMPT,
     CONF_SYSTEM_PROMPT_MODE,
@@ -147,15 +154,57 @@ async def test_model_step_always_shows_prompt_fields_without_mode_dropdowns(hass
     assert CONF_TECHNICAL_PROMPT_MODE not in schema_keys
 
 
+async def test_model_step_prompt_overrides_are_optional(hass) -> None:
+    """Prompt override fields should be optional so blank means use defaults."""
+    flow = MCPAssistConfigFlow()
+    flow.hass = hass
+    flow.context = {"source": "user"}
+    flow.step1_data = {CONF_SERVER_TYPE: SERVER_TYPE_OLLAMA}
+    flow.step2_data = {CONF_LMSTUDIO_URL: "http://localhost:11434"}
+
+    with patch(
+        "custom_components.mcp_assist.config_flow.fetch_models_from_lmstudio",
+        AsyncMock(return_value=["qwen3"]),
+    ):
+        result = await flow.async_step_model()
+
+    marker_by_key = {
+        getattr(marker, "schema", marker): marker
+        for marker in result["data_schema"].schema.keys()
+    }
+
+    assert isinstance(marker_by_key[CONF_SYSTEM_PROMPT], vol.Optional)
+    assert isinstance(marker_by_key[CONF_TECHNICAL_PROMPT], vol.Optional)
+    assert marker_by_key[CONF_SYSTEM_PROMPT].description in (None, {})
+    assert marker_by_key[CONF_TECHNICAL_PROMPT].description in (None, {})
+
+
 def test_apply_tool_family_selection_expands_profile_multiselect() -> None:
     """The tools multiselect should expand into stored per-profile booleans."""
     normalized = _apply_tool_family_selection(
         {ENABLED_TOOLS_FIELD: ["device"]},
         TOOL_FAMILY_PROFILE_SETTINGS,
+        inherit_when_empty=True,
     )
 
     assert normalized[CONF_PROFILE_ENABLE_DEVICE_TOOLS] is True
     assert normalized[CONF_PROFILE_ENABLE_ASSIST_BRIDGE] is False
+
+
+def test_apply_tool_family_selection_allows_blank_profile_inheritance() -> None:
+    """A blank profile tool override should inherit the shared MCP server tools."""
+    normalized = _apply_tool_family_selection(
+        {
+            ENABLED_TOOLS_FIELD: [],
+            CONF_PROFILE_ENABLE_DEVICE_TOOLS: False,
+            CONF_PROFILE_ENABLE_ASSIST_BRIDGE: False,
+        },
+        TOOL_FAMILY_PROFILE_SETTINGS,
+        inherit_when_empty=True,
+    )
+
+    assert CONF_PROFILE_ENABLE_DEVICE_TOOLS not in normalized
+    assert CONF_PROFILE_ENABLE_ASSIST_BRIDGE not in normalized
 
 
 def test_apply_tool_family_selection_expands_shared_multiselect() -> None:
@@ -187,3 +236,31 @@ async def test_advanced_step_groups_profile_tools_into_multiselect_section(hass)
 
     selector = next(iter(tools_section.schema.schema.values()))
     assert selector.config["multiple"] is True
+
+
+async def test_shared_mcp_step_groups_search_and_discovery_settings(hass) -> None:
+    """Shared MCP settings should group search and discovery fields into sections."""
+    flow = MCPAssistConfigFlow()
+    flow.hass = hass
+    flow.context = {"source": "user"}
+
+    result = await flow.async_step_mcp_server()
+
+    search_section = result["data_schema"].schema[SEARCH_SECTION_KEY]
+    discovery_section = result["data_schema"].schema[DISCOVERY_SECTION_KEY]
+
+    assert isinstance(search_section, section)
+    assert isinstance(discovery_section, section)
+
+    search_keys = {
+        getattr(key, "schema", key) for key in search_section.schema.schema.keys()
+    }
+    discovery_keys = {
+        getattr(key, "schema", key) for key in discovery_section.schema.schema.keys()
+    }
+
+    assert search_keys == {CONF_SEARCH_PROVIDER, CONF_BRAVE_API_KEY}
+    assert discovery_keys == {
+        CONF_ENABLE_GAP_FILLING,
+        CONF_MAX_ENTITIES_PER_DISCOVERY,
+    }

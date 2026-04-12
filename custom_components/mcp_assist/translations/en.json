@@ -24,9 +24,14 @@
         "data": {
           "model_name": "Model Name",
           "system_prompt_mode": "System Prompt Source",
-          "system_prompt": "System Prompt",
+          "system_prompt": "System Prompt Override",
           "technical_prompt_mode": "Technical Instructions Source",
-          "technical_prompt": "Technical Instructions"
+          "technical_prompt": "Technical Instructions Override"
+        },
+        "data_description": {
+          "model_name": "The LLM model this profile should use.",
+          "system_prompt": "Optional. Leave blank to use the built-in system prompt from the integration code.",
+          "technical_prompt": "Optional. Leave blank to use the built-in technical instructions from the integration code."
         }
       },
       "advanced": {
@@ -50,11 +55,12 @@
         "sections": {
           "tools": {
             "name": "Tools",
+            "description": "Optional per-profile tool filtering.",
             "data": {
-              "enabled_tools": "Tool Families"
+              "enabled_tools": "Tool Family Overrides"
             },
             "data_description": {
-              "enabled_tools": "Choose which optional MCP tool families this profile can use. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
+              "enabled_tools": "Optional. Leave blank to inherit whatever tool families are enabled on the shared MCP server. If you choose specific items here, this profile will be narrowed to that subset only. Each selected family must also be enabled in the shared MCP server settings to actually work. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
             }
           }
         }
@@ -64,23 +70,40 @@
         "description": "⚠️ These settings affect ALL profiles. Changes here will impact every MCP Assist conversation agent.",
         "data": {
           "mcp_port": "MCP Server Port",
-          "search_provider": "Web Search",
-          "brave_api_key": "Brave Search API Key",
-          "allowed_ips": "Additional Allowed IPs/Ranges",
-          "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+          "allowed_ips": "Additional Allowed IPs/Ranges"
+        },
+        "data_description": {
+          "mcp_port": "The local port used by the shared MCP server.",
+          "allowed_ips": "Optional comma-separated IP addresses or CIDR ranges that may connect in addition to localhost."
         },
         "sections": {
-          "discovery": {
-            "name": "Discovery",
+          "search": {
+            "name": "Search",
+            "description": "Configure optional web search tools exposed by the shared MCP server.",
             "data": {
-              "enable_gap_filling": "Enable Smart Entity Index"
+              "search_provider": "Web Search",
+              "brave_api_key": "Brave Search API Key"
             },
             "data_description": {
-              "enable_gap_filling": "Builds a compact system index to keep discovery fast and context-aware."
+              "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
+              "brave_api_key": "Required only when Brave Search is selected."
+            }
+          },
+          "discovery": {
+            "name": "Discovery",
+            "description": "Control how the shared MCP server builds and returns discovery results.",
+            "data": {
+              "enable_gap_filling": "Enable Smart Entity Index",
+              "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+            },
+            "data_description": {
+              "enable_gap_filling": "Builds a compact system index to keep discovery fast and context-aware.",
+              "max_entities_per_discovery": "Caps how many entities a single discovery call may return."
             }
           },
           "tools": {
             "name": "Tools",
+            "description": "Choose which optional tool families the shared MCP server exposes.",
             "data": {
               "enabled_tools": "Available Tool Families"
             },
@@ -118,9 +141,9 @@
           "api_key": "API Key",
           "model_name": "Model Name",
           "system_prompt_mode": "System Prompt Source",
-          "system_prompt": "System Prompt",
+          "system_prompt": "System Prompt Override",
           "technical_prompt_mode": "Technical Instructions Source",
-          "technical_prompt": "Technical Instructions",
+          "technical_prompt": "Technical Instructions Override",
           "temperature": "Temperature",
           "max_tokens": "Max Response Tokens",
           "max_history": "Max History Messages",
@@ -135,14 +158,20 @@
           "ollama_num_ctx": "Ollama Context Window",
           "clean_responses": "Clean Responses for Voice Output"
         },
+        "data_description": {
+          "model_name": "The LLM model this profile should use.",
+          "system_prompt": "Optional. Leave blank to use the built-in system prompt from the integration code.",
+          "technical_prompt": "Optional. Leave blank to use the built-in technical instructions from the integration code."
+        },
         "sections": {
           "tools": {
             "name": "Tools",
+            "description": "Optional per-profile tool filtering.",
             "data": {
-              "enabled_tools": "Tool Families"
+              "enabled_tools": "Tool Family Overrides"
             },
             "data_description": {
-              "enabled_tools": "Choose which optional MCP tool families this profile can use. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
+              "enabled_tools": "Optional. Leave blank to inherit whatever tool families are enabled on the shared MCP server. If you choose specific items here, this profile will be narrowed to that subset only. Each selected family must also be enabled in the shared MCP server settings to actually work. Device tools add physical-device discovery. Response service tools add native HA reads like forecasts and calendars. Recorder tools answer history questions. Assist bridge tools expose HA's native Assist API. Calculator tools add math and unit conversion. Music Assistant tools add richer music search and playback."
             }
           }
         }
@@ -152,23 +181,40 @@
         "description": "⚠️ These settings are shared across ALL profiles",
         "data": {
           "mcp_port": "MCP Server Port",
-          "search_provider": "Web Search",
-          "brave_api_key": "Brave Search API Key",
-          "allowed_ips": "Additional Allowed IPs/Ranges",
-          "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+          "allowed_ips": "Additional Allowed IPs/Ranges"
+        },
+        "data_description": {
+          "mcp_port": "The local port used by the shared MCP server.",
+          "allowed_ips": "Optional comma-separated IP addresses or CIDR ranges that may connect in addition to localhost."
         },
         "sections": {
-          "discovery": {
-            "name": "Discovery",
+          "search": {
+            "name": "Search",
+            "description": "Configure optional web search tools exposed by the shared MCP server.",
             "data": {
-              "enable_gap_filling": "Enable Smart Entity Index"
+              "search_provider": "Web Search",
+              "brave_api_key": "Brave Search API Key"
             },
             "data_description": {
-              "enable_gap_filling": "Builds a compact system index to keep discovery fast and context-aware."
+              "search_provider": "Choose whether the shared MCP server should expose web search tools, and which provider to use.",
+              "brave_api_key": "Required only when Brave Search is selected."
+            }
+          },
+          "discovery": {
+            "name": "Discovery",
+            "description": "Control how the shared MCP server builds and returns discovery results.",
+            "data": {
+              "enable_gap_filling": "Enable Smart Entity Index",
+              "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+            },
+            "data_description": {
+              "enable_gap_filling": "Builds a compact system index to keep discovery fast and context-aware.",
+              "max_entities_per_discovery": "Caps how many entities a single discovery call may return."
             }
           },
           "tools": {
             "name": "Tools",
+            "description": "Choose which optional tool families the shared MCP server exposes.",
             "data": {
               "enabled_tools": "Available Tool Families"
             },

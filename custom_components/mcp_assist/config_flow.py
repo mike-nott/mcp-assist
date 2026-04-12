@@ -225,8 +225,16 @@ def _get_form_value(
     return fallback
 
 
+def _optional_with_suggested_value(key: str, suggested_value: str | None) -> vol.Optional:
+    """Build an optional marker that pre-fills a value without forcing it."""
+    if suggested_value not in (None, ""):
+        return vol.Optional(key, description={"suggested_value": suggested_value})
+    return vol.Optional(key)
+
+
 TOOLS_SECTION_KEY = "tools"
 DISCOVERY_SECTION_KEY = "discovery"
+SEARCH_SECTION_KEY = "search"
 ENABLED_TOOLS_FIELD = "enabled_tools"
 TOOL_FAMILY_OPTIONS = [
     TOOL_FAMILY_DEVICE,
@@ -269,10 +277,21 @@ def _selected_tool_families(
     setting_map: dict[str, tuple[str, bool]],
     options: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
+    *,
+    explicit_only: bool = False,
 ) -> list[str]:
     """Return the selected tool families for a config form default."""
     options = options or {}
     data = data or {}
+    if explicit_only:
+        has_explicit_values = any(
+            (
+                current_values and setting_key in current_values
+            ) or setting_key in options or setting_key in data
+            for setting_key, _default in setting_map.values()
+        )
+        if not has_explicit_values:
+            return []
     return [
         family
         for family, (setting_key, default) in setting_map.items()
@@ -285,7 +304,10 @@ def _selected_tool_families(
 
 
 def _apply_tool_family_selection(
-    user_input: dict[str, Any], setting_map: dict[str, tuple[str, bool]]
+    user_input: dict[str, Any],
+    setting_map: dict[str, tuple[str, bool]],
+    *,
+    inherit_when_empty: bool = False,
 ) -> dict[str, Any]:
     """Expand a multi-select tool list into stored per-family booleans."""
     normalized = dict(user_input)
@@ -298,6 +320,12 @@ def _apply_tool_family_selection(
         for value in selected
         if str(value) in setting_map
     }
+
+    if inherit_when_empty and not selected_set:
+        for _family, (setting_key, _default) in setting_map.items():
+            normalized.pop(setting_key, None)
+        return normalized
+
     for family, (setting_key, _default) in setting_map.items():
         normalized[setting_key] = family in selected_set
 
@@ -322,6 +350,7 @@ def _build_profile_tools_section(
                         TOOL_FAMILY_PROFILE_SETTINGS,
                         options,
                         data,
+                        explicit_only=True,
                     ),
                 ): _tool_family_selector(),
             }
@@ -343,6 +372,60 @@ def _build_shared_tools_section(
                         defaults, TOOL_FAMILY_SHARED_SETTINGS
                     ),
                 ): _tool_family_selector(),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_search_section(current_values: dict[str, Any] | None) -> section:
+    """Build the shared MCP server search settings section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Required(
+                    CONF_SEARCH_PROVIDER,
+                    default=_get_form_value(
+                        current_values, CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER
+                    ),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": "none", "label": "Disabled"},
+                            {"value": "duckduckgo", "label": "DuckDuckGo"},
+                            {
+                                "value": "brave",
+                                "label": "Brave Search (requires API key)",
+                            },
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_BRAVE_API_KEY,
+                    default=_get_form_value(
+                        current_values, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
+                    ),
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_discovery_section(defaults: dict[str, Any]) -> section:
+    """Build the shared MCP server discovery settings section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ENABLE_GAP_FILLING,
+                    default=defaults[CONF_ENABLE_GAP_FILLING],
+                ): bool,
+                vol.Optional(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    default=defaults[CONF_MAX_ENTITIES_PER_DISCOVERY],
+                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         ),
         {"collapsed": False},
@@ -768,16 +851,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Moltbot doesn't have /v1/models endpoint - skip model selection
         if server_type == SERVER_TYPE_MOLTBOT:
+            technical_prompt_suggestion = _get_prompt_text_default(
+                current_values,
+                prompt_key=CONF_TECHNICAL_PROMPT,
+                stored_prompt=None,
+                default_prompt=DEFAULT_TECHNICAL_PROMPT,
+            )
             model_schema = vol.Schema(
                 {
-                    vol.Required(
-                        CONF_TECHNICAL_PROMPT,
-                        default=_get_prompt_text_default(
-                            current_values,
-                            prompt_key=CONF_TECHNICAL_PROMPT,
-                            stored_prompt=None,
-                            default_prompt=DEFAULT_TECHNICAL_PROMPT,
-                        ),
+                    _optional_with_suggested_value(
+                        CONF_TECHNICAL_PROMPT, technical_prompt_suggestion
                     ): TextSelector(
                         TextSelectorConfig(
                             type=TextSelectorType.TEXT, multiline=True
@@ -857,27 +940,28 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.info("No models fetched, showing text input")
             model_field = str
 
+        system_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_SYSTEM_PROMPT,
+            stored_prompt=None,
+            default_prompt=default_system_prompt,
+        )
+        technical_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_TECHNICAL_PROMPT,
+            stored_prompt=None,
+            default_prompt=DEFAULT_TECHNICAL_PROMPT,
+        )
+
         schema_dict: dict[Any, Any] = {
             vol.Required(CONF_MODEL_NAME, default=current_model): model_field,
-            vol.Required(
-                CONF_SYSTEM_PROMPT,
-                default=_get_prompt_text_default(
-                    current_values,
-                    prompt_key=CONF_SYSTEM_PROMPT,
-                    stored_prompt=None,
-                    default_prompt=default_system_prompt,
-                ),
+            _optional_with_suggested_value(
+                CONF_SYSTEM_PROMPT, system_prompt_suggestion
             ): TextSelector(
                 TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
             ),
-            vol.Required(
-                CONF_TECHNICAL_PROMPT,
-                default=_get_prompt_text_default(
-                    current_values,
-                    prompt_key=CONF_TECHNICAL_PROMPT,
-                    stored_prompt=None,
-                    default_prompt=DEFAULT_TECHNICAL_PROMPT,
-                ),
+            _optional_with_suggested_value(
+                CONF_TECHNICAL_PROMPT, technical_prompt_suggestion
             ): TextSelector(
                 TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
             ),
@@ -906,7 +990,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input = _flatten_section_values(user_input, TOOLS_SECTION_KEY)
             user_input = _apply_tool_family_selection(
-                user_input, TOOL_FAMILY_PROFILE_SETTINGS
+                user_input,
+                TOOL_FAMILY_PROFILE_SETTINGS,
+                inherit_when_empty=True,
             )
 
             # For Moltbot, set defaults for hidden fields
@@ -1154,7 +1240,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input, SEARCH_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
             )
             user_input = _apply_tool_family_selection(
                 user_input, TOOL_FAMILY_SHARED_SETTINGS
@@ -1233,10 +1319,25 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         shared_defaults = {
+            CONF_SEARCH_PROVIDER: _get_form_value(
+                current_values,
+                CONF_SEARCH_PROVIDER,
+                DEFAULT_SEARCH_PROVIDER,
+            ),
+            CONF_BRAVE_API_KEY: _get_form_value(
+                current_values,
+                CONF_BRAVE_API_KEY,
+                DEFAULT_BRAVE_API_KEY,
+            ),
             CONF_ENABLE_GAP_FILLING: _get_form_value(
                 current_values,
                 CONF_ENABLE_GAP_FILLING,
                 DEFAULT_ENABLE_GAP_FILLING,
+            ),
+            CONF_MAX_ENTITIES_PER_DISCOVERY: _get_form_value(
+                current_values,
+                CONF_MAX_ENTITIES_PER_DISCOVERY,
+                DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
             ),
             CONF_ENABLE_ASSIST_BRIDGE: _get_form_value(
                 current_values,
@@ -1279,56 +1380,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         current_values, CONF_MCP_PORT, DEFAULT_MCP_PORT
                     ),
                 ): vol.Coerce(int),
-                vol.Required(
-                    CONF_SEARCH_PROVIDER,
-                    default=_get_form_value(
-                        current_values, CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER
-                    ),
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {"value": "none", "label": "Disabled"},
-                            {"value": "duckduckgo", "label": "DuckDuckGo"},
-                            {
-                                "value": "brave",
-                                "label": "Brave Search (requires API key)",
-                            },
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Optional(
-                    CONF_BRAVE_API_KEY,
-                    default=_get_form_value(
-                        current_values, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
-                    ),
-                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 vol.Optional(
                     CONF_ALLOWED_IPS,
                     default=_get_form_value(
                         current_values, CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
                     ),
                 ): str,
-                DISCOVERY_SECTION_KEY: section(
-                    vol.Schema(
-                        {
-                            vol.Optional(
-                                CONF_ENABLE_GAP_FILLING,
-                                default=shared_defaults[CONF_ENABLE_GAP_FILLING],
-                            ): bool,
-                        }
-                    ),
-                    {"collapsed": False},
-                ),
+                SEARCH_SECTION_KEY: _build_shared_search_section(shared_defaults),
+                DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
-                vol.Optional(
-                    CONF_MAX_ENTITIES_PER_DISCOVERY,
-                    default=_get_form_value(
-                        current_values,
-                        CONF_MAX_ENTITIES_PER_DISCOVERY,
-                        DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
-                    ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         )
 
@@ -1399,7 +1459,9 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             user_input = _flatten_section_values(user_input, TOOLS_SECTION_KEY)
             user_input = _apply_tool_family_selection(
-                user_input, TOOL_FAMILY_PROFILE_SETTINGS
+                user_input,
+                TOOL_FAMILY_PROFILE_SETTINGS,
+                inherit_when_empty=True,
             )
             user_input = _normalize_prompt_inputs(user_input, server_type)
 
@@ -1545,6 +1607,26 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             ): str,
         }
 
+        system_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_SYSTEM_PROMPT,
+            stored_mode=options.get(CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)),
+            stored_prompt=options.get(CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)),
+            default_prompt=default_system_prompt,
+        )
+        technical_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_TECHNICAL_PROMPT,
+            stored_mode=options.get(
+                CONF_TECHNICAL_PROMPT_MODE,
+                data.get(CONF_TECHNICAL_PROMPT_MODE),
+            ),
+            stored_prompt=options.get(
+                CONF_TECHNICAL_PROMPT, data.get(CONF_TECHNICAL_PROMPT)
+            ),
+            default_prompt=DEFAULT_TECHNICAL_PROMPT,
+        )
+
         # 2. Server URL or API Key (based on server type)
         if server_type in [
             SERVER_TYPE_LMSTUDIO,
@@ -1612,19 +1694,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         # 4. System Prompt (skip for Moltbot - it manages its own)
         if server_type != SERVER_TYPE_MOLTBOT:
             schema_dict[
-                vol.Required(
-                    CONF_SYSTEM_PROMPT,
-                    default=_get_prompt_text_default(
-                        current_values,
-                        prompt_key=CONF_SYSTEM_PROMPT,
-                        stored_mode=options.get(
-                            CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)
-                        ),
-                        stored_prompt=options.get(
-                            CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)
-                        ),
-                        default_prompt=default_system_prompt,
-                    ),
+                _optional_with_suggested_value(
+                    CONF_SYSTEM_PROMPT, system_prompt_suggestion
                 )
             ] = TextSelector(
                 TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
@@ -1632,20 +1703,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         # 5. Technical Instructions
         schema_dict[
-            vol.Required(
-                CONF_TECHNICAL_PROMPT,
-                default=_get_prompt_text_default(
-                    current_values,
-                    prompt_key=CONF_TECHNICAL_PROMPT,
-                    stored_mode=options.get(
-                        CONF_TECHNICAL_PROMPT_MODE,
-                        data.get(CONF_TECHNICAL_PROMPT_MODE),
-                    ),
-                    stored_prompt=options.get(
-                        CONF_TECHNICAL_PROMPT, data.get(CONF_TECHNICAL_PROMPT)
-                    ),
-                    default_prompt=DEFAULT_TECHNICAL_PROMPT,
-                ),
+            _optional_with_suggested_value(
+                CONF_TECHNICAL_PROMPT, technical_prompt_suggestion
             )
         ] = TextSelector(
             TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
@@ -1915,7 +1974,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             user_input = _flatten_section_values(
-                user_input, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
+                user_input, SEARCH_SECTION_KEY, DISCOVERY_SECTION_KEY, TOOLS_SECTION_KEY
             )
             user_input = _apply_tool_family_selection(
                 user_input, TOOL_FAMILY_SHARED_SETTINGS
@@ -1988,6 +2047,19 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             sys_data = self.config_entry.data
 
         shared_defaults = {
+            CONF_SEARCH_PROVIDER: _get_form_value(
+                current_values,
+                CONF_SEARCH_PROVIDER,
+                self._get_search_provider_default(sys_options, sys_data),
+            ),
+            CONF_BRAVE_API_KEY: _get_form_value(
+                current_values,
+                CONF_BRAVE_API_KEY,
+                sys_options.get(
+                    CONF_BRAVE_API_KEY,
+                    sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
+                ),
+            ),
             CONF_ENABLE_GAP_FILLING: _get_form_value(
                 current_values,
                 CONF_ENABLE_GAP_FILLING,
@@ -2060,6 +2132,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ),
             ),
+            CONF_MAX_ENTITIES_PER_DISCOVERY: _get_form_value(
+                current_values,
+                CONF_MAX_ENTITIES_PER_DISCOVERY,
+                sys_options.get(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    sys_data.get(
+                        CONF_MAX_ENTITIES_PER_DISCOVERY,
+                        DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                    ),
+                ),
+            ),
         }
 
         # Build schema for MCP server settings
@@ -2076,37 +2159,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): vol.Coerce(int),
-                vol.Required(
-                    CONF_SEARCH_PROVIDER,
-                    default=_get_form_value(
-                        current_values,
-                        CONF_SEARCH_PROVIDER,
-                        self._get_search_provider_default(sys_options, sys_data),
-                    ),
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {"value": "none", "label": "Disabled"},
-                            {"value": "duckduckgo", "label": "DuckDuckGo"},
-                            {
-                                "value": "brave",
-                                "label": "Brave Search (requires API key)",
-                            },
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Optional(
-                    CONF_BRAVE_API_KEY,
-                    default=_get_form_value(
-                        current_values,
-                        CONF_BRAVE_API_KEY,
-                        sys_options.get(
-                            CONF_BRAVE_API_KEY,
-                            sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
-                        ),
-                    ),
-                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 vol.Optional(
                     CONF_ALLOWED_IPS,
                     default=_get_form_value(
@@ -2118,32 +2170,9 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): str,
-                DISCOVERY_SECTION_KEY: section(
-                    vol.Schema(
-                        {
-                            vol.Optional(
-                                CONF_ENABLE_GAP_FILLING,
-                                default=shared_defaults[CONF_ENABLE_GAP_FILLING],
-                            ): bool,
-                        }
-                    ),
-                    {"collapsed": False},
-                ),
+                SEARCH_SECTION_KEY: _build_shared_search_section(shared_defaults),
+                DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
-                vol.Optional(
-                    CONF_MAX_ENTITIES_PER_DISCOVERY,
-                    default=_get_form_value(
-                        current_values,
-                        CONF_MAX_ENTITIES_PER_DISCOVERY,
-                        sys_options.get(
-                            CONF_MAX_ENTITIES_PER_DISCOVERY,
-                            sys_data.get(
-                                CONF_MAX_ENTITIES_PER_DISCOVERY,
-                                DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
-                            ),
-                        ),
-                    ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         )
 
