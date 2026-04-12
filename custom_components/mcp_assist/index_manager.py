@@ -8,6 +8,7 @@ The index includes:
 - Areas with entity counts
 - Floors with area/entity counts
 - Labels with entity coverage
+- Devices summary
 - Domains with counts
 - Device classes (grouped by domain) with counts
 - Inferred entity types (via LLM gap-filling)
@@ -143,6 +144,7 @@ class IndexManager:
             self._get_areas(),
             self._get_floors(),
             self._get_labels(),
+            self._get_devices(),
             self._get_domains(),
             self._get_device_classes(),
             self._get_entities_without_device_class(),
@@ -160,6 +162,7 @@ class IndexManager:
             areas,
             floors,
             labels,
+            devices,
             domains,
             device_classes,
             entities_without_device_class,
@@ -202,6 +205,7 @@ class IndexManager:
             "areas": areas if not isinstance(areas, Exception) else [],
             "floors": floors if not isinstance(floors, Exception) else [],
             "labels": labels if not isinstance(labels, Exception) else [],
+            "devices": devices if not isinstance(devices, Exception) else {},
             "domains": domains if not isinstance(domains, Exception) else {},
             "device_classes": device_classes if not isinstance(device_classes, Exception) else {},
             "inferred_types": inferred_types,
@@ -235,6 +239,53 @@ class IndexManager:
 
         return sorted(label_names, key=str.casefold)
 
+    def _get_entity_aliases(self, entity_entry: Any) -> List[str]:
+        """Resolve aliases for an entity registry entry."""
+        if entity_entry is None:
+            return []
+
+        get_entity_aliases = getattr(er, "async_get_entity_aliases", None)
+        if get_entity_aliases is not None:
+            try:
+                aliases = get_entity_aliases(self.hass, entity_entry)
+            except Exception:  # pragma: no cover - defensive fallback
+                _LOGGER.debug("Falling back to raw entity aliases in index", exc_info=True)
+                aliases = getattr(entity_entry, "aliases", []) or []
+        else:
+            aliases = getattr(entity_entry, "aliases", []) or []
+
+        return sorted(
+            {alias for alias in aliases if isinstance(alias, str)},
+            key=str.casefold,
+        )
+
+    def _build_named_index_entry(
+        self,
+        name: str,
+        aliases: List[str],
+        **extra: Any,
+    ) -> Dict[str, Any]:
+        """Build a compact index entry for a named object and its aliases."""
+        normalized_name = name.casefold()
+        filtered_aliases = sorted(
+            {
+                alias
+                for alias in aliases
+                if alias and alias.casefold() != normalized_name
+            },
+            key=str.casefold,
+        )
+
+        item: Dict[str, Any] = {"name": name}
+        if filtered_aliases:
+            item["aliases"] = filtered_aliases
+
+        for key, value in extra.items():
+            if value not in (None, "", [], {}):
+                item[key] = value
+
+        return item
+
     async def _get_areas(self) -> List[Dict[str, Any]]:
         """Get all areas with entity counts."""
         area_reg = ar.async_get(self.hass)
@@ -245,8 +296,11 @@ class IndexManager:
 
         # Count entities per area
         area_counts = defaultdict(int)
+        exposed_device_ids = set()
         for entity in entity_reg.entities.values():
             if async_should_expose(self.hass, "conversation", entity.entity_id):
+                if entity.device_id:
+                    exposed_device_ids.add(entity.device_id)
                 if entity.area_id:
                     area_counts[entity.area_id] += 1
                 # Also check device area
@@ -255,6 +309,12 @@ class IndexManager:
                     if device and device.area_id:
                         area_counts[device.area_id] += 1
 
+        area_device_counts = defaultdict(int)
+        for device_id in exposed_device_ids:
+            device_entry = device_reg.async_get(device_id)
+            if device_entry and device_entry.area_id:
+                area_device_counts[device_entry.area_id] += 1
+
         # Build area list with counts
         areas = []
         for area in area_reg.async_list_areas():
@@ -262,18 +322,25 @@ class IndexManager:
             if count > 0:  # Only include areas with entities
                 floor_id = getattr(area, "floor_id", None)
                 floor_name = None
+                floor_aliases: List[str] = []
                 if floor_id and floor_reg is not None:
                     floor_entry = floor_reg.async_get_floor(floor_id)
                     if floor_entry:
                         floor_name = floor_entry.name
+                        floor_aliases = sorted(
+                            getattr(floor_entry, "aliases", set()) or set(),
+                            key=str.casefold,
+                        )
 
                 label_ids = set(getattr(area, "labels", set()) or set())
                 areas.append({
                     "name": area.name,
                     "aliases": sorted(getattr(area, "aliases", set()) or set(), key=str.casefold),
                     "entity_count": count,
+                    "device_count": area_device_counts.get(area.id, 0),
                     "floor": floor_name,
                     "floor_id": floor_id,
+                    "floor_aliases": floor_aliases,
                     "labels": self._get_label_names(label_ids, label_reg),
                     "label_ids": sorted(label_ids),
                 })
@@ -295,11 +362,14 @@ class IndexManager:
         device_reg = dr.async_get(self.hass)
 
         floor_area_names = defaultdict(list)
+        area_floor_ids = {}
         for area_entry in area_reg.async_list_areas():
             if getattr(area_entry, "floor_id", None):
                 floor_area_names[area_entry.floor_id].append(area_entry.name)
+                area_floor_ids[area_entry.id] = area_entry.floor_id
 
         floor_entities = defaultdict(set)
+        exposed_device_ids = set()
         for entity in entity_reg.entities.values():
             if not async_should_expose(self.hass, "conversation", entity.entity_id):
                 continue
@@ -309,6 +379,9 @@ class IndexManager:
                 device_entry = device_reg.async_get(entity.device_id)
                 if device_entry:
                     area_id = device_entry.area_id
+                    exposed_device_ids.add(device_entry.id)
+            elif entity.device_id:
+                exposed_device_ids.add(entity.device_id)
 
             if not area_id:
                 continue
@@ -318,6 +391,16 @@ class IndexManager:
             if floor_id:
                 floor_entities[floor_id].add(entity.entity_id)
 
+        floor_device_counts = defaultdict(int)
+        for device_id in exposed_device_ids:
+            device_entry = device_reg.async_get(device_id)
+            if not device_entry or not device_entry.area_id:
+                continue
+
+            floor_id = area_floor_ids.get(device_entry.area_id)
+            if floor_id:
+                floor_device_counts[floor_id] += 1
+
         floors = []
         for floor_entry in floor_reg.async_list_floors():
             areas = sorted(floor_area_names.get(floor_entry.floor_id, []), key=str.casefold)
@@ -326,6 +409,7 @@ class IndexManager:
                 "aliases": sorted(getattr(floor_entry, "aliases", set()) or set(), key=str.casefold),
                 "area_count": len(areas),
                 "entity_count": len(floor_entities.get(floor_entry.floor_id, set())),
+                "device_count": floor_device_counts.get(floor_entry.floor_id, 0),
                 "areas": areas,
             })
 
@@ -387,6 +471,51 @@ class IndexManager:
 
         labels.sort(key=lambda x: x["name"])
         return labels
+
+    async def _get_devices(self) -> Dict[str, Any]:
+        """Get a compact device summary for the index."""
+        area_reg = ar.async_get(self.hass)
+        entity_reg = er.async_get(self.hass)
+        device_reg = dr.async_get(self.hass)
+        floor_reg = fr.async_get(self.hass) if fr else None
+
+        device_domains = defaultdict(set)
+        for entity in entity_reg.entities.values():
+            if not async_should_expose(self.hass, "conversation", entity.entity_id):
+                continue
+            if entity.device_id and device_reg.async_get(entity.device_id):
+                device_domains[entity.device_id].add(entity.entity_id.split(".")[0])
+
+        by_domain = defaultdict(int)
+        by_area = defaultdict(int)
+        by_floor = defaultdict(int)
+        manufacturers = defaultdict(int)
+
+        for device_entry in device_reg.devices.values():
+            if device_entry.id not in device_domains:
+                continue
+
+            manufacturers[getattr(device_entry, "manufacturer", None) or "Unknown"] += 1
+
+            for domain in device_domains[device_entry.id]:
+                by_domain[domain] += 1
+
+            if device_entry.area_id:
+                area_entry = area_reg.async_get_area(device_entry.area_id)
+                if area_entry:
+                    by_area[area_entry.name] += 1
+                    if floor_reg is not None and getattr(area_entry, "floor_id", None):
+                        floor_entry = floor_reg.async_get_floor(area_entry.floor_id)
+                        if floor_entry:
+                            by_floor[floor_entry.name] += 1
+
+        return {
+            "count": len(device_domains),
+            "by_domain": dict(sorted(by_domain.items(), key=lambda item: (-item[1], item[0]))),
+            "by_area": dict(sorted(by_area.items(), key=lambda item: (-item[1], item[0]))),
+            "by_floor": dict(sorted(by_floor.items(), key=lambda item: (-item[1], item[0]))),
+            "manufacturers": dict(sorted(manufacturers.items(), key=lambda item: (-item[1], item[0]))),
+        }
 
     async def _get_domains(self) -> Dict[str, int]:
         """Get all domains with entity counts."""
@@ -456,17 +585,18 @@ class IndexManager:
                     state_obj = self.hass.states.get(entity.entity_id)
                     name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
 
-                    people.append({
-                        "name": name,
-                        # Aliases could be populated via LLM or config
-                        # For now, leave empty
-                    })
+                    people.append(
+                        self._build_named_index_entry(
+                            name,
+                            self._get_entity_aliases(entity),
+                        )
+                    )
 
-        people.sort(key=lambda x: x["name"])
+        people.sort(key=lambda x: x["name"].casefold())
         _LOGGER.debug("Found %d people", len(people))
         return people
 
-    async def _get_calendars(self) -> List[str]:
+    async def _get_calendars(self) -> List[Dict[str, Any]]:
         """Get all calendar entities."""
         entity_reg = er.async_get(self.hass)
 
@@ -476,13 +606,18 @@ class IndexManager:
                 if async_should_expose(self.hass, "conversation", entity.entity_id):
                     state_obj = self.hass.states.get(entity.entity_id)
                     name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-                    calendars.append(name)
+                    calendars.append(
+                        self._build_named_index_entry(
+                            name,
+                            self._get_entity_aliases(entity),
+                        )
+                    )
 
-        calendars.sort()
+        calendars.sort(key=lambda x: x["name"].casefold())
         _LOGGER.debug("Found %d calendars", len(calendars))
         return calendars
 
-    async def _get_zones(self) -> List[str]:
+    async def _get_zones(self) -> List[Dict[str, Any]]:
         """Get all zone entities."""
         entity_reg = er.async_get(self.hass)
 
@@ -494,13 +629,18 @@ class IndexManager:
                     name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
                     # Exclude 'Home' zone as it's the default
                     if name.lower() != 'home':
-                        zones.append(name)
+                        zones.append(
+                            self._build_named_index_entry(
+                                name,
+                                self._get_entity_aliases(entity),
+                            )
+                        )
 
-        zones.sort()
+        zones.sort(key=lambda x: x["name"].casefold())
         _LOGGER.debug("Found %d zones", len(zones))
         return zones
 
-    async def _get_automations(self) -> List[str]:
+    async def _get_automations(self) -> List[Dict[str, Any]]:
         """Get all automation entities."""
         entity_reg = er.async_get(self.hass)
 
@@ -510,13 +650,18 @@ class IndexManager:
                 if async_should_expose(self.hass, "conversation", entity.entity_id):
                     state_obj = self.hass.states.get(entity.entity_id)
                     name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-                    automations.append(name)
+                    automations.append(
+                        self._build_named_index_entry(
+                            name,
+                            self._get_entity_aliases(entity),
+                        )
+                    )
 
-        automations.sort()
+        automations.sort(key=lambda x: x["name"].casefold())
         _LOGGER.debug("Found %d automations", len(automations))
         return automations
 
-    async def _get_scripts(self) -> List[Dict[str, Any] | str]:
+    async def _get_scripts(self) -> List[Dict[str, Any]]:
         """Get script entities with field definitions."""
         entity_reg = er.async_get(self.hass)
 
@@ -530,6 +675,11 @@ class IndexManager:
                     script_id = entity.entity_id.split('.')[1]
                     state_obj = self.hass.states.get(entity.entity_id)
                     name = state_obj.name if state_obj else script_id
+                    script_info = self._build_named_index_entry(
+                        name,
+                        self._get_entity_aliases(entity),
+                        id=script_id,
+                    )
 
                     # Get fields from the script entity
                     fields = None
@@ -539,27 +689,21 @@ class IndexManager:
                             fields = script_entity.fields
 
                     if fields:
-                        script_info = {
-                            "id": script_id,
-                            "name": name,
-                            "fields": {}
-                        }
+                        script_info["fields"] = {}
                         # Extract field descriptions
                         for field_name, field_data in fields.items():
                             desc = field_data.get('description', '') if isinstance(field_data, dict) else ''
                             script_info["fields"][field_name] = {"description": desc} if desc else {}
 
-                        scripts.append(script_info)
-                    else:
-                        scripts.append(name)
+                    scripts.append(script_info)
 
-        scripts.sort(key=lambda x: x["name"] if isinstance(x, dict) else x)
+        scripts.sort(key=lambda x: x["name"].casefold())
         _LOGGER.debug("Found %d scripts (%d with fields)",
                      len(scripts),
-                     sum(1 for s in scripts if isinstance(s, dict)))
+                     sum(1 for s in scripts if s.get("fields")))
         return scripts
 
-    async def _get_input_helpers(self) -> Dict[str, List[str]]:
+    async def _get_input_helpers(self) -> Dict[str, List[Dict[str, Any]]]:
         """Get all input helper entities grouped by type."""
         entity_reg = er.async_get(self.hass)
 
@@ -581,14 +725,19 @@ class IndexManager:
                     if async_should_expose(self.hass, "conversation", entity.entity_id):
                         state_obj = self.hass.states.get(entity.entity_id)
                         name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-                        helpers[input_type].append(name)
+                        helpers[input_type].append(
+                            self._build_named_index_entry(
+                                name,
+                                self._get_entity_aliases(entity),
+                            )
+                        )
                         break
 
         # Sort each list and convert to plural keys
         result = {}
         for input_type, names in helpers.items():
             if names:  # Only include types with entities
-                names.sort()
+                names.sort(key=lambda x: x["name"].casefold())
                 # Convert key: input_boolean → input_booleans
                 plural_key = f"{input_type}s"
                 result[plural_key] = names

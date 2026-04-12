@@ -14,7 +14,17 @@ class CustomToolsLoader:
         self.tools = {}
 
     async def initialize(self):
-        """Initialize custom tools based on search provider selection."""
+        """Initialize always-on and provider-backed custom tools."""
+        # Load calculator tools (always available, no external provider required)
+        try:
+            from .calculator import CalculatorTool
+
+            self.tools["calculator"] = CalculatorTool(self.hass)
+            await self.tools["calculator"].initialize()
+            _LOGGER.debug("✅ Calculator tools initialized")
+        except Exception as e:
+            _LOGGER.error(f"Failed to initialize calculator tools: {e}")
+
         # Determine search provider
         search_provider = self._get_search_provider()
 

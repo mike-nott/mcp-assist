@@ -164,21 +164,20 @@ class MCPServer:
             self.site = web.TCPSite(self.runner, "0.0.0.0", self.port)
             await self.site.start()
 
-            # Create and initialize custom tools if search provider is enabled
-            # Done here (not in __init__) so system entry exists for reading settings
+            # Create and initialize custom tools after system entry exists.
+            # Calculator tools are always available; web tools depend on search provider.
             search_provider = self._get_search_provider()
-            if search_provider in ["brave", "duckduckgo"]:
-                try:
-                    from .custom_tools import CustomToolsLoader
+            try:
+                from .custom_tools import CustomToolsLoader
 
-                    self.custom_tools = CustomToolsLoader(self.hass, self.entry)
-                    await self.custom_tools.initialize()
-                    _LOGGER.info(
-                        "✅ Custom tools initialized for search provider: %s",
-                        search_provider,
-                    )
-                except Exception as e:
-                    _LOGGER.error(f"Failed to initialize custom tools: {e}")
+                self.custom_tools = CustomToolsLoader(self.hass, self.entry)
+                await self.custom_tools.initialize()
+                _LOGGER.info(
+                    "✅ Custom tools initialized (search provider: %s)",
+                    search_provider,
+                )
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize custom tools: {e}")
 
             _LOGGER.info(
                 "✅ MCP server started successfully on http://0.0.0.0:%d", self.port
@@ -686,7 +685,7 @@ class MCPServer:
         tools = [
             {
                 "name": "discover_entities",
-                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, or current state. Use this to discover what devices are available before trying to control them.",
+                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, current state, or aliases. Prefer this for most direct control and status checks, including entities that do not belong to any device.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -717,7 +716,7 @@ class MCPServer:
                         },
                         "name_contains": {
                             "type": "string",
-                            "description": "Text that entity name should contain (case-insensitive)",
+                            "description": "Text that an entity name or alias should contain. Also matches related device names, device aliases, area aliases, floor aliases, and labels (case-insensitive).",
                         },
                         "device_class": {
                             "oneOf": [
@@ -745,8 +744,53 @@ class MCPServer:
                 },
             },
             {
+                "name": "discover_devices",
+                "description": "Find and list Home Assistant devices by criteria like area, floor, label, related entity domain, manufacturer, model, name, or aliases. Use this when the user is referring to a physical device or when you want to inspect related entities on the same device.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "area": {
+                            "type": "string",
+                            "description": "Area/room name or alias to search in. If the value matches a floor name or alias instead, it will search that floor.",
+                        },
+                        "floor": {
+                            "type": "string",
+                            "description": "Floor name or alias to search in.",
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Label name to filter by (matches labels assigned to the device or its area).",
+                        },
+                        "domain": {
+                            "type": "string",
+                            "description": "Filter devices by attached entity domain (e.g., 'light', 'climate', 'media_player').",
+                        },
+                        "name_contains": {
+                            "type": "string",
+                            "description": "Text that a device name or alias should contain. Also matches attached entity names/aliases, area aliases, floor aliases, and label names (case-insensitive).",
+                        },
+                        "manufacturer": {
+                            "type": "string",
+                            "description": "Manufacturer name to filter by.",
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Model name to filter by.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": f"Maximum number of devices to return (default: 20, max: {max_limit})",
+                            "default": 20,
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "get_entity_details",
-                "description": "Get current state, attributes, area, floor, and labels of specific entities",
+                "description": "Get current state, attributes, aliases, area, floor, and labels of specific entities",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -762,8 +806,25 @@ class MCPServer:
                 },
             },
             {
+                "name": "get_device_details",
+                "description": "Get device metadata, aliases, area/floor/labels, and attached entities for specific Home Assistant devices so you can choose the right entity target for direct control",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "device_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of Home Assistant device IDs to inspect",
+                        }
+                    },
+                    "required": ["device_ids"],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "list_areas",
-                "description": "List all areas in the home with their entity counts, floors, and area labels",
+                "description": "List all areas in the home with their aliases, entity counts, device counts, floor context, and area labels",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -785,7 +846,7 @@ class MCPServer:
             },
             {
                 "name": "get_index",
-                "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, floors, labels, domains, device classes, people, pets, calendars, zones, automations, and scripts. Call this ONCE at the start of a conversation to understand what exists in the system, then use discover_entities to query specific entities. The index is ~400-800 tokens vs ~15k tokens for a full entity dump.",
+                "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, floors, labels, devices, domains, device classes, people, pets, calendars, zones, automations, scripts, and aliases for alias-capable objects. Call this ONCE at the start of a conversation to understand what exists in the system, then use discover_entities or discover_devices to query specifics. The index is much smaller than a full entity dump.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -796,7 +857,7 @@ class MCPServer:
             },
             {
                 "name": "perform_action",
-                "description": "Control Home Assistant devices by calling services. Use after discovering entities to turn on/off lights, set temperatures, open/close covers, etc.",
+                "description": "Control Home Assistant devices by calling services. Use after discovery to turn on/off lights, set temperatures, open/close covers, etc. Prefer entity_id for most direct control; use device_id when intentionally targeting the physical device as a whole.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -818,7 +879,7 @@ class MCPServer:
                                         {"type": "string"},
                                         {"type": "array", "items": {"type": "string"}},
                                     ],
-                                    "description": "Single entity ID or list of entity IDs",
+                                    "description": "Single entity ID or list of entity IDs. Preferred for most direct control and for entities that do not belong to a device.",
                                 },
                                 "area_id": {
                                     "oneOf": [
@@ -832,7 +893,7 @@ class MCPServer:
                                         {"type": "string"},
                                         {"type": "array", "items": {"type": "string"}},
                                     ],
-                                    "description": "Single device ID or list of device IDs",
+                                    "description": "Single device ID or list of device IDs. Use when intentionally targeting a physical device, often after inspecting its attached entities with get_device_details.",
                                 },
                             },
                             "minProperties": 1,
@@ -918,7 +979,7 @@ class MCPServer:
             },
             {
                 "name": "get_entity_history",
-                "description": "Get historical state changes for a specific entity over a time period. Shows when the entity changed state with timestamps. Useful for answering questions like 'when did the front door open?' or 'what time did the temperature change?'",
+                "description": "Get recorder-backed historical state changes for a specific entity over a time period. Shows when the entity changed state with timestamps. Useful when the user wants a recent timeline instead of just the latest matching event.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -940,6 +1001,86 @@ class MCPServer:
                             "default": 50,
                             "minimum": 1,
                             "maximum": 100,
+                        },
+                    },
+                    "required": ["entity_id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "get_last_entity_event",
+                "description": "Query the Home Assistant recorder database to find when an entity last changed, or last changed to a specific state/event. Use this for questions like 'when was the gate last opened?' or 'when was the front door last closed?'",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID to inspect in recorder history.",
+                        },
+                        "event": {
+                            "type": "string",
+                            "description": "Optional semantic event to search for, such as opened, closed, on, off, locked, unlocked, detected, cleared, home, or away.",
+                        },
+                        "state": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            ],
+                            "description": "Optional target state or states to search for in recorder history. If omitted, returns the latest recorded change for the entity.",
+                        },
+                        "hours": {
+                            "type": "integer",
+                            "description": "How far back to search in recorder history (default: 720 hours / 30 days, max: 8760 hours / 1 year).",
+                            "default": 720,
+                            "minimum": 1,
+                            "maximum": 8760,
+                        },
+                    },
+                    "required": ["entity_id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "analyze_entity_history",
+                "description": "Analyze Home Assistant recorder history for aggregate questions such as 'how many times was the door opened in the last hour?' or 'how often did this sensor trigger today?'. Can count all changes or matching states/events.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID to analyze in recorder history.",
+                        },
+                        "event": {
+                            "type": "string",
+                            "description": "Optional semantic event to analyze, such as opened, closed, on, off, locked, unlocked, detected, cleared, home, or away.",
+                        },
+                        "state": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            ],
+                            "description": "Optional specific target state or states to analyze. If omitted, counts all recorded state changes in the time window.",
+                        },
+                        "hours": {
+                            "type": "integer",
+                            "description": "How far back to analyze recorder history (default: 24 hours, max: 8760 hours / 1 year).",
+                            "default": 24,
+                            "minimum": 1,
+                            "maximum": 8760,
+                        },
+                        "analysis": {
+                            "type": "string",
+                            "enum": ["count", "summary"],
+                            "default": "count",
+                            "description": "count returns how many matching events occurred; summary also includes the first and last matching times in the window.",
                         },
                     },
                     "required": ["entity_id"],
@@ -968,8 +1109,12 @@ class MCPServer:
 
         if tool_name == "discover_entities":
             return await self.tool_discover_entities(arguments)
+        elif tool_name == "discover_devices":
+            return await self.tool_discover_devices(arguments)
         elif tool_name == "get_entity_details":
             return await self.tool_get_entity_details(arguments)
+        elif tool_name == "get_device_details":
+            return await self.tool_get_device_details(arguments)
         elif tool_name == "list_areas":
             return await self.tool_list_areas()
         elif tool_name == "list_domains":
@@ -986,6 +1131,10 @@ class MCPServer:
             return await self.tool_run_automation(arguments)
         elif tool_name == "get_entity_history":
             return await self.tool_get_entity_history(arguments)
+        elif tool_name == "get_last_entity_event":
+            return await self.tool_get_last_entity_event(arguments)
+        elif tool_name == "analyze_entity_history":
+            return await self.tool_analyze_entity_history(arguments)
         else:
             # Check if it's a custom tool
             if self.custom_tools and self.custom_tools.is_custom_tool(tool_name):
@@ -1027,6 +1176,75 @@ class MCPServer:
 
         # Format results based on whether it's smart discovery or general
         return self._format_discovery_results(entities, args)
+
+    async def tool_discover_devices(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Discover devices based on criteria."""
+        self.publish_progress(
+            "tool_start",
+            "Starting device discovery",
+            tool="discover_devices",
+            args=args,
+        )
+
+        devices = await self.discovery.discover_devices(
+            area=args.get("area"),
+            floor=args.get("floor"),
+            label=args.get("label"),
+            domain=args.get("domain"),
+            name_contains=args.get("name_contains"),
+            manufacturer=args.get("manufacturer"),
+            model=args.get("model"),
+            limit=args.get("limit", 20),
+        )
+
+        self.publish_progress(
+            "tool_complete",
+            f"Device discovery complete: found {len(devices)} devices",
+            tool="discover_devices",
+            count=len(devices),
+        )
+
+        if not devices:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "No devices found matching the search criteria.",
+                    }
+                ]
+            }
+
+        text_parts = [
+            f"Found {len(devices)} devices (use get_device_details to inspect attached entities; prefer entity targets for most direct control):"
+        ]
+        for device in devices:
+            detail_parts = [f"{device['entity_count']} entities"]
+            if device.get("domains"):
+                detail_parts.append(f"Domains: {', '.join(device['domains'])}")
+            if device.get("device_aliases"):
+                detail_parts.append(f"Aliases: {', '.join(device['device_aliases'])}")
+            if device.get("area"):
+                detail_parts.append(f"Area: {device['area']}")
+            if device.get("floor"):
+                detail_parts.append(f"Floor: {device['floor']}")
+            if device.get("manufacturer"):
+                detail_parts.append(f"Manufacturer: {device['manufacturer']}")
+            if device.get("model"):
+                detail_parts.append(f"Model: {device['model']}")
+            if device.get("labels"):
+                detail_parts.append(f"Labels: {', '.join(device['labels'])}")
+            if device.get("entities_preview"):
+                preview_ids = [entity["entity_id"] for entity in device["entities_preview"][:3]]
+                extra_count = max(device["entity_count"] - len(preview_ids), 0)
+                preview_text = ", ".join(preview_ids)
+                if extra_count:
+                    preview_text += f", +{extra_count} more"
+                detail_parts.append(f"Related entities: {preview_text}")
+            text_parts.append(
+                f"- {device['device_id']}: {device['name']} ({', '.join(detail_parts)})"
+            )
+
+        return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
 
     def _format_discovery_results(
         self, entities: List[Dict[str, Any]], args: Dict[str, Any]
@@ -1092,8 +1310,13 @@ class MCPServer:
                         if entity.get("labels")
                         else ""
                     )
+                    aliases = (
+                        f" [Aliases: {', '.join(entity['aliases'])}]"
+                        if entity.get("aliases")
+                        else ""
+                    )
                     text_parts.append(
-                        f"  • {entity['entity_id']}: {entity['name']} - {entity['state']}{type_desc}{location_text}{labels}"
+                        f"  • {entity['entity_id']}: {entity['name']} - {entity['state']}{type_desc}{location_text}{labels}{aliases}"
                     )
 
             # Group related entities by category
@@ -1120,8 +1343,13 @@ class MCPServer:
                             if entity.get("labels")
                             else ""
                         )
+                        aliases = (
+                            f" [Aliases: {', '.join(entity['aliases'])}]"
+                            if entity.get("aliases")
+                            else ""
+                        )
                         text_parts.append(
-                            f"    • {entity['entity_id']}: {entity['state']}{location_text}{labels}"
+                            f"    • {entity['entity_id']}: {entity['state']}{location_text}{labels}{aliases}"
                         )
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
@@ -1134,6 +1362,8 @@ class MCPServer:
                 detail_parts.append(f"Area: {entity.get('area', 'None')}")
                 if entity.get("floor"):
                     detail_parts.append(f"Floor: {entity['floor']}")
+                if entity.get("aliases"):
+                    detail_parts.append(f"Aliases: {', '.join(entity['aliases'])}")
                 if entity.get("labels"):
                     detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
                 text_parts.append(
@@ -1146,6 +1376,13 @@ class MCPServer:
         """Get detailed information about specific entities."""
         entity_ids = args.get("entity_ids", [])
         details = await self.discovery.get_entity_details(entity_ids)
+
+        return {"content": [{"type": "text", "text": json.dumps(details, indent=2)}]}
+
+    async def tool_get_device_details(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get detailed information about specific devices."""
+        device_ids = args.get("device_ids", [])
+        details = await self.discovery.get_device_details(device_ids)
 
         return {"content": [{"type": "text", "text": json.dumps(details, indent=2)}]}
 
@@ -1168,7 +1405,13 @@ class MCPServer:
                                     else ""
                                 )
                                 + (
-                                    f" (Floor: {area['floor']})"
+                                    f" (Floor: {area['floor']}"
+                                    + (
+                                        f"; Floor aliases: {', '.join(area['floor_aliases'])}"
+                                        if area.get("floor_aliases")
+                                        else ""
+                                    )
+                                    + ")"
                                     if area.get("floor")
                                     else ""
                                 )
@@ -1177,7 +1420,7 @@ class MCPServer:
                                     if area.get("labels")
                                     else ""
                                 )
-                                + f": {area['entity_count']} entities"
+                                + f": {area['entity_count']} entities, {area.get('device_count', 0)} devices"
                             )
                             for area in areas
                         ]
@@ -1533,21 +1776,13 @@ class MCPServer:
         friendly_name = current_state.attributes.get("friendly_name", entity_id)
 
         # 2. Calculate time range (UTC)
-        end_time = dt_util.utcnow()
-        start_time = end_time - timedelta(hours=hours)
-
-        # 3. Query history (run in executor to avoid blocking)
         try:
-            states = await self.hass.async_add_executor_job(
-                history.state_changes_during_period,
-                self.hass,
-                start_time,
-                end_time,
+            entity_states = await self._fetch_entity_history_states(
                 entity_id,
-                True,  # include_start_time_state
-                True,  # no_attributes (performance)
+                hours=hours,
+                descending=True,
+                limit=limit,
             )
-            entity_states = states.get(entity_id, [])
         except Exception as e:
             _LOGGER.error(f"Failed to get history for {entity_id}: {e}")
             return {
@@ -1575,9 +1810,6 @@ class MCPServer:
                 ]
             }
 
-        # Reverse to get most recent first, apply limit
-        recent_states = list(reversed(entity_states[-limit:]))
-
         # Build formatted text
         text_parts = [
             f"{friendly_name} ({entity_id})",
@@ -1586,36 +1818,412 @@ class MCPServer:
             f"Recent history (last {hours} hours):",
         ]
 
-        now = dt_util.utcnow()
-        for state in recent_states:
-            # Calculate relative time
-            time_diff = now - state.last_changed
-            seconds = time_diff.total_seconds()
-
-            if seconds < 60:
-                relative = "just now"
-            elif seconds < 3600:
-                minutes = int(seconds / 60)
-                relative = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-            elif seconds < 86400:
-                hours_ago = int(seconds / 3600)
-                relative = f"{hours_ago} hour{'s' if hours_ago != 1 else ''} ago"
-            else:
-                days = int(seconds / 86400)
-                relative = f"{days} day{'s' if days != 1 else ''} ago"
-
-            # Absolute timestamp
-            absolute = state.last_changed.strftime("%H:%M:%S")
-
-            # Format line
+        for state in entity_states:
+            when = state.last_changed or state.last_updated
+            relative = self._format_relative_time(when)
+            absolute = self._format_absolute_time(when)
             text_parts.append(f"• {relative} ({absolute}) → {state.state}")
 
         text_parts.append("")
         text_parts.append(
-            f"Showing {len(recent_states)} change{'s' if len(recent_states) != 1 else ''}"
+            f"Showing {len(entity_states)} change{'s' if len(entity_states) != 1 else ''}"
         )
 
         return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+    async def tool_get_last_entity_event(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Find the latest recorder event for an entity."""
+        entity_id = args.get("entity_id")
+        hours = min(args.get("hours", 720), 8760)  # Max 1 year
+        current_state = self.hass.states.get(entity_id)
+
+        if not current_state:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Entity '{entity_id}' not found."}
+                ]
+            }
+
+        friendly_name = current_state.attributes.get("friendly_name", entity_id)
+        target_states = self._normalize_history_targets(
+            args.get("state"), args.get("event")
+        )
+        end_time = dt_util.utcnow()
+
+        self.publish_progress(
+            "tool_start",
+            f"Searching recorder history for {entity_id}",
+            tool="get_last_entity_event",
+            entity_id=entity_id,
+        )
+
+        try:
+            if target_states:
+                matched_state = None
+                for window_hours in self._build_history_search_windows(hours):
+                    entity_states = await self._fetch_entity_history_states(
+                        entity_id,
+                        hours=window_hours,
+                        end_time=end_time,
+                        descending=True,
+                    )
+                    matched_state = next(
+                        (
+                            state
+                            for state in entity_states
+                            if state.state.casefold() in target_states
+                        ),
+                        None,
+                    )
+                    if matched_state is not None:
+                        break
+            else:
+                entity_states = await self._fetch_entity_history_states(
+                    entity_id,
+                    hours=hours,
+                    end_time=end_time,
+                    descending=True,
+                    limit=1,
+                )
+                matched_state = entity_states[0] if entity_states else None
+        except Exception as err:
+            _LOGGER.error("Failed to get last recorder event for %s: %s", entity_id, err)
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Failed to retrieve recorder history: {err}",
+                    }
+                ]
+            }
+
+        self.publish_progress(
+            "tool_complete",
+            "Recorder history search complete",
+            tool="get_last_entity_event",
+            success=True,
+            found=matched_state is not None,
+        )
+
+        if not matched_state:
+            search_label = self._describe_history_target(
+                args.get("state"), args.get("event")
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"{friendly_name} ({entity_id})\n"
+                            f"Current state: {current_state.state}\n\n"
+                            f"No recorded {search_label} event was found in the last {hours} hours."
+                        ),
+                    }
+                ]
+            }
+
+        when = matched_state.last_changed or matched_state.last_updated
+        relative = self._format_relative_time(when)
+        absolute = self._format_absolute_time(when)
+        search_label = self._describe_history_target(
+            args.get("state"), args.get("event")
+        )
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"{friendly_name} ({entity_id})\n"
+                        f"Current state: {current_state.state}\n"
+                        f"Last recorded {search_label}: {absolute} ({relative})\n"
+                        f"Matched state: {matched_state.state}"
+                    ),
+                }
+            ]
+        }
+
+    async def tool_analyze_entity_history(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze recorder history for counts and summaries."""
+        entity_id = args.get("entity_id")
+        hours = min(args.get("hours", 24), 8760)  # Max 1 year
+        analysis = args.get("analysis", "count")
+        current_state = self.hass.states.get(entity_id)
+
+        if not current_state:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Entity '{entity_id}' not found."}
+                ]
+            }
+
+        friendly_name = current_state.attributes.get("friendly_name", entity_id)
+        target_states = self._normalize_history_targets(
+            args.get("state"), args.get("event")
+        )
+
+        self.publish_progress(
+            "tool_start",
+            f"Analyzing recorder history for {entity_id}",
+            tool="analyze_entity_history",
+            entity_id=entity_id,
+        )
+
+        try:
+            entity_states = await self._fetch_entity_history_states(
+                entity_id,
+                hours=hours,
+                descending=False,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to analyze history for %s: %s", entity_id, err)
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Failed to analyze recorder history: {err}",
+                    }
+                ]
+            }
+
+        if target_states:
+            count_states = self._choose_history_count_states(
+                entity_states,
+                args.get("state"),
+                args.get("event"),
+            )
+            matched_states = [
+                state for state in entity_states if state.state.casefold() in count_states
+            ]
+        else:
+            count_states = []
+            matched_states = entity_states
+
+        match_count = len(matched_states)
+
+        self.publish_progress(
+            "tool_complete",
+            "Recorder history analysis complete",
+            tool="analyze_entity_history",
+            success=True,
+            count=match_count,
+        )
+
+        search_label = self._describe_history_target(
+            args.get("state"), args.get("event")
+        )
+        noun = f"{search_label} event" if search_label != "change" else "state change"
+
+        text_parts = [
+            f"{friendly_name} ({entity_id})",
+            f"Current state: {current_state.state}",
+            f"Recorded {noun}{'s' if match_count != 1 else ''} in the last {hours} hour{'s' if hours != 1 else ''}: {match_count}",
+        ]
+
+        if count_states:
+            text_parts.append(
+                f"Counted using recorder state{'s' if len(count_states) != 1 else ''}: {', '.join(count_states)}"
+            )
+
+        if analysis == "summary" and matched_states:
+            first_match = matched_states[0]
+            last_match = matched_states[-1]
+            first_when = first_match.last_changed or first_match.last_updated
+            last_when = last_match.last_changed or last_match.last_updated
+            text_parts.append(
+                f"First matching event in window: {self._format_absolute_time(first_when)} ({self._format_relative_time(first_when)})"
+            )
+            text_parts.append(
+                f"Most recent matching event: {self._format_absolute_time(last_when)} ({self._format_relative_time(last_when)})"
+            )
+
+        if analysis == "summary" and not matched_states:
+            text_parts.append("No matching recorder events were found in that window.")
+
+        return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
+
+    def _extract_history_states(
+        self, history_result: Dict[str, Any], entity_id: str
+    ) -> List[Any]:
+        """Extract an entity's state list from recorder helper results."""
+        return (
+            history_result.get(entity_id)
+            or history_result.get(entity_id.casefold())
+            or next(iter(history_result.values()), [])
+        )
+
+    def _normalize_history_targets(
+        self, raw_state: Any, raw_event: Any
+    ) -> List[str]:
+        """Normalize target states or semantic events into recorder states."""
+        values: List[str] = []
+
+        if isinstance(raw_state, list):
+            values.extend(str(value) for value in raw_state)
+        elif raw_state is not None:
+            values.append(str(raw_state))
+
+        if raw_event is not None:
+            values.append(str(raw_event))
+
+        expanded: List[str] = []
+        for value in values:
+            normalized = value.strip().casefold().replace(" ", "_")
+            if not normalized:
+                continue
+            expanded.extend(self._history_state_aliases(normalized))
+
+        deduped: List[str] = []
+        seen = set()
+        for value in expanded:
+            if value not in seen:
+                seen.add(value)
+                deduped.append(value)
+        return deduped
+
+    def _normalize_history_request_values(
+        self, raw_state: Any, raw_event: Any
+    ) -> List[str]:
+        """Normalize raw requested history values before alias expansion."""
+        values: List[str] = []
+
+        if isinstance(raw_state, list):
+            values.extend(str(value) for value in raw_state)
+        elif raw_state is not None:
+            values.append(str(raw_state))
+
+        if raw_event is not None:
+            values.append(str(raw_event))
+
+        normalized: List[str] = []
+        seen = set()
+        for value in values:
+            item = value.strip().casefold().replace(" ", "_")
+            if item and item not in seen:
+                seen.add(item)
+                normalized.append(item)
+        return normalized
+
+    def _choose_history_count_states(
+        self, entity_states: List[Any], raw_state: Any, raw_event: Any
+    ) -> List[str]:
+        """Choose the best recorder states to count for semantic event requests."""
+        present_states = {state.state.casefold() for state in entity_states}
+        requested_values = self._normalize_history_request_values(raw_state, raw_event)
+        chosen: List[str] = []
+        seen = set()
+
+        for value in requested_values:
+            aliases = self._history_state_aliases(value)
+            selected = next((alias for alias in aliases if alias in present_states), aliases[0])
+            if selected not in seen:
+                seen.add(selected)
+                chosen.append(selected)
+
+        return chosen or self._normalize_history_targets(raw_state, raw_event)
+
+    def _history_state_aliases(self, value: str) -> List[str]:
+        """Map semantic event words to likely recorder states."""
+        aliases = {
+            "open": ["open", "opening", "on"],
+            "opened": ["open", "opening", "on"],
+            "opening": ["opening", "open", "on"],
+            "close": ["closed", "closing", "off"],
+            "closed": ["closed", "closing", "off"],
+            "closing": ["closing", "closed", "off"],
+            "on": ["on"],
+            "turned_on": ["on"],
+            "enabled": ["on"],
+            "active": ["on"],
+            "off": ["off"],
+            "turned_off": ["off"],
+            "disabled": ["off"],
+            "locked": ["locked"],
+            "unlocked": ["unlocked"],
+            "detected": ["detected", "on", "open"],
+            "triggered": ["triggered", "on"],
+            "clear": ["clear", "off", "closed"],
+            "cleared": ["clear", "off", "closed"],
+            "home": ["home"],
+            "away": ["away", "not_home"],
+            "not_home": ["not_home", "away"],
+        }
+        return aliases.get(value, [value])
+
+    def _describe_history_target(self, raw_state: Any, raw_event: Any) -> str:
+        """Create a readable description of the recorder search target."""
+        if raw_event:
+            return str(raw_event).replace("_", " ").strip()
+        if isinstance(raw_state, list):
+            return " / ".join(str(value).replace("_", " ").strip() for value in raw_state)
+        if raw_state:
+            return str(raw_state).replace("_", " ").strip()
+        return "change"
+
+    def _format_relative_time(self, when) -> str:
+        """Format a timestamp relative to now."""
+        now = dt_util.utcnow()
+        seconds = max((now - when).total_seconds(), 0)
+
+        if seconds < 60:
+            return "just now"
+        if seconds < 3600:
+            minutes = int(seconds / 60)
+            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+        if seconds < 86400:
+            hours = int(seconds / 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        if seconds < 604800:
+            days = int(seconds / 86400)
+            return f"{days} day{'s' if days != 1 else ''} ago"
+
+        weeks = int(seconds / 604800)
+        return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+
+    def _format_absolute_time(self, when) -> str:
+        """Format a timestamp in the user's local time zone."""
+        return dt_util.as_local(when).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    def _build_history_search_windows(self, max_hours: int) -> List[int]:
+        """Build progressively larger recorder search windows."""
+        windows = [24, 168, 720, max_hours]
+        deduped: List[int] = []
+        seen = set()
+
+        for window in windows:
+            clamped = min(window, max_hours)
+            if clamped > 0 and clamped not in seen:
+                seen.add(clamped)
+                deduped.append(clamped)
+
+        return deduped
+
+    async def _fetch_entity_history_states(
+        self,
+        entity_id: str,
+        hours: int,
+        *,
+        end_time=None,
+        descending: bool = True,
+        limit: int | None = None,
+    ) -> List[Any]:
+        """Fetch recorder-backed history states for a single entity."""
+        query_end_time = end_time or dt_util.utcnow()
+        start_time = query_end_time - timedelta(hours=hours)
+
+        states = await self.hass.async_add_executor_job(
+            lambda: history.state_changes_during_period(
+                self.hass,
+                start_time,
+                end_time=query_end_time,
+                entity_id=entity_id,
+                no_attributes=True,
+                descending=descending,
+                limit=limit,
+                include_start_time_state=False,
+            )
+        )
+        return self._extract_history_states(states, entity_id)
 
     def validate_service(self, domain: str, action: str) -> str:
         """Validate that a domain/action combination is allowed.

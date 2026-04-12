@@ -11,6 +11,7 @@ A Home Assistant conversation agent that uses MCP (Model Context Protocol) for e
 - ✅ **Multilingual Support**: 21 languages with localized UI, system prompts, and speech detection
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
+- ✅ **Calculator Tools**: Built-in arithmetic tools for exact math through tool calling
 - ✅ **Web Search Tools**: Optional DuckDuckGo or Brave Search integration for current information
 - ✅ **Works with 1000+ Entities**: Efficient even with large Home Assistant installations
 - ✅ **Multi-Profile Support**: Run multiple conversation agents with different models
@@ -30,13 +31,18 @@ Instead of dumping all entities, MCP Assist:
 
 1. **Starts an MCP Server** on Home Assistant that exposes entity discovery tools
 2. **Your LLM connects** to the MCP server and gets access to these tools:
-   - `get_index` - Get system structure index (areas, domains, device_classes, people, etc.)
-   - `discover_entities` - Find entities by type, area, domain, device_class, or state
-   - `get_entity_details` - Get current state and attributes
-   - `perform_action` - Control devices
+   - `get_index` - Get system structure index (areas, floors, labels, devices, domains, device_classes, people, etc.) including aliases for alias-capable objects
+   - `discover_entities` - Find entities by type, area, floor, label, domain, device_class, state, or alias-aware name search. This is the preferred path for most direct control.
+   - `discover_devices` - Find Home Assistant devices by area, floor, label, domain, name, or alias-aware search when you want physical-device context or related entities on the same device
+   - `get_entity_details` - Get current entity state and attributes
+   - `get_device_details` - Get device metadata and attached entities so you can choose the right entity target
+   - `perform_action` - Control devices, usually with entity IDs for direct control
+   - `get_last_entity_event` - Query Home Assistant recorder history for questions like "when was the gate last opened?"
+   - `analyze_entity_history` - Use recorder history for aggregate questions like "how many times was the door opened in the last hour?"
+   - `add` / `subtract` / `multiply` / `divide` / `sqrt` / `power` / `round_number` - Do exact calculator operations through tool calling
    - `run_script` - Execute scripts and return response data
    - `run_automation` - Trigger automations manually
-   - `list_areas` - List all areas in your home
+   - `list_areas` - List all areas in your home with entity/device counts
    - `list_domains` - List all entity types
    - `set_conversation_state` - Smart follow-up handling
 3. **LLM uses the index for smart queries** - Understands what exists without full context dump
@@ -53,7 +59,7 @@ Instead of dumping all entities, MCP Assist:
 
 ## Smart Entity Index (v0.5.0+)
 
-The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your Home Assistant system structure, enabling context-aware queries without full entity dumps. The index includes areas, domains, device classes, people, calendars, zones, automations, and scripts. For entities without standardized device_class attributes (like custom integrations), LLM-powered gap-filling automatically infers semantic categories from naming patterns. This results in faster, more accurate queries that use ~95% fewer tokens compared to traditional entity dumps.
+The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your Home Assistant system structure, enabling context-aware queries without full entity dumps. The index includes areas, floors, labels, domains, device classes, devices, people, calendars, zones, automations, scripts, and alias metadata for alias-capable Home Assistant objects. For entities without standardized device_class attributes (like custom integrations), LLM-powered gap-filling automatically infers semantic categories from naming patterns. This results in faster, more accurate queries that use ~95% fewer tokens compared to traditional entity dumps.
 
 ## Multilingual Support (v0.12.0+)
 

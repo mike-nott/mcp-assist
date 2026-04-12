@@ -8,6 +8,7 @@ import asyncio
 import fnmatch
 import logging
 import re
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from enum import Enum
@@ -121,11 +122,56 @@ class SmartDiscovery:
         _LOGGER.debug(f"Detected query type: {query_type}, name_contains: {name_contains}")
 
         # Route to appropriate discovery method
-        if query_type == QueryType.PERSON and name_contains and not device_class and not name_pattern and not inferred_type:
+        if (
+            query_type == QueryType.PERSON
+            and name_contains
+            and not any(
+                [
+                    entity_type,
+                    area,
+                    floor,
+                    label,
+                    domain,
+                    state,
+                    device_class,
+                    name_pattern,
+                    inferred_type,
+                ]
+            )
+        ):
             return await self._discover_person_entities(name_contains, limit)
-        elif query_type == QueryType.PET and name_contains and not device_class and not name_pattern and not inferred_type:
+        elif (
+            query_type == QueryType.PET
+            and name_contains
+            and not any(
+                [
+                    entity_type,
+                    area,
+                    floor,
+                    label,
+                    domain,
+                    state,
+                    device_class,
+                    name_pattern,
+                    inferred_type,
+                ]
+            )
+        ):
             return await self._discover_pet_entities(name_contains, limit)
-        elif query_type == QueryType.AGGREGATE and not device_class and not name_pattern and not inferred_type and not floor and not label:
+        elif (
+            query_type == QueryType.AGGREGATE
+            and not any(
+                [
+                    entity_type,
+                    area,
+                    floor,
+                    label,
+                    device_class,
+                    name_pattern,
+                    inferred_type,
+                ]
+            )
+        ):
             return await self._discover_aggregate_entities(domain, state, limit)
         elif area and not floor and not label and not device_class and not name_pattern and not inferred_type:
             return await self._discover_area_entities(area, domain, state, limit)
@@ -189,6 +235,20 @@ class SmartDiscovery:
         person_entity = f"person.{name}"
         if self.hass.states.get(person_entity):
             return True
+
+        entity_registry = er.async_get(self.hass)
+
+        for entity_id in self.hass.states.async_entity_ids():
+            if not entity_id.startswith("person."):
+                continue
+
+            state_obj = self.hass.states.get(entity_id)
+            if state_obj and name in state_obj.name.casefold():
+                return True
+
+            entity_entry = entity_registry.async_get(entity_id)
+            if any(name in alias.casefold() for alias in self._get_entity_aliases(entity_entry)):
+                return True
 
         # Check for device_tracker patterns (often indicates a person)
         for entity_id in self.hass.states.async_entity_ids():
@@ -450,6 +510,181 @@ class SmartDiscovery:
             value and search_term in value.casefold()
             for value in search_values
         )
+
+    def _get_device_context(
+        self,
+        device_entry: Any,
+        area_registry: Any,
+        floor_registry: Any = None,
+        label_registry: Any = None,
+        include_label_sources: bool = False,
+    ) -> Dict[str, Any]:
+        """Resolve area, floor, and label context for a device."""
+        area_id = device_entry.area_id if device_entry else None
+        area_entry = area_registry.async_get_area(area_id) if area_id else None
+
+        floor_id = getattr(area_entry, "floor_id", None) if area_entry else None
+        floor_entry = None
+        floor_name = None
+        if floor_id and floor_registry is not None:
+            floor_entry = floor_registry.async_get_floor(floor_id)
+            if floor_entry:
+                floor_name = floor_entry.name
+
+        label_sources = {
+            "device": set(getattr(device_entry, "labels", set()) or set()),
+            "area": set(getattr(area_entry, "labels", set()) or set()),
+        }
+        label_ids = set().union(*label_sources.values())
+
+        context = {
+            "device": (
+                (getattr(device_entry, "name_by_user", None) or getattr(device_entry, "name", None))
+                if device_entry
+                else None
+            ),
+            "device_name": getattr(device_entry, "name", None) if device_entry else None,
+            "device_name_by_user": getattr(device_entry, "name_by_user", None) if device_entry else None,
+            "device_aliases": self._get_entry_aliases(device_entry),
+            "manufacturer": getattr(device_entry, "manufacturer", None) if device_entry else None,
+            "model": getattr(device_entry, "model", None) if device_entry else None,
+            "model_id": getattr(device_entry, "model_id", None) if device_entry else None,
+            "area": area_entry.name if area_entry else None,
+            "area_id": area_id,
+            "area_aliases": self._get_entry_aliases(area_entry),
+            "floor": floor_name,
+            "floor_id": floor_id,
+            "floor_aliases": self._get_entry_aliases(floor_entry),
+            "labels": self._get_label_names(label_ids, label_registry),
+            "label_ids": sorted(label_ids),
+        }
+
+        if include_label_sources:
+            context["label_sources"] = {
+                source: self._get_label_names(source_ids, label_registry)
+                for source, source_ids in label_sources.items()
+                if source_ids
+            }
+
+        return context
+
+    def _build_device_entity_map(
+        self,
+        entity_registry: Any,
+        device_registry: Any,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Build a map of exposed entities by device ID."""
+        device_entities: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+        for state_obj in self.hass.states.async_all():
+            if not async_should_expose(self.hass, "conversation", state_obj.entity_id):
+                continue
+
+            entity_entry = entity_registry.async_get(state_obj.entity_id)
+            if not entity_entry or not entity_entry.device_id:
+                continue
+
+            if entity_entry.device_id not in device_registry.devices:
+                continue
+
+            entity_summary = {
+                "entity_id": state_obj.entity_id,
+                "name": state_obj.name,
+                "domain": state_obj.domain,
+                "state": state_obj.state,
+            }
+            entity_aliases = self._get_entity_aliases(entity_entry)
+            if entity_aliases:
+                entity_summary["aliases"] = entity_aliases
+
+            device_entities[entity_entry.device_id].append(entity_summary)
+
+        return device_entities
+
+    def _device_matches_search_term(
+        self,
+        search_term: str,
+        device_entry: Any,
+        device_context: Dict[str, Any],
+        device_entities: List[Dict[str, Any]],
+    ) -> bool:
+        """Check whether a search term matches a device or its attached entities."""
+        search_values = {
+            device_context.get("device"),
+            device_context.get("device_name"),
+            device_context.get("device_name_by_user"),
+            device_context.get("manufacturer"),
+            device_context.get("model"),
+            device_context.get("model_id"),
+            device_context.get("area"),
+            device_context.get("floor"),
+        }
+
+        search_values.update(device_context.get("device_aliases", []))
+        search_values.update(device_context.get("area_aliases", []))
+        search_values.update(device_context.get("floor_aliases", []))
+        search_values.update(device_context.get("labels", []))
+
+        for entity in device_entities:
+            search_values.update(
+                [
+                    entity.get("entity_id"),
+                    entity.get("name"),
+                    entity.get("domain"),
+                ]
+            )
+            search_values.update(entity.get("aliases", []))
+
+        return any(
+            value and search_term in value.casefold()
+            for value in search_values
+        )
+
+    def _create_device_info(
+        self,
+        device_entry: Any,
+        device_context: Dict[str, Any],
+        device_entities: List[Dict[str, Any]],
+        include_entities: bool = False,
+    ) -> Dict[str, Any]:
+        """Create a device information dictionary."""
+        domains = sorted({entity["domain"] for entity in device_entities}, key=str.casefold)
+        device_info = {
+            "device_id": device_entry.id,
+            "name": device_context.get("device") or device_entry.id,
+            "entity_count": len(device_entities),
+            "domains": domains,
+            "manufacturer": device_context.get("manufacturer"),
+            "model": device_context.get("model"),
+            "model_id": device_context.get("model_id"),
+            "disabled": getattr(device_entry, "disabled_by", None) is not None,
+        }
+
+        for key in (
+            "device_name",
+            "device_name_by_user",
+            "device_aliases",
+            "area",
+            "area_id",
+            "area_aliases",
+            "floor",
+            "floor_id",
+            "floor_aliases",
+        ):
+            if device_context.get(key):
+                device_info[key] = device_context[key]
+
+        if device_context.get("labels"):
+            device_info["labels"] = device_context["labels"]
+            device_info["label_ids"] = device_context["label_ids"]
+
+        if include_entities:
+            device_info["entities"] = device_entities
+            device_info["entity_ids"] = [entity["entity_id"] for entity in device_entities]
+        elif device_entities:
+            device_info["entities_preview"] = device_entities[:5]
+
+        return device_info
 
     async def _discover_person_entities(
         self, name: str, limit: int
@@ -1088,40 +1323,248 @@ class SmartDiscovery:
 
         return details
 
-    async def list_areas(self) -> List[Dict[str, Any]]:
-        """List all areas with entity counts."""
+    async def discover_devices(
+        self,
+        area: Optional[str] = None,
+        floor: Optional[str] = None,
+        label: Optional[str] = None,
+        domain: Optional[str] = None,
+        name_contains: Optional[str] = None,
+        manufacturer: Optional[str] = None,
+        model: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Discover Home Assistant devices."""
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
         floor_registry = fr.async_get(self.hass) if fr else None
         label_registry = lr.async_get(self.hass) if lr else None
 
+        area_id = None
+        floor_id = None
+        label_id = None
+
+        if area:
+            area_entry = self._resolve_area_entry(area, area_registry)
+            if area_entry:
+                area_id = area_entry.id
+            elif not floor:
+                floor_entry = self._resolve_floor_entry(area, floor_registry)
+                if floor_entry:
+                    floor_id = floor_entry.floor_id
+                else:
+                    return []
+            else:
+                return []
+
+        if floor:
+            floor_entry = self._resolve_floor_entry(floor, floor_registry)
+            if not floor_entry:
+                return []
+            floor_id = floor_entry.floor_id
+
+        if label:
+            label_entry = self._resolve_label_entry(label, label_registry)
+            if not label_entry:
+                return []
+            label_id = label_entry.label_id
+
+        from .const import DOMAIN, CONF_MAX_ENTITIES_PER_DISCOVERY
+        max_limit = MAX_ENTITIES_PER_DISCOVERY
+        system_entry = None
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.source == "system":
+                system_entry = entry
+                break
+
+        if system_entry:
+            max_limit = system_entry.data.get(
+                CONF_MAX_ENTITIES_PER_DISCOVERY,
+                MAX_ENTITIES_PER_DISCOVERY,
+            )
+
+        limit = min(limit, max_limit)
+
+        device_entities_map = self._build_device_entity_map(entity_registry, device_registry)
+        devices = []
+
+        for device_entry in device_registry.devices.values():
+            device_entities = device_entities_map.get(device_entry.id, [])
+            if not device_entities:
+                continue
+
+            device_context = self._get_device_context(
+                device_entry,
+                area_registry,
+                floor_registry,
+                label_registry,
+            )
+
+            if area_id and device_context["area_id"] != area_id:
+                continue
+
+            if floor_id and device_context["floor_id"] != floor_id:
+                continue
+
+            if label_id and label_id not in device_context["label_ids"]:
+                continue
+
+            device_domains = {entity["domain"] for entity in device_entities}
+            if domain and domain not in device_domains:
+                continue
+
+            if manufacturer:
+                manufacturer_name = (device_context.get("manufacturer") or "").casefold()
+                if manufacturer.casefold() not in manufacturer_name:
+                    continue
+
+            if model:
+                model_name = (device_context.get("model") or "").casefold()
+                if model.casefold() not in model_name:
+                    continue
+
+            if name_contains and not self._device_matches_search_term(
+                name_contains.casefold(),
+                device_entry,
+                device_context,
+                device_entities,
+            ):
+                continue
+
+            devices.append(
+                self._create_device_info(
+                    device_entry,
+                    device_context,
+                    device_entities,
+                )
+            )
+
+            if len(devices) >= limit:
+                break
+
+        _LOGGER.debug(
+            "Device discovery found %d devices with filters: area=%s, floor=%s, "
+            "label=%s, domain=%s, name_contains=%s, manufacturer=%s, model=%s",
+            len(devices),
+            area,
+            floor,
+            label,
+            domain,
+            name_contains,
+            manufacturer,
+            model,
+        )
+
+        return devices
+
+    async def get_device_details(self, device_ids: List[str]) -> Dict[str, Any]:
+        """Get detailed information about specific devices."""
+        details = {}
+        area_registry = ar.async_get(self.hass)
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
+
+        device_entities_map = self._build_device_entity_map(entity_registry, device_registry)
+
+        for device_id in device_ids:
+            device_entry = device_registry.async_get(device_id)
+            if not device_entry:
+                details[device_id] = {"error": "Device not found"}
+                continue
+
+            exposed_entities = device_entities_map.get(device_id, [])
+            if not exposed_entities:
+                details[device_id] = {
+                    "error": "Device not exposed to conversation"
+                }
+                continue
+
+            device_context = self._get_device_context(
+                device_entry,
+                area_registry,
+                floor_registry,
+                label_registry,
+                include_label_sources=True,
+            )
+
+            entity_details = []
+            for entity in exposed_entities:
+                state_obj = self.hass.states.get(entity["entity_id"])
+                entity_entry = entity_registry.async_get(entity["entity_id"])
+                if not state_obj:
+                    continue
+                entity_details.append(
+                    self._create_entity_info(
+                        state_obj,
+                        entity_entry=entity_entry,
+                    )
+                )
+
+            device_info = self._create_device_info(
+                device_entry,
+                device_context,
+                entity_details,
+                include_entities=True,
+            )
+            device_info["label_sources"] = device_context.get("label_sources", {})
+            device_info["configuration_url"] = getattr(device_entry, "configuration_url", None)
+            device_info["primary_config_entry"] = getattr(device_entry, "primary_config_entry", None)
+            device_info["via_device_id"] = getattr(device_entry, "via_device_id", None)
+            device_info["entry_type"] = (
+                str(getattr(device_entry, "entry_type", None))
+                if getattr(device_entry, "entry_type", None) is not None
+                else None
+            )
+
+            details[device_id] = device_info
+
+        return details
+
+    async def list_areas(self) -> List[Dict[str, Any]]:
+        """List all areas with entity and device counts."""
+        area_registry = ar.async_get(self.hass)
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
+
+        area_entity_counts: Dict[str, int] = defaultdict(int)
+        exposed_device_ids: Set[str] = set()
+        for entity_entry in entity_registry.entities.values():
+            if not async_should_expose(self.hass, "conversation", entity_entry.entity_id):
+                continue
+
+            if entity_entry.device_id:
+                exposed_device_ids.add(entity_entry.device_id)
+
+            area_id = entity_entry.area_id
+            if not area_id and entity_entry.device_id:
+                device_entry = device_registry.async_get(entity_entry.device_id)
+                if device_entry:
+                    area_id = device_entry.area_id
+
+            if area_id:
+                area_entity_counts[area_id] += 1
+
+        area_device_counts: Dict[str, int] = defaultdict(int)
+        for device_id in exposed_device_ids:
+            device_entry = device_registry.async_get(device_id)
+            if device_entry and device_entry.area_id:
+                area_device_counts[device_entry.area_id] += 1
+
         areas = []
         for area_entry in area_registry.areas.values():
-            # Count entities in this area
-            entity_count = 0
-
-            # Count entities directly assigned to area
-            for entity_entry in entity_registry.entities.values():
-                if entity_entry.area_id == area_entry.id:
-                    if async_should_expose(self.hass, "conversation", entity_entry.entity_id):
-                        entity_count += 1
-
-            # Count entities via devices in this area
-            for device_entry in device_registry.devices.values():
-                if device_entry.area_id == area_entry.id:
-                    for entity_entry in entity_registry.entities.values():
-                        if (entity_entry.device_id == device_entry.id
-                            and not entity_entry.area_id  # Not already counted
-                            and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
-                            entity_count += 1
-
             floor_id = getattr(area_entry, "floor_id", None)
             floor_name = None
+            floor_aliases = []
             if floor_id and floor_registry is not None:
                 floor_entry = floor_registry.async_get_floor(floor_id)
                 if floor_entry:
                     floor_name = floor_entry.name
+                    floor_aliases = self._get_entry_aliases(floor_entry)
 
             label_ids = set(getattr(area_entry, "labels", set()) or set())
 
@@ -1129,9 +1572,11 @@ class SmartDiscovery:
                 "id": area_entry.id,
                 "name": area_entry.name,
                 "aliases": self._get_entry_aliases(area_entry),
-                "entity_count": entity_count,
+                "entity_count": area_entity_counts.get(area_entry.id, 0),
+                "device_count": area_device_counts.get(area_entry.id, 0),
                 "floor": floor_name,
                 "floor_id": floor_id,
+                "floor_aliases": floor_aliases,
                 "labels": self._get_label_names(label_ids, label_registry),
                 "label_ids": sorted(label_ids),
             })
