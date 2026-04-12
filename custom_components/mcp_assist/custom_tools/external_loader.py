@@ -11,7 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..const import CUSTOM_TOOL_SCHEMA_VERSION, CUSTOM_TOOLS_DIRECTORY
+from ..const import (
+    CUSTOM_TOOL_MANIFEST_FILENAME,
+    CUSTOM_TOOL_SCHEMA_VERSION,
+    CUSTOM_TOOLS_DIRECTORY,
+    LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME,
+)
 from ..custom_tool_api import MCPAssistCustomToolManifest, MCPAssistExternalTool
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,17 +141,20 @@ class ExternalCustomToolLoader:
 
     def _load_manifest(self, tool_dir: Path) -> MCPAssistCustomToolManifest:
         """Load and validate a custom tool manifest."""
-        manifest_path = tool_dir / "manifest.json"
-        if not manifest_path.is_file():
-            raise ValueError("manifest.json is required")
+        manifest_path = self._resolve_manifest_path(tool_dir)
+        if manifest_path is None:
+            raise ValueError(
+                f"{CUSTOM_TOOL_MANIFEST_FILENAME} is required "
+                f"(legacy {LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME} is also supported)"
+            )
 
         try:
             raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception as err:
-            raise ValueError(f"Invalid manifest.json: {err}") from err
+            raise ValueError(f"Invalid {manifest_path.name}: {err}") from err
 
         if not isinstance(raw_manifest, dict):
-            raise ValueError("manifest.json must contain an object")
+            raise ValueError(f"{manifest_path.name} must contain an object")
 
         schema_version = raw_manifest.get("schema_version")
         if schema_version != CUSTOM_TOOL_SCHEMA_VERSION:
@@ -201,6 +209,18 @@ class ExternalCustomToolLoader:
             capabilities=capabilities,
             prompt_append_file=prompt_append_file,
         )
+
+    def _resolve_manifest_path(self, tool_dir: Path) -> Path | None:
+        """Resolve the preferred or legacy manifest path for a tool package."""
+        preferred = tool_dir / CUSTOM_TOOL_MANIFEST_FILENAME
+        if preferred.is_file():
+            return preferred
+
+        legacy = tool_dir / LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME
+        if legacy.is_file():
+            return legacy
+
+        return None
 
     def _instantiate_tool(
         self,

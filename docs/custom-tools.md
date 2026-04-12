@@ -45,7 +45,7 @@ Each tool package lives in its own folder:
 <home-assistant-config>/
   mcp-assist-tools/
     my_tool/
-      manifest.json
+      mcp_assist_tool.json
       tool.py
       prompt.md
 ```
@@ -58,7 +58,9 @@ Rules:
 
 ## Manifest Format
 
-Each package must contain a `manifest.json`.
+Each package should contain an `mcp_assist_tool.json`.
+
+Legacy `manifest.json` is still supported for backward compatibility, but the namespaced filename is preferred because it avoids collisions with Home Assistant validation tools and other generic manifest conventions.
 
 Current schema:
 
@@ -213,7 +215,7 @@ Follow these guidelines to keep packages portable and maintainable:
 
 A working example lives here:
 
-- [docs/examples/mcp-assist-tools/sample_tool/manifest.json](examples/mcp-assist-tools/sample_tool/manifest.json)
+- [docs/examples/mcp-assist-tools/sample_tool/mcp_assist_tool.json](examples/mcp-assist-tools/sample_tool/mcp_assist_tool.json)
 - [docs/examples/mcp-assist-tools/sample_tool/tool.py](examples/mcp-assist-tools/sample_tool/tool.py)
 - [docs/examples/mcp-assist-tools/sample_tool/prompt.md](examples/mcp-assist-tools/sample_tool/prompt.md)
 
@@ -226,7 +228,7 @@ Check:
 - **Custom Tools** is enabled in shared MCP server settings
 - the package lives under `<home-assistant-config>/mcp-assist-tools/<tool_id>/`
 - the folder name matches the manifest `id`
-- the manifest uses `schema_version: 1`
+- the manifest file is named `mcp_assist_tool.json` (or legacy `manifest.json`) and uses `schema_version: 1`
 - the tool names are properly prefixed with `<tool_id>_`
 - Home Assistant logs for `Failed to load external custom tool package`
 

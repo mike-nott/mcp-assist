@@ -17,7 +17,9 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEB_SEARCH,
     CONF_SEARCH_PROVIDER,
+    CUSTOM_TOOL_MANIFEST_FILENAME,
     CUSTOM_TOOLS_DIRECTORY,
+    LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME,
 )
 from custom_components.mcp_assist.custom_tools import CustomToolsLoader
 
@@ -49,6 +51,7 @@ def _write_external_tool_package(
     tool_name: str | None = None,
     include_prompt_file: bool = True,
     directory_name: str | None = None,
+    manifest_filename: str = CUSTOM_TOOL_MANIFEST_FILENAME,
 ) -> Path:
     """Write a valid external custom tool package to the temp config root."""
     package_dir = config_root / CUSTOM_TOOLS_DIRECTORY / (directory_name or tool_id)
@@ -66,7 +69,7 @@ def _write_external_tool_package(
     if include_prompt_file:
         manifest["prompt_append_file"] = "prompt.md"
 
-    (package_dir / "manifest.json").write_text(
+    (package_dir / manifest_filename).write_text(
         json.dumps(manifest),
         encoding="utf-8",
     )
@@ -330,3 +333,34 @@ async def test_external_tool_name_must_be_namespaced(
     await loader.initialize()
 
     assert loader.external_tools == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_manifest_filename_is_still_supported(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Older external tool packages using manifest.json should keep loading."""
+    _write_external_tool_package(
+        tmp_path,
+        manifest_filename=LEGACY_CUSTOM_TOOL_MANIFEST_FILENAME,
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert [item["id"] for item in loader.get_loaded_external_tool_info()] == [
+        "sample_tool"
+    ]
