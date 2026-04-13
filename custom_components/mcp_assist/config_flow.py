@@ -537,11 +537,7 @@ def _build_profile_tools_section(
                 spec.profile_disable_label.casefold(),
                 vol.Optional(
                     _builtin_profile_disable_field_key(spec),
-                    description=(
-                        {"description": spec.profile_disable_description}
-                        if spec.profile_disable_description
-                        else None
-                    ),
+                    description=spec.profile_disable_description or None,
                     default=_builtin_profile_tool_disabled_default(
                         current_values,
                         spec,
@@ -592,11 +588,7 @@ def _build_shared_tools_section(
                 spec.shared_label.casefold(),
                 vol.Optional(
                     _builtin_shared_field_key(spec),
-                    description=(
-                        {"description": spec.shared_description}
-                        if spec.shared_description
-                        else None
-                    ),
+                    description=spec.shared_description or None,
                     default=_get_form_value(
                         defaults,
                         spec.shared_setting_key,

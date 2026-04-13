@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import voluptuous as vol
+import voluptuous_serialize
 from homeassistant.data_entry_flow import FlowResultType, section
 
 from custom_components.mcp_assist.config_flow import (
@@ -32,6 +33,8 @@ from custom_components.mcp_assist.config_flow import (
     PROFILE_DISABLE_FIELD_BY_FAMILY,
     STATIC_TOOL_FAMILY_ALPHABETICAL,
     TOOLS_SECTION_KEY,
+    _build_profile_tools_section,
+    _build_shared_tools_section,
     _apply_profile_tool_disables,
     _infer_prompt_mode,
     _needs_prompt_followup,
@@ -422,10 +425,8 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
         getattr(marker, "schema", marker): marker
         for marker in tools_section.schema.schema.keys()
     }
-    assert marker_by_key[_builtin_profile_key("calculator")].description[
-        "description"
-    ]
-    assert marker_by_key[_builtin_profile_key("search")].description["description"]
+    assert marker_by_key[_builtin_profile_key("calculator")].description
+    assert marker_by_key[_builtin_profile_key("search")].description
 
 
 async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
@@ -483,8 +484,51 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     external_default = tool_markers[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS].default
     assert external_default() is False if callable(external_default) else external_default is False
-    assert tool_markers[_builtin_shared_key("calculator")].description["description"]
-    assert tool_markers[_builtin_shared_key("read_url")].description["description"]
+    assert tool_markers[_builtin_shared_key("calculator")].description
+    assert tool_markers[_builtin_shared_key("read_url")].description
+
+
+def test_built_in_tool_checkbox_descriptions_serialize_as_plain_strings() -> None:
+    """Dynamic built-in tool checkbox subtitles should serialize in the UI-friendly shape."""
+    shared_section = _build_shared_tools_section({}, BUILTIN_SPECS)
+    profile_section = _build_profile_tools_section({}, BUILTIN_SPECS, {}, {})
+
+    shared_checkbox_fields = {
+        marker: value
+        for marker, value in shared_section.schema.schema.items()
+        if getattr(marker, "schema", marker)
+        in {"Calculator", "Read URL", "Search", "Unit Conversion"}
+    }
+    profile_checkbox_fields = {
+        marker: value
+        for marker, value in profile_section.schema.schema.items()
+        if getattr(marker, "schema", marker)
+        in {
+            "Disable Calculator",
+            "Disable Read URL",
+            "Disable Search",
+            "Disable Unit Conversion",
+        }
+    }
+
+    shared_serialized = voluptuous_serialize.convert(vol.Schema(shared_checkbox_fields))
+    profile_serialized = voluptuous_serialize.convert(vol.Schema(profile_checkbox_fields))
+
+    shared_by_name = {item["name"]: item for item in shared_serialized}
+    profile_by_name = {item["name"]: item for item in profile_serialized}
+
+    for name in ("Calculator", "Read URL", "Search", "Unit Conversion"):
+        assert isinstance(shared_by_name[name]["description"], str)
+        assert shared_by_name[name]["description"]
+
+    for name in (
+        "Disable Calculator",
+        "Disable Read URL",
+        "Disable Search",
+        "Disable Unit Conversion",
+    ):
+        assert isinstance(profile_by_name[name]["description"], str)
+        assert profile_by_name[name]["description"]
 
 
 def test_optional_tool_family_checkbox_sets_stay_in_sync() -> None:
