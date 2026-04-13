@@ -253,7 +253,7 @@ async def test_read_url_extracts_html_text_and_decodes_entities(hass) -> None:
         <html>
           <head><style>body { color: red; }</style></head>
           <body>
-            <script>console.log("ignore")</script>
+            <script>console.log("ignore")</script >
             <h1>Hello &amp; welcome</h1>
             <p>Line&nbsp;two</p>
           </body>

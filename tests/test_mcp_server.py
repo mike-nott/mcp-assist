@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_socket import disable_socket, enable_socket
 
+import custom_components.mcp_assist.mcp_server as mcp_server_module
 from custom_components.mcp_assist.custom_tools.builtin_catalog import (
     load_builtin_tool_toggle_specs,
 )
@@ -1298,6 +1299,28 @@ async def test_tool_get_image_returns_image_block_from_local_file(
 
 
 @pytest.mark.asyncio
+async def test_tool_get_image_accepts_absolute_path_inside_config_root(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Absolute image paths should still work when they stay inside the config root."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    image_path = tmp_path / "absolute_guest_wifi.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nabsolute")
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+
+    result = await server.tool_get_image({"image_path": str(image_path)})
+
+    assert result["isError"] is False
+    assert result["content"][1]["type"] == "image"
+    assert result["content"][1]["mimeType"] == "image/png"
+
+
+@pytest.mark.asyncio
 async def test_tool_analyze_image_returns_answer_and_optional_image_block(
     hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
 ) -> None:
@@ -1325,3 +1348,61 @@ async def test_tool_analyze_image_returns_answer_and_optional_image_block(
     assert result["content"][0]["text"] == "A white SUV is in the driveway."
     assert result["content"][1]["type"] == "image"
     assert result["structuredContent"]["source"]["type"] == "image_path"
+
+
+def test_resolve_local_image_path_rejects_path_traversal(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Local image resolution should reject traversal outside the config root."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+
+    with pytest.raises(ValueError, match="stay inside"):
+        server._resolve_local_image_path("../secrets.txt")
+
+
+def test_resolve_fetchable_http_image_url_keeps_supported_sources(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Image URL validation should keep HA-local and allowlisted remote URLs working."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    monkeypatch.setattr(
+        mcp_server_module.network_helper,
+        "get_url",
+        lambda *args, **kwargs: "http://ha.local:8123",
+    )
+    monkeypatch.setattr(
+        mcp_server_module.network_helper,
+        "is_hass_url",
+        lambda hass_obj, url: str(url).startswith("http://ha.local:8123"),
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "is_allowed_external_url",
+        lambda url: str(url).startswith("https://images.example.com/"),
+    )
+
+    assert (
+        str(server._resolve_fetchable_http_image_url("/api/image_proxy/front_door"))
+        == "http://ha.local:8123/api/image_proxy/front_door"
+    )
+    assert (
+        str(
+            server._resolve_fetchable_http_image_url(
+                "https://images.example.com/weather/radar.png"
+            )
+        )
+        == "https://images.example.com/weather/radar.png"
+    )
+
+    with pytest.raises(ValueError, match="allowlisted"):
+        server._resolve_fetchable_http_image_url(
+            "https://169.254.169.254/latest/meta-data"
+        )

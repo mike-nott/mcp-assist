@@ -7,7 +7,7 @@ import ipaddress
 import json
 import logging
 import mimetypes
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
@@ -18,6 +18,7 @@ from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 import voluptuous as vol
 from voluptuous_openapi import convert
+import yarl
 
 from homeassistant.components import conversation
 from homeassistant.core import Context, HomeAssistant, SupportsResponse
@@ -27,6 +28,7 @@ from homeassistant.helpers import (
     device_registry as dr,
     entity_registry as er,
     llm,
+    network as network_helper,
     service as service_helper,
 )
 from homeassistant.components.homeassistant import async_should_expose
@@ -125,6 +127,8 @@ from .memory_manager import MemoryManager
 _LOGGER = logging.getLogger(__name__)
 
 _MAX_INLINE_IMAGE_BYTES = 6 * 1024 * 1024
+_HTTP_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_MAX_IMAGE_FETCH_REDIRECTS = 5
 
 
 class MCPServer:
@@ -948,20 +952,23 @@ class MCPServer:
                             "type": "string",
                             "description": (
                                 "Image-like entity to resolve. Camera entities are supported directly. "
-                                "Other entities may work when they expose a local or remote picture URL."
+                                "Other entities may work when they expose a Home Assistant-local or "
+                                "allowlisted picture URL."
                             ),
                         },
                         "image_url": {
                             "type": "string",
                             "description": (
-                                "Remote URL, data URL, or /local/... URL for the image to analyze."
+                                "Image URL to analyze. Supports data URLs, Home Assistant-local URLs, "
+                                "/local/... URLs, /media/local/... URLs, and remote http(s) URLs only "
+                                "when they are allowlisted in Home Assistant."
                             ),
                         },
                         "image_path": {
                             "type": "string",
                             "description": (
                                 "Local image path relative to the Home Assistant config directory, "
-                                "or an absolute path inside that directory."
+                                "or an absolute path already inside that directory."
                             ),
                         },
                         "detail": {
@@ -1014,13 +1021,17 @@ class MCPServer:
                         },
                         "image_url": {
                             "type": "string",
-                            "description": "Remote URL, data URL, or /local/... URL for the image.",
+                            "description": (
+                                "Image URL. Supports data URLs, Home Assistant-local URLs, "
+                                "/local/... URLs, /media/local/... URLs, and remote http(s) URLs only "
+                                "when they are allowlisted in Home Assistant."
+                            ),
                         },
                         "image_path": {
                             "type": "string",
                             "description": (
                                 "Local image path relative to the Home Assistant config directory, "
-                                "or an absolute path inside that directory."
+                                "or an absolute path already inside that directory."
                             ),
                         },
                     },
@@ -2849,27 +2860,116 @@ class MCPServer:
         return image_bytes, mime_type, f"entity picture for {entity_id}"
 
     async def _fetch_image_reference(self, reference: str) -> tuple[bytes, str]:
-        """Fetch image bytes from a data URL, local URL, or remote URL."""
+        """Fetch image bytes from a supported image reference."""
+        reference = str(reference or "").strip()
+        if not reference:
+            raise ValueError("Image reference is required.")
+
         if reference.startswith("data:"):
             return self._parse_data_url_image(reference)
-        if reference.startswith("/local/") or reference.startswith("/media/local/"):
-            local_path = self._resolve_local_image_path(reference)
-            return self._read_local_image_path(local_path)
-        if not reference.startswith(("http://", "https://")):
+        if reference.startswith("/"):
+            if reference.startswith("/local/") or reference.startswith("/media/local/"):
+                local_path = self._resolve_local_image_path(reference)
+                return self._read_local_image_path(local_path)
+            return await self._fetch_http_image_url(reference)
+        if reference.startswith(("http://", "https://")):
+            return await self._fetch_http_image_url(reference)
+        if "://" in reference:
             raise ValueError(
-                "Only data URLs, /local URLs, /media/local URLs, and http(s) image URLs are supported."
+                "Only data URLs, Home Assistant-local URLs, local image paths, and http(s) image URLs are supported."
             )
 
+        local_path = self._resolve_local_image_path(reference)
+        return self._read_local_image_path(local_path)
+
+    async def _fetch_http_image_url(self, reference: str) -> tuple[bytes, str]:
+        """Fetch an image from an allowed HTTP(S) URL, validating redirects."""
+        current_url = self._resolve_fetchable_http_image_url(reference)
         timeout = aiohttp.ClientTimeout(total=20)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(reference) as response:
-                if response.status != 200:
-                    raise ValueError(
-                        f"Unable to fetch image URL {reference!r}: HTTP {response.status}"
+            for _redirect_count in range(_MAX_IMAGE_FETCH_REDIRECTS + 1):
+                async with session.get(str(current_url), allow_redirects=False) as response:
+                    if response.status in _HTTP_REDIRECT_STATUSES:
+                        location = str(response.headers.get("Location") or "").strip()
+                        if not location:
+                            raise ValueError(
+                                f"Image URL {current_url!s} redirected without a Location header."
+                            )
+                        current_url = self._resolve_fetchable_http_image_url(
+                            str(current_url.join(yarl.URL(location)))
+                        )
+                        continue
+
+                    if response.status != 200:
+                        raise ValueError(
+                            f"Unable to fetch image URL {current_url!s}: HTTP {response.status}"
+                        )
+
+                    image_bytes = await response.read()
+                    mime_type = response.headers.get("Content-Type")
+                    return self._normalize_image_payload(
+                        image_bytes,
+                        mime_type,
+                        str(current_url),
                     )
-                image_bytes = await response.read()
-                mime_type = response.headers.get("Content-Type")
-        return self._normalize_image_payload(image_bytes, mime_type, reference)
+
+        raise ValueError(f"Image URL {reference!r} redirected too many times.")
+
+    def _resolve_fetchable_http_image_url(self, reference: str) -> yarl.URL:
+        """Resolve a supported HTTP(S) image URL into a safe absolute URL."""
+        raw_reference = str(reference or "").strip()
+        if not raw_reference:
+            raise ValueError("Image URL is required.")
+
+        if raw_reference.startswith("/"):
+            base_url = self._get_hass_base_url()
+            return yarl.URL(base_url).join(yarl.URL(raw_reference))
+
+        parsed_url = yarl.URL(raw_reference)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.host:
+            raise ValueError(
+                "HTTP image URLs must use http or https and include a host."
+            )
+        if parsed_url.user or parsed_url.password:
+            raise ValueError("HTTP image URLs must not embed credentials.")
+
+        parsed_url = parsed_url.with_fragment(None)
+        normalized_url = str(parsed_url)
+
+        if network_helper.is_hass_url(self.hass, normalized_url):
+            return parsed_url
+
+        if self.hass.config.is_allowed_external_url(normalized_url):
+            return parsed_url
+
+        raise ValueError(
+            "Remote image URLs must either point to this Home Assistant instance or be allowlisted in Home Assistant."
+        )
+
+    def _get_hass_base_url(self) -> str:
+        """Return a base URL for this Home Assistant instance."""
+        try:
+            return network_helper.get_url(
+                self.hass,
+                allow_cloud=False,
+                allow_external=True,
+                allow_internal=True,
+                prefer_external=False,
+            )
+        except HomeAssistantError:
+            if self.hass.config.api is None:
+                raise ValueError(
+                    "Unable to determine a Home Assistant base URL for local image fetches."
+                ) from None
+
+            scheme = "https" if self.hass.config.api.use_ssl else "http"
+            return str(
+                yarl.URL.build(
+                    scheme=scheme,
+                    host="127.0.0.1",
+                    port=self.hass.config.api.port,
+                )
+            )
 
     def _parse_data_url_image(self, reference: str) -> tuple[bytes, str]:
         """Decode a data URL into image bytes."""
@@ -2884,21 +2984,50 @@ class MCPServer:
         image_bytes = base64.b64decode(match.group("data"), validate=False)
         return self._normalize_image_payload(image_bytes, mime_type, "data-url")
 
-    def _resolve_local_image_path(self, reference: str) -> Path:
-        """Resolve a local image path inside the Home Assistant config directory."""
-        config_root = Path(self.hass.config.path("")).resolve()
-        if reference.startswith("/local/"):
-            candidate = (config_root / "www" / reference.removeprefix("/local/")).resolve()
-        elif reference.startswith("/media/local/"):
-            candidate = (
-                config_root / "media" / reference.removeprefix("/media/local/")
-            ).resolve()
-        else:
-            raw_path = Path(reference)
-            if raw_path.is_absolute():
-                candidate = raw_path.resolve()
-            else:
-                candidate = (config_root / raw_path).resolve()
+    def _sanitize_relative_image_parts(self, relative_reference: str) -> tuple[str, ...]:
+        """Return safe relative path parts for a config-scoped image path."""
+        normalized = str(relative_reference or "").strip().replace("\\", "/")
+        if not normalized:
+            raise ValueError("Image path is required.")
+
+        relative_path = PurePosixPath(normalized)
+        parts = relative_path.parts
+        if not parts or relative_path.is_absolute():
+            raise ValueError(
+                "Image paths must be relative to the Home Assistant config directory."
+            )
+        if any(part in {"", ".", ".."} for part in parts):
+            raise ValueError(
+                "Image paths must stay inside the Home Assistant config directory."
+            )
+        return tuple(parts)
+
+    def _coerce_config_relative_image_path(
+        self, reference: str, config_root: Path
+    ) -> tuple[str, ...]:
+        """Convert a relative or config-root-absolute image path into safe parts."""
+        normalized = str(reference or "").strip()
+        if not normalized:
+            raise ValueError("Image path is required.")
+
+        config_root_posix = config_root.as_posix().rstrip("/")
+        normalized_posix = normalized.replace("\\", "/")
+
+        if normalized_posix == config_root_posix or normalized_posix.startswith(
+            f"{config_root_posix}/"
+        ):
+            normalized_posix = normalized_posix[len(config_root_posix) :].lstrip("/")
+
+        return self._sanitize_relative_image_parts(normalized_posix)
+
+    def _resolve_config_scoped_path(
+        self,
+        config_root: Path,
+        base_root: Path,
+        relative_parts: tuple[str, ...],
+    ) -> Path:
+        """Resolve and validate a config-scoped path from trusted relative parts."""
+        candidate = base_root.joinpath(*relative_parts).resolve()
 
         try:
             candidate.relative_to(config_root)
@@ -2910,6 +3039,35 @@ class MCPServer:
         if not candidate.is_file():
             raise ValueError(f"Image file was not found: {candidate}")
         return candidate
+
+    def _resolve_local_image_path(self, reference: str) -> Path:
+        """Resolve a local image path inside the Home Assistant config directory."""
+        config_root = Path(self.hass.config.path("")).resolve()
+        if reference.startswith("/local/"):
+            relative_parts = self._sanitize_relative_image_parts(
+                reference.removeprefix("/local/")
+            )
+            return self._resolve_config_scoped_path(
+                config_root,
+                config_root / "www",
+                relative_parts,
+            )
+        if reference.startswith("/media/local/"):
+            relative_parts = self._sanitize_relative_image_parts(
+                reference.removeprefix("/media/local/")
+            )
+            return self._resolve_config_scoped_path(
+                config_root,
+                config_root / "media",
+                relative_parts,
+            )
+
+        relative_parts = self._coerce_config_relative_image_path(reference, config_root)
+        return self._resolve_config_scoped_path(
+            config_root,
+            config_root,
+            relative_parts,
+        )
 
     def _read_local_image_path(self, path: Path) -> tuple[bytes, str]:
         """Read and validate a local image file."""

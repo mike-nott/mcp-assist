@@ -166,8 +166,18 @@ class ReadUrlTool:
         import re
 
         # Remove script and style blocks
-        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(
+            r"<script\b[^>]*>.*?</script\b[^>]*>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        html = re.sub(
+            r"<style\b[^>]*>.*?</style\b[^>]*>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
 
         # Remove HTML comments
         html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
