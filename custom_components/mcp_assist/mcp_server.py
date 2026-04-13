@@ -2972,17 +2972,31 @@ class MCPServer:
         target_url: yarl.URL,
     ) -> yarl.URL:
         """Build a request URL using a trusted authority and a validated target path."""
-        request_url = trusted_base_url.origin().with_path(target_url.path or "/")
+        request_url = trusted_base_url.origin().with_path(
+            self._sanitize_http_request_path(target_url.path or "/")
+        )
         if target_url.query_string:
             request_url = request_url.with_query(target_url.query_string)
         return request_url.with_fragment(None)
 
     def _build_safe_http_request_path(self, target_url: yarl.URL) -> str:
         """Build a request path using only a validated target path and query."""
-        request_path = target_url.path or "/"
+        request_path = self._sanitize_http_request_path(target_url.path or "/")
         if target_url.query_string:
             request_path = f"{request_path}?{target_url.query_string}"
         return request_path
+
+    def _sanitize_http_request_path(self, path: str) -> str:
+        """Normalize an HTTP request path so it cannot replace the trusted authority.
+
+        aiohttp accepts both absolute URLs and relative request paths. Collapse any
+        leading slash run to a single rooted path so inputs like ``//evil.test/x``
+        cannot be interpreted as a network-path reference against the session base URL.
+        """
+        normalized_path = path or "/"
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        return "/" + normalized_path.lstrip("/")
 
     def _get_allowlisted_external_base_url(
         self, parsed_url: yarl.URL
@@ -3035,7 +3049,7 @@ class MCPServer:
 
     def _normalized_http_path(self, path: str) -> str:
         """Return a normalized HTTP path for prefix checks."""
-        normalized_path = path or "/"
+        normalized_path = self._sanitize_http_request_path(path or "/")
         if normalized_path != "/" and normalized_path.endswith("/"):
             return normalized_path.rstrip("/")
         return normalized_path

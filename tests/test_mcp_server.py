@@ -1457,3 +1457,57 @@ def test_resolve_fetchable_http_image_url_keeps_supported_sources(
         server._resolve_fetchable_http_image_url(
             "https://images.example.com/weather-evil/radar.png"
         )
+
+
+def test_resolve_fetchable_http_image_url_sanitizes_double_slash_paths(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Double-slash paths should stay on the trusted authority, not become a network-path URL."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    monkeypatch.setattr(
+        mcp_server_module.network_helper,
+        "get_url",
+        lambda *args, **kwargs: "http://ha.local:8123",
+    )
+    monkeypatch.setattr(
+        mcp_server_module.network_helper,
+        "is_hass_url",
+        lambda hass_obj, url: _is_exact_http_origin(
+            url,
+            scheme="http",
+            host="ha.local",
+            port=8123,
+        ),
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "is_allowed_external_url",
+        _is_allowlisted_external_image_url,
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "allowlist_external_urls",
+        ["https://images.example.com/weather/"],
+    )
+
+    assert (
+        str(
+            server._resolve_fetchable_http_image_url(
+                "http://ha.local:8123//evil.test/latest/meta-data"
+            )
+        )
+        == "http://ha.local:8123/evil.test/latest/meta-data"
+    )
+    assert (
+        server._build_safe_http_request_path(
+            yarl.URL("https://images.example.com//weather/radar.png")
+        )
+        == "/weather/radar.png"
+    )
+
+    with pytest.raises(ValueError, match="allowlisted"):
+        server._resolve_fetchable_http_image_url(
+            "https://images.example.com//evil.test/weather/radar.png"
+        )
