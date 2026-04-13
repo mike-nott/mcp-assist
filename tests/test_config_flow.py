@@ -440,8 +440,8 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
         getattr(marker, "schema", marker): marker
         for marker in tools_section.schema.schema.keys()
     }
-    assert marker_by_key[_builtin_profile_key("calculator")].description
-    assert marker_by_key[_builtin_profile_key("search")].description
+    assert marker_by_key[_builtin_profile_key("calculator")].description is None
+    assert marker_by_key[_builtin_profile_key("search")].description is None
 
 
 async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
@@ -499,12 +499,12 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     external_default = tool_markers[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS].default
     assert external_default() is False if callable(external_default) else external_default is False
-    assert tool_markers[_builtin_shared_key("calculator")].description
-    assert tool_markers[_builtin_shared_key("read_url")].description
+    assert tool_markers[_builtin_shared_key("calculator")].description is None
+    assert tool_markers[_builtin_shared_key("read_url")].description is None
 
 
-def test_built_in_tool_checkbox_descriptions_serialize_as_plain_strings() -> None:
-    """Dynamic built-in tool checkbox subtitles should serialize in the UI-friendly shape."""
+def test_built_in_tool_checkboxes_rely_on_translation_subtitles() -> None:
+    """Built-in packaged tool checkboxes should not override translated subtitles inline."""
     shared_section = _build_shared_tools_section({}, BUILTIN_SPECS)
     profile_section = _build_profile_tools_section({}, BUILTIN_SPECS, {}, {})
 
@@ -539,12 +539,10 @@ def test_built_in_tool_checkbox_descriptions_serialize_as_plain_strings() -> Non
     profile_by_name = {item["name"]: item for item in profile_serialized}
 
     for name in shared_names:
-        assert isinstance(shared_by_name[name]["description"], str)
-        assert shared_by_name[name]["description"]
+        assert "description" not in shared_by_name[name]
 
     for name in profile_names:
-        assert isinstance(profile_by_name[name]["description"], str)
-        assert profile_by_name[name]["description"]
+        assert "description" not in profile_by_name[name]
 
 
 def test_optional_tool_family_checkbox_sets_stay_in_sync() -> None:
