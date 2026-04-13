@@ -184,6 +184,41 @@ During a tool call, packages can read:
 - `self.get_profile_settings()`
 - `self.get_call_context()`
 
+### Reusing core MCP tools
+
+External packages can call built-in MCP Assist tools instead of reimplementing
+shared behavior:
+
+```python
+result = await self.call_mcp_tool(
+    "analyze_image",
+    {
+        "camera_entity_id": "camera.driveway",
+        "question": "What is in the driveway right now?",
+    },
+)
+```
+
+Shared helper modules can do the same with the module-level helpers:
+
+```python
+from custom_components.mcp_assist.custom_tool_api import (
+    call_mcp_tool,
+    get_external_tool_call_context,
+)
+
+result = await call_mcp_tool(
+    hass,
+    "analyze_image",
+    {"camera_entity_id": "camera.driveway"},
+    context=get_external_tool_call_context(),
+)
+```
+
+This keeps package prompts smaller, preserves active-profile model selection,
+and lets external suites compose generic MCP Assist capabilities such as image
+analysis without duplicating provider logic.
+
 ## Tool Definition Rules
 
 Each tool definition must:

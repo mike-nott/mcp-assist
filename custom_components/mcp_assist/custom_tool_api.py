@@ -21,7 +21,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from .const import CUSTOM_TOOL_SHARED_DIRECTORY, CUSTOM_TOOLS_DIRECTORY
+from .const import CUSTOM_TOOL_SHARED_DIRECTORY, CUSTOM_TOOLS_DIRECTORY, DOMAIN
 
 _CURRENT_EXTERNAL_TOOL_CALL_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
     "mcp_assist_external_tool_call_context",
@@ -140,10 +140,20 @@ class MCPAssistExternalTool:
 
     def get_call_context(self) -> dict[str, Any]:
         """Return MCP Assist metadata for the current tool call."""
-        context = _CURRENT_EXTERNAL_TOOL_CALL_CONTEXT.get()
-        if isinstance(context, dict):
-            return dict(context)
-        return {}
+        return get_external_tool_call_context()
+
+    async def call_mcp_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Invoke any MCP Assist tool using the current profile call context."""
+        return await call_mcp_tool(
+            self.hass,
+            tool_name,
+            arguments,
+            context=self.get_call_context(),
+        )
 
     def _set_loaded_settings(self, settings: dict[str, Any]) -> None:
         """Internal helper used by the loader to attach validated settings."""
@@ -209,6 +219,41 @@ def load_external_shared_module(
         sys.modules.pop(unique_module_name, None)
         raise
     return module
+
+
+def get_external_tool_call_context() -> dict[str, Any]:
+    """Return the current scoped external-tool call context."""
+    context = _CURRENT_EXTERNAL_TOOL_CALL_CONTEXT.get()
+    if isinstance(context, dict):
+        return dict(context)
+    return {}
+
+
+async def call_mcp_tool(
+    hass: HomeAssistant,
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Invoke any MCP Assist tool through the shared MCP server."""
+    server = hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+    if server is None:
+        raise RuntimeError("Shared MCP server is not running.")
+
+    handle_tool_call = getattr(server, "handle_tool_call", None)
+    if not callable(handle_tool_call):
+        raise RuntimeError(
+            "This MCP Assist build does not support tool invocation from external packages."
+        )
+
+    return await handle_tool_call(
+        {
+            "name": tool_name,
+            "arguments": dict(arguments or {}),
+            "context": dict(context or {}),
+        }
+    )
 
 
 def _find_external_tools_root(caller_path: Path) -> Path:

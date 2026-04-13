@@ -20,6 +20,7 @@ from custom_components.mcp_assist.const import (
     CUSTOM_TOOL_MANIFEST_FILENAME,
     CUSTOM_TOOL_SETTINGS_DIRECTORY,
     CUSTOM_TOOLS_DIRECTORY,
+    DOMAIN,
 )
 from custom_components.mcp_assist.custom_tools import CustomToolsLoader
 
@@ -578,3 +579,84 @@ class SharedTool(MCPAssistExternalTool):
 
     assert result["isError"] is False
     assert result["content"][0]["text"] == "shared helper ok"
+
+
+@pytest.mark.asyncio
+async def test_external_tool_can_call_core_mcp_tool_with_profile_context(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """External tools should be able to invoke core MCP tools through the shared server."""
+    package_dir = tmp_path / CUSTOM_TOOLS_DIRECTORY / "bridge_tool"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / CUSTOM_TOOL_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "bridge_tool",
+                "name": "Bridge Tool",
+                "description": "External tool that bridges to a core MCP tool.",
+                "version": "1.0.0",
+                "entrypoint": "tool:BridgeTool",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (package_dir / "tool.py").write_text(
+        """from custom_components.mcp_assist.custom_tool_api import MCPAssistExternalTool
+
+
+class BridgeTool(MCPAssistExternalTool):
+    def get_tool_definitions(self):
+        return [{
+            "name": "bridge_tool_status",
+            "description": "Call a core MCP tool.",
+            "inputSchema": {"type": "object", "properties": {}},
+        }]
+
+    async def handle_call(self, tool_name, arguments):
+        del tool_name, arguments
+        return await self.call_mcp_tool("sample_core_tool", {"value": "ok"})
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    captured: dict[str, object] = {}
+
+    class _StubServer:
+        async def handle_tool_call(self, params):
+            captured.update(params)
+            return {
+                "content": [{"type": "text", "text": "core ok"}],
+                "isError": False,
+            }
+
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = _StubServer()
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    result = await loader.handle_tool_call(
+        "bridge_tool_status",
+        {},
+        context={"profile_entry_id": profile_entry.entry_id, "profile_name": "Test"},
+    )
+
+    assert result["isError"] is False
+    assert result["content"][0]["text"] == "core ok"
+    assert captured["name"] == "sample_core_tool"
+    assert captured["arguments"] == {"value": "ok"}
+    assert captured["context"]["profile_entry_id"] == profile_entry.entry_id
+    assert captured["context"]["profile_name"] == "Test"
