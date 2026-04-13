@@ -11,16 +11,17 @@ from typing import Any
 from ..custom_tool_api import MCPAssistExternalTool
 from ..const import (
     CONF_BRAVE_API_KEY,
-    CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
-    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
-    CONF_ENABLE_WEB_SEARCH,
     CONF_SEARCH_PROVIDER,
     DEFAULT_BRAVE_API_KEY,
-    DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
-    DEFAULT_ENABLE_WEB_SEARCH,
+)
+from .builtin_catalog import (
+    BuiltInToolToggleSpec,
+    get_builtin_toggle_spec_by_tool_name,
+    is_builtin_package_enabled_for_shared_settings,
+    load_builtin_tool_toggle_specs,
 )
 from .external_loader import (
     ExternalCustomToolLoader,
@@ -64,51 +65,42 @@ class CustomToolsLoader:
             prompt_package_label="Built-in tool package",
         )
         self._external_loader = ExternalCustomToolLoader(self.hass)
+        self._builtin_toggle_specs: tuple[BuiltInToolToggleSpec, ...] = ()
+        self._builtin_prompt_instructions = ""
         self._external_prompt_instructions = ""
         self._tool_registry: dict[str, _RegisteredTool] = {}
         self._tool_definitions_cache: list[dict[str, Any]] = []
 
     async def initialize(self):
         """Initialize built-in bundles and optional external tool packages."""
+        await self._load_builtin_toggle_specs()
         await self._initialize_builtin_tools()
         await self._initialize_external_tools()
         self._refresh_tool_registry()
+
+    async def _load_builtin_toggle_specs(self) -> None:
+        """Load built-in package toggle metadata from the package manifests."""
+        self._builtin_toggle_specs = await self.hass.async_add_executor_job(
+            load_builtin_tool_toggle_specs
+        )
 
     async def _initialize_builtin_tools(self) -> None:
         """Load built-in tool bundles that ship with MCP Assist."""
         await self._shutdown_builtin_tools()
 
-        selected_tool_ids: set[str] = set()
-        calculator_enabled = self._get_shared_setting(
-            CONF_ENABLE_CALCULATOR_TOOLS, DEFAULT_ENABLE_CALCULATOR_TOOLS
-        )
-        unit_conversion_enabled = self._get_shared_setting(
-            CONF_ENABLE_UNIT_CONVERSION_TOOLS, None
-        )
-        if unit_conversion_enabled is None:
-            unit_conversion_enabled = calculator_enabled
-
-        if calculator_enabled or unit_conversion_enabled:
-            selected_tool_ids.add("calculator")
-        else:
-            _LOGGER.debug(
-                "Calculator and unit-conversion tools disabled in shared MCP settings"
-            )
-
         search_provider = self._get_search_provider()
-        web_search_enabled = self._get_shared_setting(
-            CONF_ENABLE_WEB_SEARCH,
-            DEFAULT_ENABLE_WEB_SEARCH,
-        )
-
-        if not web_search_enabled:
-            _LOGGER.debug("Web search tools disabled in shared MCP settings")
-        elif search_provider in {"brave", "duckduckgo"}:
-            selected_tool_ids.update({"search", "read_url"})
-        else:
-            _LOGGER.debug("Web search enabled, but no supported search provider is configured")
+        selected_tool_ids = {
+            spec.package_id
+            for spec in self._builtin_toggle_specs
+            if is_builtin_package_enabled_for_shared_settings(
+                spec,
+                self._get_shared_setting,
+                search_provider=search_provider,
+            )
+        }
 
         if not selected_tool_ids:
+            self._builtin_prompt_instructions = ""
             return
 
         self.builtin_packages = await self._builtin_loader.load(
@@ -116,6 +108,11 @@ class CustomToolsLoader:
         )
         for loaded_tool in self.builtin_packages:
             self.tools[loaded_tool.manifest.tool_id] = loaded_tool.instance
+        self._builtin_prompt_instructions = combine_prompt_instructions(
+            self.builtin_packages,
+            heading="## Optional Built-In Tool Packages",
+            truncated_notice="[Built-in tool package instructions truncated.]",
+        )
 
         if self.builtin_packages:
             _LOGGER.info(
@@ -179,6 +176,7 @@ class CustomToolsLoader:
                 self.tools.pop(loaded_tool.manifest.tool_id, None)
 
         self.builtin_packages = []
+        self._builtin_prompt_instructions = ""
 
     async def _shutdown_external_tools(self) -> None:
         """Shut down only the currently loaded external custom tool packages."""
@@ -227,9 +225,6 @@ class CustomToolsLoader:
         """Get search provider (shared setting) with backward compatibility."""
         provider = self._get_shared_setting(CONF_SEARCH_PROVIDER)
         if provider:
-            explicit_enabled = self._get_shared_setting(CONF_ENABLE_WEB_SEARCH)
-            if explicit_enabled is False:
-                return "none"
             return provider
 
         # Backward compat: older versions used enable_custom_tools for Brave search.
@@ -289,6 +284,32 @@ class CustomToolsLoader:
         registry_entry = self._tool_registry.get(tool_name)
         return bool(registry_entry and registry_entry.is_external)
 
+    def is_builtin_custom_tool(self, tool_name: str) -> bool:
+        """Check if a tool name comes from a built-in packaged tool."""
+        registry_entry = self._tool_registry.get(tool_name)
+        return bool(
+            registry_entry
+            and registry_entry.loaded_tool_package is not None
+            and not registry_entry.is_external
+        )
+
+    def get_builtin_toggle_specs(self) -> tuple[BuiltInToolToggleSpec, ...]:
+        """Return built-in packaged-tool toggle metadata."""
+        return self._builtin_toggle_specs
+
+    def get_builtin_toggle_spec(
+        self, tool_name: str
+    ) -> BuiltInToolToggleSpec | None:
+        """Return built-in package toggle metadata for a tool name."""
+        return get_builtin_toggle_spec_by_tool_name(
+            tool_name,
+            self._builtin_toggle_specs,
+        )
+
+    def get_builtin_prompt_instructions(self) -> str:
+        """Return aggregated prompt additions from loaded built-in tool packages."""
+        return self._builtin_prompt_instructions
+
     def get_external_prompt_instructions(self) -> str:
         """Return aggregated prompt additions from loaded external tool packages."""
         return self._external_prompt_instructions
@@ -305,6 +326,14 @@ class CustomToolsLoader:
             tool_definitions = ()
 
         try:
+            builtin_prompt_instructions = self.get_builtin_prompt_instructions()
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read built-in prompt instructions for cache key: %s", err
+            )
+            builtin_prompt_instructions = ""
+
+        try:
             external_prompt_instructions = self.get_external_prompt_instructions()
         except Exception as err:
             _LOGGER.debug(
@@ -312,7 +341,11 @@ class CustomToolsLoader:
             )
             external_prompt_instructions = ""
 
-        return (tool_definitions, external_prompt_instructions)
+        return (
+            tool_definitions,
+            builtin_prompt_instructions,
+            external_prompt_instructions,
+        )
 
     async def reload_external_tools(self) -> dict[str, Any]:
         """Backward-compatible alias that reloads all manifest-based tool packages."""
@@ -353,11 +386,13 @@ class CustomToolsLoader:
                     "version": loaded_tool.manifest.version,
                     "tool_names": list(loaded_tool.tool_names),
                     "capabilities": list(loaded_tool.manifest.capabilities),
+                    "prompt_instructions": loaded_tool.prompt_instructions,
                     "shared_settings_path": loaded_tool.shared_settings_path,
                     "has_settings_schema": bool(loaded_tool.settings_schema),
                 }
                 for loaded_tool in self.builtin_packages
             ],
+            "built_in_prompt_instructions": self._builtin_prompt_instructions,
             "external_custom_tools_enabled": self._external_custom_tools_enabled(),
             "external_tools_root": str(self._external_loader.get_tools_root()),
             "external_settings_root": str(self._external_loader.get_settings_root()),
@@ -371,6 +406,7 @@ class CustomToolsLoader:
                     "version": loaded_tool.manifest.version,
                     "tool_names": list(loaded_tool.tool_names),
                     "capabilities": list(loaded_tool.manifest.capabilities),
+                    "prompt_instructions": loaded_tool.prompt_instructions,
                     "shared_settings_path": loaded_tool.shared_settings_path,
                     "has_settings_schema": bool(loaded_tool.settings_schema),
                 }

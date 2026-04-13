@@ -8,6 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from custom_components.mcp_assist.agent import MCPAssistConversationEntity
+from custom_components.mcp_assist.custom_tools.builtin_catalog import (
+    load_builtin_tool_toggle_specs,
+)
 from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_ASSIST_BRIDGE,
@@ -15,6 +18,7 @@ from custom_components.mcp_assist.const import (
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_CLEAN_RESPONSES,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_MAX_HISTORY,
@@ -22,12 +26,24 @@ from custom_components.mcp_assist.const import (
     CONF_TECHNICAL_PROMPT,
     CONF_TECHNICAL_PROMPT_MODE,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
+    CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
     CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_PROFILE_ENABLE_DEVICE_TOOLS,
+    CONF_PROFILE_ENABLE_WEB_SEARCH,
     DOMAIN,
     PROMPT_MODE_CUSTOM,
 )
+
+BUILTIN_SPECS = load_builtin_tool_toggle_specs()
+
+
+def _builtin_spec(tool_name: str):
+    """Return the built-in spec that declares a tool name."""
+    for spec in BUILTIN_SPECS:
+        if tool_name in spec.tool_names:
+            return spec
+    raise AssertionError(f"Missing built-in spec for {tool_name}")
 
 
 def _tool(name: str) -> dict[str, object]:
@@ -115,6 +131,66 @@ def test_profile_tool_filtering_hides_disabled_optional_tools(
     assert "list_assist_tools" not in tool_names
 
 
+def test_profile_tool_filtering_can_hide_convert_unit_without_hiding_add(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Profiles should still be able to disable unit conversion independently of math tools."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
+        }
+    )
+    entry = profile_entry_factory(
+        options={
+            CONF_PROFILE_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS: False,
+        }
+    )
+
+    agent = MCPAssistConversationEntity(hass, entry)
+    filtered = agent._filter_mcp_tools_for_profile(
+        [
+            _tool("add"),
+            _tool("convert_unit"),
+        ]
+    )
+
+    tool_names = {tool["name"] for tool in filtered}
+    assert "add" in tool_names
+    assert "convert_unit" not in tool_names
+
+
+def test_profile_tool_filtering_hides_web_search_tools_for_disabled_profile(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Profiles should still be able to hide search and read_url together."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_WEB_SEARCH: True,
+        }
+    )
+    entry = profile_entry_factory(
+        options={
+            CONF_PROFILE_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    agent = MCPAssistConversationEntity(hass, entry)
+    filtered = agent._filter_mcp_tools_for_profile(
+        [
+            _tool("search"),
+            _tool("read_url"),
+            _tool("discover_entities"),
+        ]
+    )
+
+    tool_names = {tool["name"] for tool in filtered}
+    assert "discover_entities" in tool_names
+    assert "search" not in tool_names
+    assert "read_url" not in tool_names
+
+
 def test_optional_technical_instructions_include_external_custom_tool_guidance(
     hass, profile_entry_factory, system_entry_factory
 ) -> None:
@@ -133,6 +209,33 @@ def test_optional_technical_instructions_include_external_custom_tool_guidance(
 
     assert "External Custom Tools" in instructions
     assert "sample_tool_status" in instructions
+
+
+def test_optional_technical_instructions_include_built_in_package_guidance(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Built-in packaged tools should contribute prompt guidance through the loader."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+        }
+    )
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
+        custom_tools=SimpleNamespace(
+            get_builtin_prompt_instructions=lambda: (
+                "## Optional Built-In Tool Packages\n"
+                "Use calculator tools for arithmetic questions."
+            ),
+            get_builtin_toggle_specs=lambda: BUILTIN_SPECS,
+        )
+    )
+
+    instructions = agent._build_optional_technical_instructions("Kitchen")
+
+    assert "Optional Built-In Tool Packages" in instructions
+    assert "calculator tools" in instructions
 
 
 def test_profile_tool_filtering_hides_disabled_external_custom_tools(
@@ -184,6 +287,42 @@ def test_optional_technical_instructions_omit_external_custom_tool_guidance_when
     assert "sample_tool_status" not in instructions
 
 
+def test_profile_tool_filtering_can_disable_search_without_hiding_read_url(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Built-in packaged tools should be independently gateable per profile."""
+    system_entry_factory(
+        data={
+            "enable_search_tool": True,
+            "enable_read_url_tool": True,
+        }
+    )
+    entry = profile_entry_factory(
+        options={
+            "profile_enable_search_tool": False,
+            "profile_enable_read_url_tool": True,
+        }
+    )
+    agent = MCPAssistConversationEntity(hass, entry)
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
+        custom_tools=SimpleNamespace(
+            get_builtin_toggle_spec=lambda name: _builtin_spec(name),
+            get_builtin_toggle_specs=lambda: BUILTIN_SPECS,
+        )
+    )
+
+    filtered = agent._filter_mcp_tools_for_profile(
+        [
+            _tool("search"),
+            _tool("read_url"),
+        ]
+    )
+
+    tool_names = {tool["name"] for tool in filtered}
+    assert "search" not in tool_names
+    assert "read_url" in tool_names
+
+
 @pytest.mark.asyncio
 async def test_profile_disabled_tool_is_rejected_before_mcp_call(
     hass, profile_entry_factory, system_entry_factory
@@ -194,6 +333,31 @@ async def test_profile_disabled_tool_is_rejected_before_mcp_call(
 
     agent = MCPAssistConversationEntity(hass, entry)
     result = await agent._call_mcp_tool("list_assist_tools", {})
+
+    assert result["isError"] is True
+    assert "disabled for this profile" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_profile_disabled_unit_conversion_is_rejected_before_mcp_call(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Direct MCP calls should still respect the profile unit-conversion toggle."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
+        }
+    )
+    entry = profile_entry_factory(
+        options={
+            CONF_PROFILE_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS: False,
+        }
+    )
+
+    agent = MCPAssistConversationEntity(hass, entry)
+    result = await agent._call_mcp_tool("convert_unit", {"value": 1, "from_unit": "m", "to_unit": "ft"})
 
     assert result["isError"] is True
     assert "disabled for this profile" in result["content"][0]["text"]

@@ -8,6 +8,10 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 
+from .custom_tools.builtin_catalog import (
+    get_builtin_shared_setting_value,
+    load_builtin_tool_toggle_specs,
+)
 from .const import (
     DOMAIN,
     SYSTEM_ENTRY_UNIQUE_ID,
@@ -142,6 +146,7 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
     system_entry = get_system_entry(hass)
 
     if system_entry is None:
+        built_in_specs = await hass.async_add_executor_job(load_builtin_tool_toggle_specs)
         _LOGGER.info("System entry not found, creating from first profile's settings (self-healing)")
 
         # Find first profile entry to copy shared settings from
@@ -310,6 +315,14 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     ),
                 ),
             }
+            for spec in built_in_specs:
+                shared_settings[spec.shared_setting_key] = get_builtin_shared_setting_value(
+                    spec,
+                    lambda key, default=None: first_profile.options.get(
+                        key,
+                        first_profile.data.get(key, default),
+                    ),
+                )
         else:
             # No profiles exist yet (shouldn't happen in normal flow), use defaults
             _LOGGER.info("No existing profiles found, using default shared settings")
@@ -336,6 +349,8 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_MEMORY_MAX_TTL_DAYS: DEFAULT_MEMORY_MAX_TTL_DAYS,
                 CONF_MEMORY_MAX_ITEMS: DEFAULT_MEMORY_MAX_ITEMS,
             }
+            for spec in built_in_specs:
+                shared_settings[spec.shared_setting_key] = spec.shared_default
 
         # Create system entry with extracted/default settings
         await hass.config_entries.flow.async_init(

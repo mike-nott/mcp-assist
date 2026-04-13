@@ -14,6 +14,9 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_socket import disable_socket, enable_socket
 
+from custom_components.mcp_assist.custom_tools.builtin_catalog import (
+    load_builtin_tool_toggle_specs,
+)
 from custom_components.mcp_assist.const import (
     CONF_ALLOWED_IPS,
     CONF_ENABLE_ASSIST_BRIDGE,
@@ -24,10 +27,21 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_RECORDER_TOOLS,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_LMSTUDIO_URL,
 )
 from custom_components.mcp_assist.mcp_server import MCPServer
+
+BUILTIN_SPECS = load_builtin_tool_toggle_specs()
+
+
+def _builtin_spec(tool_name: str):
+    """Return the built-in packaged-tool spec for a tool name."""
+    for spec in BUILTIN_SPECS:
+        if tool_name in spec.tool_names:
+            return spec
+    raise AssertionError(f"Missing built-in spec for {tool_name}")
 
 
 def test_server_collects_allowed_ips_from_url_and_shared_settings(
@@ -183,6 +197,81 @@ async def test_handle_tools_list_filters_disabled_tool_families(
     assert "play_music_assistant" not in tool_names
     assert "add" not in tool_names
     assert "convert_unit" not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_handle_tools_list_can_keep_unit_conversion_when_calculator_math_is_disabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Package-based built-ins should still honor the separate global math/unit toggles."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
+        }
+    )
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.custom_tools = SimpleNamespace(
+        get_tool_definitions=lambda: [
+            {"name": "add", "description": "calc", "inputSchema": {}},
+            {"name": "convert_unit", "description": "convert", "inputSchema": {}},
+        ],
+        is_custom_tool=lambda tool_name: tool_name in {"add", "convert_unit"},
+    )
+
+    result = await server.handle_tools_list()
+    tool_names = {tool["name"] for tool in result["tools"]}
+
+    assert "add" not in tool_names
+    assert "convert_unit" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_handle_tools_list_hides_web_search_tools_when_shared_toggle_is_off(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """The shared web-search toggle should still hide search and read_url together."""
+    system_entry_factory(
+        data={
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.custom_tools = SimpleNamespace(
+        get_tool_definitions=lambda: [
+            {"name": "search", "description": "search", "inputSchema": {}},
+            {"name": "read_url", "description": "read", "inputSchema": {}},
+        ],
+        is_custom_tool=lambda tool_name: tool_name in {"search", "read_url"},
+    )
+
+    result = await server.handle_tools_list()
+    tool_names = {tool["name"] for tool in result["tools"]}
+
+    assert "search" not in tool_names
+    assert "read_url" not in tool_names
+
+
+def test_package_based_search_and_read_url_can_be_toggled_independently(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Shared built-in package toggles should not force search and read_url together."""
+    system_entry_factory(
+        data={
+            "enable_search_tool": True,
+            "enable_read_url_tool": False,
+            CONF_ENABLE_WEB_SEARCH: False,
+            "search_provider": "brave",
+        }
+    )
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.custom_tools = SimpleNamespace(
+        get_builtin_toggle_spec=lambda name: _builtin_spec(name),
+        get_builtin_toggle_specs=lambda: BUILTIN_SPECS,
+    )
+
+    assert server._is_tool_enabled("search") is True
+    assert server._is_tool_enabled("read_url") is False
 
 
 @pytest.mark.asyncio

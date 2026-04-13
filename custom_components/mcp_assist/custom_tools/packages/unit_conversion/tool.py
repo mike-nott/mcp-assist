@@ -1,4 +1,4 @@
-"""Built-in calculator tool package wrapper."""
+"""Built-in unit-conversion package wrapper."""
 
 from __future__ import annotations
 
@@ -8,10 +8,8 @@ from custom_components.mcp_assist.custom_tool_api import MCPAssistExternalTool
 from custom_components.mcp_assist.custom_tools.calculator import CalculatorTool
 
 
-class CalculatorPackageTool(MCPAssistExternalTool):
-    """Expose the legacy calculator bundle through the package API."""
-
-    _EXCLUDED_TOOL_NAMES = {"convert_unit"}
+class UnitConversionPackageTool(MCPAssistExternalTool):
+    """Expose only the legacy convert_unit tool through the package API."""
 
     def __init__(self, hass, manifest, tool_dir) -> None:
         """Initialize the wrapper and delegated calculator bundle."""
@@ -23,11 +21,11 @@ class CalculatorPackageTool(MCPAssistExternalTool):
         await self._delegate.initialize()
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
-        """Return the delegated calculator tool definitions."""
+        """Return only the unit-conversion tool definition."""
         return [
             tool_definition
             for tool_definition in self._delegate.get_tool_definitions()
-            if str(tool_definition.get("name") or "") not in self._EXCLUDED_TOOL_NAMES
+            if str(tool_definition.get("name") or "") == "convert_unit"
         ]
 
     async def handle_call(
@@ -35,5 +33,5 @@ class CalculatorPackageTool(MCPAssistExternalTool):
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        """Delegate calculator tool calls to the legacy implementation."""
+        """Delegate unit-conversion calls to the legacy implementation."""
         return await self._delegate.handle_call(tool_name, arguments)

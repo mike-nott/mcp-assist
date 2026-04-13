@@ -23,6 +23,12 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from .custom_tools.builtin_catalog import (
+    BuiltInToolToggleSpec,
+    get_builtin_profile_setting_value,
+    get_builtin_shared_setting_value,
+    load_builtin_tool_toggle_specs,
+)
 from .localization import get_language_instruction, get_follow_up_phrases, get_end_words
 
 from .const import (
@@ -68,7 +74,6 @@ from .const import (
     CONF_MEMORY_DEFAULT_TTL_DAYS,
     CONF_MEMORY_MAX_TTL_DAYS,
     CONF_MEMORY_MAX_ITEMS,
-    CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
     CONF_OLLAMA_KEEP_ALIVE,
@@ -132,7 +137,6 @@ from .const import (
     DEFAULT_CLEAN_RESPONSES,
     DEFAULT_TIMEOUT,
     TOOL_FAMILY_ASSIST_BRIDGE,
-    TOOL_FAMILY_CALCULATOR,
     TOOL_FAMILY_DEVICE,
     TOOL_FAMILY_EXTERNAL_CUSTOM,
     TOOL_FAMILY_MUSIC_ASSISTANT,
@@ -140,9 +144,7 @@ from .const import (
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
-    TOOL_FAMILY_UNIT_CONVERSION,
     TOOL_FAMILY_WEATHER_FORECAST,
-    TOOL_FAMILY_WEB_SEARCH,
     TOOL_FAMILY_SHARED_SETTINGS,
     OPENAI_BASE_URL,
     OPENROUTER_BASE_URL,
@@ -279,43 +281,34 @@ PERFORMANCE_SECTION_KEY = "performance"
 PROVIDER_SECTION_KEY = "provider"
 ADVANCED_SECTION_KEY = "advanced_settings"
 DISABLE_ASSIST_BRIDGE_FIELD = "disable_assist_bridge"
-DISABLE_CALCULATOR_FIELD = "disable_calculator"
 DISABLE_CUSTOM_TOOLS_FIELD = "disable_custom_tools"
 DISABLE_DEVICE_FIELD = "disable_device"
 DISABLE_MEMORY_FIELD = "disable_memory"
 DISABLE_MUSIC_ASSISTANT_FIELD = "disable_music_assistant"
 DISABLE_RECORDER_FIELD = "disable_recorder"
 DISABLE_RESPONSE_SERVICE_FIELD = "disable_response_service"
-DISABLE_UNIT_CONVERSION_FIELD = "disable_unit_conversion"
 DISABLE_WEATHER_FORECAST_FIELD = "disable_weather_forecast"
-DISABLE_WEB_SEARCH_FIELD = "disable_web_search"
 
-TOOL_FAMILY_ALPHABETICAL = [
+STATIC_TOOL_FAMILY_ALPHABETICAL = [
     TOOL_FAMILY_ASSIST_BRIDGE,
-    TOOL_FAMILY_CALCULATOR,
     TOOL_FAMILY_EXTERNAL_CUSTOM,
     TOOL_FAMILY_DEVICE,
     TOOL_FAMILY_MEMORY,
     TOOL_FAMILY_MUSIC_ASSISTANT,
     TOOL_FAMILY_RECORDER,
     TOOL_FAMILY_RESPONSE_SERVICE,
-    TOOL_FAMILY_UNIT_CONVERSION,
     TOOL_FAMILY_WEATHER_FORECAST,
-    TOOL_FAMILY_WEB_SEARCH,
 ]
 
 PROFILE_DISABLE_FIELD_BY_FAMILY = {
     TOOL_FAMILY_ASSIST_BRIDGE: DISABLE_ASSIST_BRIDGE_FIELD,
-    TOOL_FAMILY_CALCULATOR: DISABLE_CALCULATOR_FIELD,
     TOOL_FAMILY_EXTERNAL_CUSTOM: DISABLE_CUSTOM_TOOLS_FIELD,
     TOOL_FAMILY_DEVICE: DISABLE_DEVICE_FIELD,
     TOOL_FAMILY_MEMORY: DISABLE_MEMORY_FIELD,
     TOOL_FAMILY_MUSIC_ASSISTANT: DISABLE_MUSIC_ASSISTANT_FIELD,
     TOOL_FAMILY_RECORDER: DISABLE_RECORDER_FIELD,
     TOOL_FAMILY_RESPONSE_SERVICE: DISABLE_RESPONSE_SERVICE_FIELD,
-    TOOL_FAMILY_UNIT_CONVERSION: DISABLE_UNIT_CONVERSION_FIELD,
     TOOL_FAMILY_WEATHER_FORECAST: DISABLE_WEATHER_FORECAST_FIELD,
-    TOOL_FAMILY_WEB_SEARCH: DISABLE_WEB_SEARCH_FIELD,
 }
 
 
@@ -333,6 +326,23 @@ def _flatten_section_values(
     return normalized
 
 
+async def _async_load_builtin_tool_toggle_specs(
+    hass: HomeAssistant,
+) -> tuple[BuiltInToolToggleSpec, ...]:
+    """Load built-in packaged-tool metadata asynchronously."""
+    return await hass.async_add_executor_job(load_builtin_tool_toggle_specs)
+
+
+def _builtin_shared_field_key(spec: BuiltInToolToggleSpec) -> str:
+    """Return the human-readable shared-form checkbox key for a built-in package."""
+    return spec.shared_label
+
+
+def _builtin_profile_disable_field_key(spec: BuiltInToolToggleSpec) -> str:
+    """Return the human-readable profile disable checkbox key for a built-in package."""
+    return spec.profile_disable_label
+
+
 def _profile_tool_disabled_default(
     current_values: dict[str, Any] | None,
     family: str,
@@ -348,18 +358,36 @@ def _profile_tool_disabled_default(
 
     setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
     stored_value = options.get(setting_key, data.get(setting_key))
-    if stored_value is None and family == TOOL_FAMILY_UNIT_CONVERSION:
-        stored_value = options.get(
-            CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
-            data.get(CONF_PROFILE_ENABLE_CALCULATOR_TOOLS),
-        )
     return stored_value is False
 
 
-def _apply_profile_tool_disables(user_input: dict[str, Any]) -> dict[str, Any]:
+def _builtin_profile_tool_disabled_default(
+    current_values: dict[str, Any] | None,
+    spec: BuiltInToolToggleSpec,
+    options: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> bool:
+    """Return whether a built-in packaged tool should default to disabled."""
+    options = options or {}
+    data = data or {}
+    disable_field = _builtin_profile_disable_field_key(spec)
+    if current_values and disable_field in current_values:
+        return bool(current_values[disable_field])
+
+    stored_value = get_builtin_profile_setting_value(
+        spec,
+        lambda key, default=None: options.get(key, data.get(key, default)),
+    )
+    return stored_value is False
+
+
+def _apply_profile_tool_disables(
+    user_input: dict[str, Any],
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...] = (),
+) -> dict[str, Any]:
     """Map profile disable checkboxes to stored profile enable flags."""
     normalized = dict(user_input)
-    for family in TOOL_FAMILY_ALPHABETICAL:
+    for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
         disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
         disabled = bool(normalized.pop(disable_field, False))
         setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
@@ -367,6 +395,14 @@ def _apply_profile_tool_disables(user_input: dict[str, Any]) -> dict[str, Any]:
             normalized[setting_key] = False
         else:
             normalized.pop(setting_key, None)
+
+    for spec in built_in_specs:
+        disable_field = _builtin_profile_disable_field_key(spec)
+        disabled = bool(normalized.pop(disable_field, False))
+        if disabled:
+            normalized[spec.profile_setting_key] = False
+        else:
+            normalized.pop(spec.profile_setting_key, None)
 
     return normalized
 
@@ -393,17 +429,34 @@ def _infer_web_search_enabled(
     return bool(legacy_enable_custom_tools)
 
 
-def _normalize_shared_tool_inputs(user_input: dict[str, Any]) -> dict[str, Any]:
+def _normalize_shared_tool_inputs(
+    user_input: dict[str, Any],
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...] = (),
+) -> dict[str, Any]:
     """Normalize shared tool-family settings before storing."""
     normalized = dict(user_input)
-    web_search_enabled = bool(
-        normalized.get(CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH)
-    )
+
+    for spec in built_in_specs:
+        field_key = _builtin_shared_field_key(spec)
+        if field_key in normalized:
+            normalized[spec.shared_setting_key] = bool(normalized.pop(field_key))
+
     search_provider = _normalize_search_provider(
         normalized.get(CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER)
     )
 
-    if web_search_enabled and search_provider == DEFAULT_SEARCH_PROVIDER:
+    built_in_search_enabled = any(
+        bool(normalized.get(spec.shared_setting_key, spec.shared_default))
+        for spec in built_in_specs
+        if spec.requires_search_provider
+    )
+    legacy_web_search_enabled = bool(
+        normalized.get(CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH)
+    )
+
+    if (
+        built_in_search_enabled or legacy_web_search_enabled
+    ) and search_provider == DEFAULT_SEARCH_PROVIDER:
         normalized[CONF_SEARCH_PROVIDER] = "duckduckgo"
     else:
         normalized[CONF_SEARCH_PROVIDER] = search_provider
@@ -433,6 +486,7 @@ def _normalize_shared_tool_inputs(user_input: dict[str, Any]) -> dict[str, Any]:
 
 def _build_profile_tools_section(
     current_values: dict[str, Any] | None,
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...],
     options: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
 ) -> section:
@@ -440,7 +494,7 @@ def _build_profile_tools_section(
     options = options or {}
     data = data or {}
     profile_tool_fields = {}
-    for family in TOOL_FAMILY_ALPHABETICAL:
+    for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
         disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
         profile_tool_fields[
             vol.Optional(
@@ -450,6 +504,28 @@ def _build_profile_tools_section(
                 ),
             )
         ] = bool
+
+    for spec in sorted(
+        built_in_specs,
+        key=lambda item: item.profile_disable_label.casefold(),
+    ):
+        profile_tool_fields[
+            vol.Optional(
+                _builtin_profile_disable_field_key(spec),
+                description=(
+                    {"description": spec.profile_disable_description}
+                    if spec.profile_disable_description
+                    else None
+                ),
+                default=_builtin_profile_tool_disabled_default(
+                    current_values,
+                    spec,
+                    options,
+                    data,
+                ),
+            )
+        ] = bool
+
     return section(
         vol.Schema(profile_tool_fields),
         {"collapsed": False},
@@ -458,15 +534,36 @@ def _build_profile_tools_section(
 
 def _build_shared_tools_section(
     defaults: dict[str, Any],
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...],
 ) -> section:
     """Build the shared MCP server optional tools section."""
     shared_tool_fields = {}
-    for family in TOOL_FAMILY_ALPHABETICAL:
+    for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
         setting_key, default = TOOL_FAMILY_SHARED_SETTINGS[family]
         shared_tool_fields[
             vol.Optional(
                 setting_key,
                 default=_get_form_value(defaults, setting_key, default),
+            )
+        ] = bool
+
+    for spec in sorted(
+        built_in_specs,
+        key=lambda item: item.shared_label.casefold(),
+    ):
+        shared_tool_fields[
+            vol.Optional(
+                _builtin_shared_field_key(spec),
+                description=(
+                    {"description": spec.shared_description}
+                    if spec.shared_description
+                    else None
+                ),
+                default=_get_form_value(
+                    defaults,
+                    spec.shared_setting_key,
+                    spec.shared_default,
+                ),
             )
         ] = bool
 
@@ -1180,6 +1277,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle step 4 - advanced settings."""
         errors: dict[str, str] = {}
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         # Get server type to determine which fields to show
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
@@ -1192,7 +1290,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 PROVIDER_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
-            user_input = _apply_profile_tool_disables(user_input)
+            user_input = _apply_profile_tool_disables(user_input, built_in_specs)
 
             # For Moltbot, set defaults for hidden fields
             if server_type == SERVER_TYPE_MOLTBOT:
@@ -1304,6 +1402,18 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
                             ),
                         }
+                        for spec in built_in_specs:
+                            shared_settings[spec.shared_setting_key] = (
+                                existing_entry.data.get(
+                                    spec.shared_setting_key,
+                                    get_builtin_shared_setting_value(
+                                        spec,
+                                        lambda key, default=None: existing_entry.data.get(
+                                            key, default
+                                        ),
+                                    ),
+                                )
+                            )
 
                     # Combine data from steps 1-4 + shared settings
                     combined_data = {
@@ -1433,7 +1543,8 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         advanced_schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
-            getattr(self, "step4_data", {})
+            getattr(self, "step4_data", {}),
+            built_in_specs,
         )
 
         advanced_schema = vol.Schema(advanced_schema_dict)
@@ -1469,6 +1580,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle step 5 - shared MCP server settings (first profile only)."""
         errors: dict[str, str] = {}
         current_values = user_input or {}
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         if user_input is not None:
             user_input = _flatten_section_values(
@@ -1478,7 +1590,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 MEMORY_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
-            user_input = _normalize_shared_tool_inputs(user_input)
+            user_input = _normalize_shared_tool_inputs(user_input, built_in_specs)
             current_values = user_input
 
             # Validate MCP port
@@ -1616,20 +1728,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ENABLE_MEMORY_TOOLS,
                 DEFAULT_ENABLE_MEMORY_TOOLS,
             ),
-            CONF_ENABLE_CALCULATOR_TOOLS: _get_form_value(
-                current_values,
-                CONF_ENABLE_CALCULATOR_TOOLS,
-                DEFAULT_ENABLE_CALCULATOR_TOOLS,
-            ),
-            CONF_ENABLE_UNIT_CONVERSION_TOOLS: _get_form_value(
-                current_values,
-                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
-                _get_form_value(
-                    current_values,
-                    CONF_ENABLE_CALCULATOR_TOOLS,
-                    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
-                ),
-            ),
             CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
                 current_values,
                 CONF_ENABLE_DEVICE_TOOLS,
@@ -1661,6 +1759,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 DEFAULT_MEMORY_MAX_ITEMS,
             ),
         }
+        for spec in built_in_specs:
+            shared_defaults[spec.shared_setting_key] = _get_form_value(
+                current_values,
+                spec.shared_setting_key,
+                get_builtin_shared_setting_value(
+                    spec,
+                    lambda key, default=None: current_values.get(key, default),
+                ),
+            )
 
         # Build schema for MCP server settings
         mcp_schema = vol.Schema(
@@ -1680,7 +1787,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 MEMORY_SECTION_KEY: _build_shared_memory_section(shared_defaults),
-                TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
+                TOOLS_SECTION_KEY: _build_shared_tools_section(
+                    shared_defaults,
+                    built_in_specs,
+                ),
             }
         )
 
@@ -1748,6 +1858,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
         default_system_prompt = _get_default_system_prompt(self.hass)
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         if user_input is not None:
             user_input = _flatten_section_values(
@@ -1760,7 +1871,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 ADVANCED_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
-            user_input = _apply_profile_tool_disables(user_input)
+            user_input = _apply_profile_tool_disables(user_input, built_in_specs)
             user_input = _normalize_prompt_inputs(
                 user_input, server_type, default_system_prompt
             )
@@ -2235,7 +2346,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 )
 
         schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
-            current_values, options, data
+            current_values,
+            built_in_specs,
+            options,
+            data,
         )
         schema_dict[ADVANCED_SECTION_KEY] = _build_advanced_section(
             advanced_schema_items
@@ -2279,6 +2393,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         """Configure shared MCP server settings (affects all profiles)."""
         errors: dict[str, str] = {}
         current_values = user_input or {}
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         if user_input is not None:
             user_input = _flatten_section_values(
@@ -2288,7 +2403,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 MEMORY_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
-            user_input = _normalize_shared_tool_inputs(user_input)
+            user_input = _normalize_shared_tool_inputs(user_input, built_in_specs)
             current_values = user_input
 
             # Validate allowed IPs
@@ -2469,34 +2584,6 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ),
             ),
-            CONF_ENABLE_CALCULATOR_TOOLS: _get_form_value(
-                current_values,
-                CONF_ENABLE_CALCULATOR_TOOLS,
-                sys_options.get(
-                    CONF_ENABLE_CALCULATOR_TOOLS,
-                    sys_data.get(
-                        CONF_ENABLE_CALCULATOR_TOOLS,
-                        DEFAULT_ENABLE_CALCULATOR_TOOLS,
-                    ),
-                ),
-            ),
-            CONF_ENABLE_UNIT_CONVERSION_TOOLS: _get_form_value(
-                current_values,
-                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
-                sys_options.get(
-                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
-                    sys_data.get(
-                        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
-                        sys_options.get(
-                            CONF_ENABLE_CALCULATOR_TOOLS,
-                            sys_data.get(
-                                CONF_ENABLE_CALCULATOR_TOOLS,
-                                DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
-                            ),
-                        ),
-                    ),
-                ),
-            ),
             CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
                 current_values,
                 CONF_ENABLE_DEVICE_TOOLS,
@@ -2574,6 +2661,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 ),
             ),
         }
+        for spec in built_in_specs:
+            shared_defaults[spec.shared_setting_key] = _get_form_value(
+                current_values,
+                spec.shared_setting_key,
+                get_builtin_shared_setting_value(
+                    spec,
+                    lambda key, default=None: sys_options.get(
+                        key, sys_data.get(key, default)
+                    ),
+                ),
+            )
 
         # Build schema for MCP server settings
         mcp_schema = vol.Schema(
@@ -2603,7 +2701,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
                 DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
                 MEMORY_SECTION_KEY: _build_shared_memory_section(shared_defaults),
-                TOOLS_SECTION_KEY: _build_shared_tools_section(shared_defaults),
+                TOOLS_SECTION_KEY: _build_shared_tools_section(
+                    shared_defaults,
+                    built_in_specs,
+                ),
             }
         )
 

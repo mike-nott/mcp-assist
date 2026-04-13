@@ -15,15 +15,12 @@ from custom_components.mcp_assist.config_flow import (
     CONTEXT_SECTION_KEY,
     DISCOVERY_SECTION_KEY,
     DISABLE_ASSIST_BRIDGE_FIELD,
-    DISABLE_CALCULATOR_FIELD,
     DISABLE_CUSTOM_TOOLS_FIELD,
     DISABLE_DEVICE_FIELD,
     DISABLE_MEMORY_FIELD,
     DISABLE_MUSIC_ASSISTANT_FIELD,
     DISABLE_RECORDER_FIELD,
     DISABLE_RESPONSE_SERVICE_FIELD,
-    DISABLE_UNIT_CONVERSION_FIELD,
-    DISABLE_WEB_SEARCH_FIELD,
     DISABLE_WEATHER_FORECAST_FIELD,
     MEMORY_SECTION_KEY,
     MCPAssistConfigFlow,
@@ -33,17 +30,19 @@ from custom_components.mcp_assist.config_flow import (
     PROFILE_SECTION_KEY,
     PROMPTS_SECTION_KEY,
     PROFILE_DISABLE_FIELD_BY_FAMILY,
+    STATIC_TOOL_FAMILY_ALPHABETICAL,
     TOOLS_SECTION_KEY,
-    TOOL_FAMILY_ALPHABETICAL,
     _apply_profile_tool_disables,
     _infer_prompt_mode,
     _needs_prompt_followup,
     _normalize_prompt_inputs,
     validate_allowed_ips,
 )
+from custom_components.mcp_assist.custom_tools.builtin_catalog import (
+    load_builtin_tool_toggle_specs,
+)
 from custom_components.mcp_assist.const import (
     CONF_BRAVE_API_KEY,
-    CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
@@ -51,8 +50,6 @@ from custom_components.mcp_assist.const import (
     CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_MEMORY_TOOLS,
-    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
-    CONF_ENABLE_WEB_SEARCH,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RECORDER_TOOLS,
@@ -80,6 +77,27 @@ from custom_components.mcp_assist.const import (
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_SHARED_SETTINGS,
 )
+
+BUILTIN_SPECS = load_builtin_tool_toggle_specs()
+BUILTIN_SPEC_BY_PACKAGE = {spec.package_id: spec for spec in BUILTIN_SPECS}
+PROFILE_BUILTIN_ORDER = [
+    spec.profile_disable_label
+    for spec in sorted(BUILTIN_SPECS, key=lambda item: item.profile_disable_label.casefold())
+]
+SHARED_BUILTIN_ORDER = [
+    spec.shared_label
+    for spec in sorted(BUILTIN_SPECS, key=lambda item: item.shared_label.casefold())
+]
+
+
+def _builtin_shared_key(package_id: str) -> str:
+    """Return the shared form label for a built-in packaged tool."""
+    return BUILTIN_SPEC_BY_PACKAGE[package_id].shared_label
+
+
+def _builtin_profile_key(package_id: str) -> str:
+    """Return the profile-disable form label for a built-in packaged tool."""
+    return BUILTIN_SPEC_BY_PACKAGE[package_id].profile_disable_label
 
 
 def test_infer_prompt_mode_defaults_when_prompt_matches_builtin() -> None:
@@ -248,12 +266,17 @@ def test_apply_profile_tool_disables_marks_checked_tools_disabled() -> None:
             DISABLE_DEVICE_FIELD: True,
             DISABLE_ASSIST_BRIDGE_FIELD: True,
             DISABLE_CUSTOM_TOOLS_FIELD: True,
-        }
+            _builtin_profile_key("calculator"): True,
+            _builtin_profile_key("search"): True,
+        },
+        BUILTIN_SPECS,
     )
 
     assert normalized[CONF_PROFILE_ENABLE_DEVICE_TOOLS] is False
     assert normalized[CONF_PROFILE_ENABLE_ASSIST_BRIDGE] is False
     assert normalized[CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS] is False
+    assert normalized["profile_enable_calculator_tools"] is False
+    assert normalized["profile_enable_search_tool"] is False
 
 
 def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
@@ -263,15 +286,19 @@ def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
             DISABLE_DEVICE_FIELD: False,
             DISABLE_ASSIST_BRIDGE_FIELD: False,
             DISABLE_CUSTOM_TOOLS_FIELD: False,
+            _builtin_profile_key("calculator"): False,
             CONF_PROFILE_ENABLE_DEVICE_TOOLS: False,
             CONF_PROFILE_ENABLE_ASSIST_BRIDGE: False,
             CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
-        }
+            "profile_enable_calculator_tools": False,
+        },
+        BUILTIN_SPECS,
     )
 
     assert CONF_PROFILE_ENABLE_DEVICE_TOOLS not in normalized
     assert CONF_PROFILE_ENABLE_ASSIST_BRIDGE not in normalized
     assert CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS not in normalized
+    assert "profile_enable_calculator_tools" not in normalized
 
 
 async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) -> None:
@@ -293,16 +320,14 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
     ]
     assert section_keys == [
         DISABLE_ASSIST_BRIDGE_FIELD,
-        DISABLE_CALCULATOR_FIELD,
         DISABLE_CUSTOM_TOOLS_FIELD,
         DISABLE_DEVICE_FIELD,
         DISABLE_MEMORY_FIELD,
         DISABLE_MUSIC_ASSISTANT_FIELD,
         DISABLE_RECORDER_FIELD,
         DISABLE_RESPONSE_SERVICE_FIELD,
-        DISABLE_UNIT_CONVERSION_FIELD,
         DISABLE_WEATHER_FORECAST_FIELD,
-        DISABLE_WEB_SEARCH_FIELD,
+        *PROFILE_BUILTIN_ORDER,
     ]
     assert all(value is bool for value in tools_section.schema.schema.values())
 
@@ -353,16 +378,14 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     assert tool_keys == [
         CONF_ENABLE_ASSIST_BRIDGE,
-        CONF_ENABLE_CALCULATOR_TOOLS,
         CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
         CONF_ENABLE_DEVICE_TOOLS,
         CONF_ENABLE_MEMORY_TOOLS,
         CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
         CONF_ENABLE_RECORDER_TOOLS,
         CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
         CONF_ENABLE_WEATHER_FORECAST_TOOL,
-        CONF_ENABLE_WEB_SEARCH,
+        *SHARED_BUILTIN_ORDER,
         CONF_SEARCH_PROVIDER,
         CONF_BRAVE_API_KEY,
     ]
@@ -376,13 +399,13 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
 
 def test_optional_tool_family_checkbox_sets_stay_in_sync() -> None:
     """Every optional tool family should exist in both shared and profile checkbox builders."""
-    assert set(TOOL_FAMILY_ALPHABETICAL) == set(TOOL_FAMILY_PROFILE_SETTINGS)
-    assert set(TOOL_FAMILY_ALPHABETICAL) == set(TOOL_FAMILY_SHARED_SETTINGS)
-    assert set(TOOL_FAMILY_ALPHABETICAL) == set(PROFILE_DISABLE_FIELD_BY_FAMILY)
+    assert set(STATIC_TOOL_FAMILY_ALPHABETICAL) <= set(TOOL_FAMILY_PROFILE_SETTINGS)
+    assert set(STATIC_TOOL_FAMILY_ALPHABETICAL) <= set(TOOL_FAMILY_SHARED_SETTINGS)
+    assert set(STATIC_TOOL_FAMILY_ALPHABETICAL) == set(PROFILE_DISABLE_FIELD_BY_FAMILY)
 
 
 def test_tool_checkbox_translations_cover_all_declared_tool_fields() -> None:
-    """All shared/profile tool checkbox fields should have labels and descriptions."""
+    """Static shared/profile tool checkbox fields should still have labels and descriptions."""
     strings = json.loads(
         Path("custom_components/mcp_assist/strings.json").read_text(encoding="utf-8")
     )
@@ -391,10 +414,12 @@ def test_tool_checkbox_translations_cover_all_declared_tool_fields() -> None:
         shared_tools = strings[root]["step"]["mcp_server"]["sections"][TOOLS_SECTION_KEY]
 
         expected_profile_fields = {
-            PROFILE_DISABLE_FIELD_BY_FAMILY[family] for family in TOOL_FAMILY_ALPHABETICAL
+            PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+            for family in STATIC_TOOL_FAMILY_ALPHABETICAL
         }
         expected_shared_fields = {
-            TOOL_FAMILY_SHARED_SETTINGS[family][0] for family in TOOL_FAMILY_ALPHABETICAL
+            TOOL_FAMILY_SHARED_SETTINGS[family][0]
+            for family in STATIC_TOOL_FAMILY_ALPHABETICAL
         }
 
         assert expected_profile_fields <= set(advanced_tools["data"])

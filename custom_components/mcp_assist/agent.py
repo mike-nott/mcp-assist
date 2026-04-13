@@ -29,6 +29,11 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
+from .custom_tools.builtin_catalog import (
+    BuiltInToolToggleSpec,
+    get_builtin_toggle_spec_by_package_id,
+    is_builtin_package_enabled_for_profile,
+)
 from .localization import get_language_instruction
 from .const import (
     DOMAIN,
@@ -94,8 +99,6 @@ from .const import (
     RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS,
     MEMORY_TECHNICAL_INSTRUCTIONS,
     ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS,
-    CALCULATOR_TECHNICAL_INSTRUCTIONS,
-    UNIT_CONVERSION_TECHNICAL_INSTRUCTIONS,
     MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
@@ -275,8 +278,77 @@ class MCPAssistConversationEntity(ConversationEntity):
             and self._get_profile_setting(profile_key, profile_default)
         )
 
+    def _get_builtin_toggle_specs(self) -> tuple[BuiltInToolToggleSpec, ...]:
+        """Return built-in packaged-tool metadata from the shared custom tool loader."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return ()
+
+        getter = getattr(custom_tools, "get_builtin_toggle_specs", None)
+        if not callable(getter):
+            return ()
+
+        try:
+            return tuple(getter() or ())
+        except Exception as err:
+            _LOGGER.debug("Unable to read built-in packaged tool specs: %s", err)
+            return ()
+
+    def _get_builtin_toggle_spec(
+        self,
+        tool_name: str,
+    ) -> BuiltInToolToggleSpec | None:
+        """Return built-in packaged-tool metadata for a tool name, if any."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is not None:
+            getter = getattr(custom_tools, "get_builtin_toggle_spec", None)
+            if callable(getter):
+                try:
+                    return getter(tool_name)
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Unable to read built-in packaged tool metadata for %s: %s",
+                        tool_name,
+                        err,
+                    )
+
+        return None
+
+    def _is_builtin_package_enabled(
+        self,
+        spec: BuiltInToolToggleSpec,
+    ) -> bool:
+        """Return whether a built-in packaged tool is enabled for this profile."""
+        return is_builtin_package_enabled_for_profile(
+            spec,
+            self._get_shared_setting,
+            self._get_profile_setting,
+            search_provider=self.search_provider,
+        )
+
+    def _is_builtin_package_enabled_by_id(
+        self,
+        package_id: str,
+        *,
+        fallback_family: str | None = None,
+    ) -> bool:
+        """Return whether a built-in package is enabled, with family fallback."""
+        spec = get_builtin_toggle_spec_by_package_id(
+            package_id,
+            self._get_builtin_toggle_specs(),
+        )
+        if spec is not None:
+            return self._is_builtin_package_enabled(spec)
+        if fallback_family is not None:
+            return self._is_optional_tool_family_enabled(fallback_family)
+        return False
+
     def _is_tool_enabled_for_profile(self, tool_name: str) -> bool:
         """Return whether a tool should be visible to this profile."""
+        built_in_spec = self._get_builtin_toggle_spec(tool_name)
+        if built_in_spec is not None:
+            return self._is_builtin_package_enabled(built_in_spec)
+
         family = get_optional_tool_family(tool_name)
         if family is not None:
             return self._is_optional_tool_family_enabled(family)
@@ -454,12 +526,18 @@ class MCPAssistConversationEntity(ConversationEntity):
     @property
     def calculator_tools_enabled(self) -> bool:
         """Get effective calculator tool setting for this profile."""
-        return self._is_optional_tool_family_enabled("calculator")
+        return self._is_builtin_package_enabled_by_id(
+            "calculator",
+            fallback_family="calculator",
+        )
 
     @property
     def unit_conversion_tools_enabled(self) -> bool:
         """Get effective unit-conversion tool setting for this profile."""
-        return self._is_optional_tool_family_enabled("unit_conversion")
+        return self._is_builtin_package_enabled_by_id(
+            "unit_conversion",
+            fallback_family="unit_conversion",
+        )
 
     @property
     def device_tools_enabled(self) -> bool:
@@ -469,6 +547,13 @@ class MCPAssistConversationEntity(ConversationEntity):
     @property
     def web_search_tools_enabled(self) -> bool:
         """Get effective web-search tool setting for this profile."""
+        specs = self._get_builtin_toggle_specs()
+        if specs:
+            return any(
+                self._is_builtin_package_enabled(spec)
+                for spec in specs
+                if spec.package_id in {"search", "read_url"}
+            )
         return self._is_optional_tool_family_enabled("web_search")
 
     def _get_shared_custom_tools_loader(self) -> Any | None:
@@ -494,6 +579,25 @@ class MCPAssistConversationEntity(ConversationEntity):
             )
             return False
 
+    def _get_builtin_tool_instructions(self) -> str:
+        """Return prompt additions from loaded built-in packaged tools."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return ""
+
+        getter = getattr(custom_tools, "get_builtin_prompt_instructions", None)
+        if not callable(getter):
+            return ""
+
+        try:
+            return str(getter() or "").strip()
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read built-in packaged tool prompt instructions: %s",
+                err,
+            )
+            return ""
+
     def _build_disabled_tool_family_instructions(self) -> str:
         """Build prompt instructions for disabled optional tool families."""
         lines: list[str] = []
@@ -501,11 +605,6 @@ class MCPAssistConversationEntity(ConversationEntity):
         if not self.device_tools_enabled:
             lines.append(
                 "- Device tools are disabled. Do not call discover_devices or get_device_details. Use discover_entities and get_entity_details instead."
-            )
-
-        if not self.web_search_tools_enabled:
-            lines.append(
-                "- Web search tools are disabled. Do not call search or read_url."
             )
 
         if not self.assist_bridge_enabled:
@@ -532,19 +631,16 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "- Memory tools are disabled. Do not call remember_memory, recall_memories, or forget_memory."
             )
 
-        if not self.calculator_tools_enabled:
-            lines.append(
-                "- Calculator tools are disabled. Do not call arithmetic or expression-evaluation tools."
-            )
-
         if not self.external_custom_tools_enabled:
             lines.append(
                 "- External custom tools are disabled. Do not call tools provided by user-defined packages."
             )
 
-        if not self.unit_conversion_tools_enabled:
+        for spec in self._get_builtin_toggle_specs():
+            if self._is_builtin_package_enabled(spec):
+                continue
             lines.append(
-                "- Unit-conversion tools are disabled. Do not call convert_unit."
+                f"- {spec.package_name} is disabled for this profile. Do not call {', '.join(spec.tool_names)}."
             )
 
         if not lines:
@@ -571,18 +667,16 @@ class MCPAssistConversationEntity(ConversationEntity):
         if self.assist_bridge_enabled:
             sections.append(ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS.strip())
 
-        if self.calculator_tools_enabled:
-            sections.append(CALCULATOR_TECHNICAL_INSTRUCTIONS.strip())
-
-        if self.unit_conversion_tools_enabled:
-            sections.append(UNIT_CONVERSION_TECHNICAL_INSTRUCTIONS.strip())
-
         if self.music_assistant_support_enabled:
             sections.append(
                 MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS.replace(
                     "{current_area}", current_area
                 ).strip()
             )
+
+        built_in_tool_instructions = self._get_builtin_tool_instructions()
+        if built_in_tool_instructions:
+            sections.append(built_in_tool_instructions)
 
         if self.external_custom_tools_enabled:
             external_custom_tool_instructions = (
@@ -770,17 +864,22 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.weather_forecast_tools_enabled,
             self.recorder_tools_enabled,
             self.memory_tools_enabled,
-            self.calculator_tools_enabled,
             self.external_custom_tools_enabled,
-            self.unit_conversion_tools_enabled,
             self.device_tools_enabled,
             self.music_assistant_support_enabled,
             self.web_search_tools_enabled,
+            tuple(
+                (
+                    spec.package_id,
+                    self._is_builtin_package_enabled(spec),
+                )
+                for spec in self._get_builtin_toggle_specs()
+            ),
             self._get_external_custom_tool_cache_signature(),
         )
 
     def _get_external_custom_tool_cache_signature(self) -> tuple[Any, ...]:
-        """Return a cache signature for loaded external custom tools."""
+        """Return a cache signature for loaded built-in/external packaged tools."""
         server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
         custom_tools = getattr(server, "custom_tools", None) if server else None
         if custom_tools is None:
@@ -796,6 +895,18 @@ class MCPAssistConversationEntity(ConversationEntity):
             except Exception as err:
                 _LOGGER.debug(
                     "Unable to read external custom tool cache signature: %s", err
+                )
+
+        get_builtin_prompt_instructions = getattr(
+            custom_tools, "get_builtin_prompt_instructions", None
+        )
+        if callable(get_builtin_prompt_instructions):
+            try:
+                return (str(get_builtin_prompt_instructions() or "").strip(),)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Unable to read built-in packaged tool prompt instructions: %s",
+                    err,
                 )
 
         get_external_prompt_instructions = getattr(

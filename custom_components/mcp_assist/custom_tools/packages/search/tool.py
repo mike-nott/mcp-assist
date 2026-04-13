@@ -8,7 +8,6 @@ from custom_components.mcp_assist import get_system_entry
 from custom_components.mcp_assist.const import (
     CONF_BRAVE_API_KEY,
     CONF_ENABLE_CUSTOM_TOOLS,
-    CONF_ENABLE_WEB_SEARCH,
     CONF_SEARCH_PROVIDER,
     DEFAULT_BRAVE_API_KEY,
 )
@@ -75,9 +74,6 @@ class SearchPackageTool(MCPAssistExternalTool):
         """Return the effective shared search provider."""
         provider = self._get_shared_setting(CONF_SEARCH_PROVIDER)
         if provider:
-            explicit_enabled = self._get_shared_setting(CONF_ENABLE_WEB_SEARCH)
-            if explicit_enabled is False:
-                return "none"
             return str(provider)
 
         if self._get_shared_setting(CONF_ENABLE_CUSTOM_TOOLS, False):

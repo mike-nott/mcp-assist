@@ -719,8 +719,13 @@ class ExternalCustomToolLoader:
         return trimmed.rstrip(" ,;:.") + "."
 
 
-def combine_prompt_instructions(loaded_tools: list[LoadedExternalTool]) -> str:
-    """Combine external-tool prompt appendices into one compact block."""
+def combine_prompt_instructions(
+    loaded_tools: list[LoadedExternalTool],
+    *,
+    heading: str = "## External Custom Tools",
+    truncated_notice: str = "[External custom tool instructions truncated.]",
+) -> str:
+    """Combine tool-package prompt appendices into one compact block."""
     prompt_sections = [
         tool.prompt_instructions.strip()
         for tool in loaded_tools
@@ -729,9 +734,9 @@ def combine_prompt_instructions(loaded_tools: list[LoadedExternalTool]) -> str:
     if not prompt_sections:
         return ""
 
-    combined = "## External Custom Tools\n" + "\n\n".join(prompt_sections)
+    combined = heading.strip() + "\n" + "\n\n".join(prompt_sections)
     if len(combined) <= _MAX_PROMPT_CHARS_TOTAL:
         return combined
 
     truncated = combined[:_MAX_PROMPT_CHARS_TOTAL].rstrip()
-    return truncated + "\n\n[External custom tool instructions truncated.]"
+    return truncated + f"\n\n{truncated_notice}"

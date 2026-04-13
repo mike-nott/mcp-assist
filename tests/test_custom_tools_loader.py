@@ -150,7 +150,7 @@ async def test_initialize_skips_calculator_when_disabled(
 async def test_initialize_loads_calculator_bundle_when_only_unit_conversion_enabled(
     hass, profile_entry_factory, system_entry_factory
 ) -> None:
-    """Unit conversion should still load the shared calculator tool bundle."""
+    """Unit conversion should load its own package without loading math tools."""
     profile_entry = profile_entry_factory()
     system_entry_factory(
         data={
@@ -162,7 +162,8 @@ async def test_initialize_loads_calculator_bundle_when_only_unit_conversion_enab
 
     await loader.initialize()
 
-    assert "calculator" in loader.tools
+    assert "calculator" not in loader.tools
+    assert "unit_conversion" in loader.tools
 
 
 @pytest.mark.asyncio
@@ -216,8 +217,12 @@ async def test_package_diagnostics_include_loaded_builtin_packages(
     diagnostics = loader.get_package_diagnostics()
 
     assert diagnostics["built_in_packages"][0]["id"] == "calculator"
+    assert diagnostics["built_in_prompt_instructions"].startswith(
+        "## Optional Built-In Tool Packages"
+    )
     assert diagnostics["external_custom_tools_enabled"] is False
     assert loader.get_loaded_builtin_tool_info()[0]["tool_names"]
+    assert "Calculator" in loader.get_builtin_prompt_instructions()
 
 
 @pytest.mark.asyncio
@@ -252,6 +257,39 @@ async def test_initialize_loads_search_and_read_url_for_brave(
     await loader.initialize()
 
     assert set(loader.tools) == {"search", "read_url"}
+
+
+@pytest.mark.asyncio
+async def test_initialize_can_enable_search_without_read_url(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Built-in packaged tools should be independently toggleable."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            "enable_search_tool": True,
+            "enable_read_url_tool": False,
+            CONF_SEARCH_PROVIDER: "brave",
+            CONF_BRAVE_API_KEY: "secret",
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    brave_module = types.SimpleNamespace(
+        BraveSearchTool=type("BraveSearchTool", (_StubTool,), {})
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "custom_components.mcp_assist.custom_tools.brave_search",
+        brave_module,
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert "search" in loader.tools
+    assert "read_url" not in loader.tools
 
 
 @pytest.mark.asyncio
