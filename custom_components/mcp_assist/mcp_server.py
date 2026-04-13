@@ -2884,20 +2884,31 @@ class MCPServer:
 
     async def _fetch_http_image_url(self, reference: str) -> tuple[bytes, str]:
         """Fetch an image from an allowed HTTP(S) URL, validating redirects."""
-        current_url = self._resolve_fetchable_http_image_url(reference)
+        current_base_url, current_target_url = self._resolve_fetchable_http_request_target(
+            reference
+        )
         timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for _redirect_count in range(_MAX_IMAGE_FETCH_REDIRECTS + 1):
-                async with session.get(str(current_url), allow_redirects=False) as response:
+        for _redirect_count in range(_MAX_IMAGE_FETCH_REDIRECTS + 1):
+            current_url = self._build_safe_http_request_url(
+                current_base_url, current_target_url
+            )
+            request_path = self._build_safe_http_request_path(current_target_url)
+            async with aiohttp.ClientSession(
+                timeout=timeout,
+                base_url=str(current_base_url),
+            ) as session:
+                async with session.get(request_path, allow_redirects=False) as response:
                     if response.status in _HTTP_REDIRECT_STATUSES:
                         location = str(response.headers.get("Location") or "").strip()
                         if not location:
                             raise ValueError(
                                 f"Image URL {current_url!s} redirected without a Location header."
                             )
-                        current_url = self._resolve_fetchable_http_image_url(
-                            str(current_url.join(yarl.URL(location)))
-                        )
+                        redirect_url = current_url.join(yarl.URL(location))
+                        (
+                            current_base_url,
+                            current_target_url,
+                        ) = self._resolve_fetchable_http_request_target(str(redirect_url))
                         continue
 
                     if response.status != 200:
@@ -2917,13 +2928,21 @@ class MCPServer:
 
     def _resolve_fetchable_http_image_url(self, reference: str) -> yarl.URL:
         """Resolve a supported HTTP(S) image URL into a safe absolute URL."""
+        trusted_base_url, target_url = self._resolve_fetchable_http_request_target(
+            reference
+        )
+        return self._build_safe_http_request_url(trusted_base_url, target_url)
+
+    def _resolve_fetchable_http_request_target(
+        self, reference: str
+    ) -> tuple[yarl.URL, yarl.URL]:
+        """Resolve a supported HTTP(S) image URL into a trusted base URL and request target."""
         raw_reference = str(reference or "").strip()
         if not raw_reference:
             raise ValueError("Image URL is required.")
 
         if raw_reference.startswith("/"):
-            base_url = self._get_hass_base_url()
-            return yarl.URL(base_url).join(yarl.URL(raw_reference))
+            return yarl.URL(self._get_hass_base_url()).origin(), yarl.URL(raw_reference)
 
         parsed_url = yarl.URL(raw_reference)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.host:
@@ -2937,13 +2956,98 @@ class MCPServer:
         normalized_url = str(parsed_url)
 
         if network_helper.is_hass_url(self.hass, normalized_url):
-            return parsed_url
+            return yarl.URL(self._get_hass_base_url()).origin(), parsed_url
 
-        if self.hass.config.is_allowed_external_url(normalized_url):
-            return parsed_url
+        allowlisted_base = self._get_allowlisted_external_base_url(parsed_url)
+        if allowlisted_base is not None:
+            return allowlisted_base.origin(), parsed_url
 
         raise ValueError(
             "Remote image URLs must either point to this Home Assistant instance or be allowlisted in Home Assistant."
+        )
+
+    def _build_safe_http_request_url(
+        self,
+        trusted_base_url: yarl.URL,
+        target_url: yarl.URL,
+    ) -> yarl.URL:
+        """Build a request URL using a trusted authority and a validated target path."""
+        request_url = trusted_base_url.origin().with_path(target_url.path or "/")
+        if target_url.query_string:
+            request_url = request_url.with_query(target_url.query_string)
+        return request_url.with_fragment(None)
+
+    def _build_safe_http_request_path(self, target_url: yarl.URL) -> str:
+        """Build a request path using only a validated target path and query."""
+        request_path = target_url.path or "/"
+        if target_url.query_string:
+            request_path = f"{request_path}?{target_url.query_string}"
+        return request_path
+
+    def _get_allowlisted_external_base_url(
+        self, parsed_url: yarl.URL
+    ) -> yarl.URL | None:
+        """Return the matching allowlisted external base URL for a target URL."""
+        normalized_url = str(parsed_url.with_fragment(None))
+        if not self.hass.config.is_allowed_external_url(normalized_url):
+            return None
+
+        matching_allowlisted_urls = sorted(
+            (
+                yarl.URL(str(allowed).strip())
+                for allowed in self.hass.config.allowlist_external_urls
+                if allowed
+            ),
+            key=lambda item: len(self._normalized_http_path(item.path or "/")),
+            reverse=True,
+        )
+        for allowlisted_url in matching_allowlisted_urls:
+            if allowlisted_url.scheme not in {"http", "https"} or not allowlisted_url.host:
+                continue
+            if not self._has_same_http_origin(allowlisted_url, parsed_url):
+                continue
+            if not self._is_http_path_within_base(
+                allowlisted_url.path or "/",
+                parsed_url.path or "/",
+            ):
+                continue
+            return allowlisted_url
+        return None
+
+    def _has_same_http_origin(self, allowed_url: yarl.URL, target_url: yarl.URL) -> bool:
+        """Return whether two HTTP(S) URLs share the same origin."""
+        return (
+            allowed_url.scheme == target_url.scheme
+            and allowed_url.host == target_url.host
+            and self._normalized_http_port(allowed_url)
+            == self._normalized_http_port(target_url)
+        )
+
+    def _normalized_http_port(self, url: yarl.URL) -> int | None:
+        """Return the effective port for an HTTP(S) URL."""
+        if url.explicit_port is not None:
+            return url.explicit_port
+        if url.scheme == "http":
+            return 80
+        if url.scheme == "https":
+            return 443
+        return None
+
+    def _normalized_http_path(self, path: str) -> str:
+        """Return a normalized HTTP path for prefix checks."""
+        normalized_path = path or "/"
+        if normalized_path != "/" and normalized_path.endswith("/"):
+            return normalized_path.rstrip("/")
+        return normalized_path
+
+    def _is_http_path_within_base(self, base_path: str, target_path: str) -> bool:
+        """Return whether a target path stays within an allowlisted base path."""
+        normalized_base = self._normalized_http_path(base_path)
+        normalized_target = self._normalized_http_path(target_path)
+        if normalized_base == "/":
+            return normalized_target.startswith("/")
+        return normalized_target == normalized_base or normalized_target.startswith(
+            f"{normalized_base}/"
         )
 
     def _get_hass_base_url(self) -> str:

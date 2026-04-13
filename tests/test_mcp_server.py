@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from aiohttp import ClientSession
+import yarl
 from homeassistant.components.weather import WeatherEntityFeature
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -43,6 +44,36 @@ def _builtin_spec(tool_name: str):
         if tool_name in spec.tool_names:
             return spec
     raise AssertionError(f"Missing built-in spec for {tool_name}")
+
+
+def _is_exact_http_origin(url: object, *, scheme: str, host: str, port: int) -> bool:
+    """Return whether a URL matches an exact origin."""
+    parsed_url = yarl.URL(str(url))
+    parsed_port = parsed_url.explicit_port
+    if parsed_port is None and parsed_url.scheme == "http":
+        parsed_port = 80
+    if parsed_port is None and parsed_url.scheme == "https":
+        parsed_port = 443
+    return (
+        parsed_url.scheme == scheme
+        and parsed_url.host == host
+        and parsed_port == port
+        and parsed_url.user is None
+        and parsed_url.password is None
+    )
+
+
+def _is_allowlisted_external_image_url(url: object) -> bool:
+    """Return whether a URL is under the exact allowlisted external image base."""
+    parsed_url = yarl.URL(str(url))
+    if not _is_exact_http_origin(
+        parsed_url,
+        scheme="https",
+        host="images.example.com",
+        port=443,
+    ):
+        return False
+    return parsed_url.path == "/weather" or parsed_url.path.startswith("/weather/")
 
 
 def test_server_collects_allowed_ips_from_url_and_shared_settings(
@@ -1381,12 +1412,22 @@ def test_resolve_fetchable_http_image_url_keeps_supported_sources(
     monkeypatch.setattr(
         mcp_server_module.network_helper,
         "is_hass_url",
-        lambda hass_obj, url: str(url).startswith("http://ha.local:8123"),
+        lambda hass_obj, url: _is_exact_http_origin(
+            url,
+            scheme="http",
+            host="ha.local",
+            port=8123,
+        ),
     )
     monkeypatch.setattr(
         hass.config,
         "is_allowed_external_url",
-        lambda url: str(url).startswith("https://images.example.com/"),
+        _is_allowlisted_external_image_url,
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "allowlist_external_urls",
+        ["https://images.example.com/weather/"],
     )
 
     assert (
@@ -1405,4 +1446,14 @@ def test_resolve_fetchable_http_image_url_keeps_supported_sources(
     with pytest.raises(ValueError, match="allowlisted"):
         server._resolve_fetchable_http_image_url(
             "https://169.254.169.254/latest/meta-data"
+        )
+
+    with pytest.raises(ValueError, match="allowlisted"):
+        server._resolve_fetchable_http_image_url(
+            "https://images.example.com.evil.test/weather/radar.png"
+        )
+
+    with pytest.raises(ValueError, match="allowlisted"):
+        server._resolve_fetchable_http_image_url(
+            "https://images.example.com/weather-evil/radar.png"
         )
