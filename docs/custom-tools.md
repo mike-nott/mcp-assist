@@ -6,26 +6,28 @@ This is intended for advanced users who want to:
 
 - expose integration-specific read helpers
 - add custom component behavior
-- bundle local house-specific helper logic
+- bundle installation-specific helper logic
 - extend MCP Assist without forking the integration
 
 It also keeps user extensions out of the HACS-managed integration directory, which is the recommended upgrade-safe pattern for Home Assistant customizations.
 
 ## What Belongs Where
 
-Use the built-in/core MCP Assist repo for capabilities that are broadly reusable across many Home Assistant installations, such as:
+For most users, the right place to add new behavior is an external custom tool package under `<home-assistant-config>/mcp-assist-tools`.
 
-- generic web, math, calendar, weather, media, or image-analysis helpers
-- tools that operate on standard Home Assistant entities or services without assuming one specific house layout
-- features that should be trusted and available as part of MCP Assist itself
+External custom tools are the recommended place for capabilities that are installation-specific, such as:
 
-Use external custom tool packages for capabilities that are installation-specific, such as:
-
-- local custom components, MariaDB audit tables, or house-specific scripts
-- family relationships, vehicle nicknames, room aliases, or local naming conventions
+- local custom components, recorder/audit tables, or local scripts
+- relationship aliases, vehicle nicknames, room aliases, or local naming conventions
 - city-specific schedules, site-specific camera zones, or custom dashboards
 
-If a capability only works because it knows details about one household or one set of custom entities, it should stay in `<home-assistant-config>/mcp-assist-tools` instead of being added to the core integration.
+If a capability only works because it knows details about one installation or one set of custom entities, it should stay in `<home-assistant-config>/mcp-assist-tools` instead of requiring changes to MCP Assist itself.
+
+If you are contributing directly to the MCP Assist project, core changes should usually be reserved for capabilities that are broadly reusable across many Home Assistant installations, such as:
+
+- generic web, math, calendar, weather, media, or image-analysis helpers
+- tools that operate on standard Home Assistant entities or services without assuming one specific layout
+- features that should be trusted and available as part of MCP Assist itself
 
 ## Safety Model
 

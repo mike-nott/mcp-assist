@@ -2621,7 +2621,7 @@ class MCPServer:
         if server_type == SERVER_TYPE_OPENROUTER:
             return {
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/Jason-Morcos/mcp-assist",
+                "HTTP-Referer": "https://github.com/mike-nott/mcp-assist",
                 "X-Title": "MCP Assist for Home Assistant",
             }
         return {}
