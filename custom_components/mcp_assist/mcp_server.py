@@ -43,6 +43,10 @@ try:
 except ImportError:  # pragma: no cover - older Home Assistant versions
     lr = None
 
+from .custom_tools.builtin_catalog import (
+    BuiltInToolToggleSpec,
+    is_builtin_package_enabled_for_shared_settings,
+)
 from .const import (
     DOMAIN,
     MCP_SERVER_NAME,
@@ -85,7 +89,6 @@ from .const import (
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
     DEFAULT_ENABLE_RECORDER_TOOLS,
     DEFAULT_ENABLE_MEMORY_TOOLS,
-    DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
@@ -215,8 +218,6 @@ class MCPServer:
         """Get search provider (shared setting) with backward compatibility."""
         provider = self._get_shared_setting(CONF_SEARCH_PROVIDER, None)
         if provider:
-            if not self._web_search_enabled():
-                return "none"
             return provider
 
         # Backward compat: if old enable_custom_tools was True, default to "brave"
@@ -296,10 +297,13 @@ class MCPServer:
 
     def _calculator_tools_enabled(self) -> bool:
         """Return whether calculator tools are enabled."""
+        built_in_spec = self._get_builtin_toggle_spec("add")
+        if built_in_spec is not None:
+            return self._is_builtin_package_enabled(built_in_spec)
         return bool(
             self._get_shared_setting(
                 CONF_ENABLE_CALCULATOR_TOOLS,
-                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                False,
             )
         )
 
@@ -351,6 +355,9 @@ class MCPServer:
 
     def _unit_conversion_tools_enabled(self) -> bool:
         """Return whether unit-conversion tools are enabled."""
+        built_in_spec = self._get_builtin_toggle_spec("convert_unit")
+        if built_in_spec is not None:
+            return self._is_builtin_package_enabled(built_in_spec)
         explicit_enabled = self._get_shared_setting(
             CONF_ENABLE_UNIT_CONVERSION_TOOLS,
             None,
@@ -373,6 +380,56 @@ class MCPServer:
             )
         )
 
+    def _get_builtin_toggle_spec(
+        self,
+        tool_name: str,
+    ) -> BuiltInToolToggleSpec | None:
+        """Return built-in packaged-tool metadata for a tool name, if any."""
+        custom_tools = self.custom_tools
+        if custom_tools is None:
+            return None
+
+        getter = getattr(custom_tools, "get_builtin_toggle_spec", None)
+        if not callable(getter):
+            return None
+
+        try:
+            return getter(tool_name)
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read built-in packaged tool metadata for %s: %s",
+                tool_name,
+                err,
+            )
+            return None
+
+    def _get_builtin_toggle_specs(self) -> tuple[BuiltInToolToggleSpec, ...]:
+        """Return built-in packaged-tool metadata from the custom tool loader."""
+        custom_tools = self.custom_tools
+        if custom_tools is None:
+            return ()
+
+        getter = getattr(custom_tools, "get_builtin_toggle_specs", None)
+        if not callable(getter):
+            return ()
+
+        try:
+            return tuple(getter() or ())
+        except Exception as err:
+            _LOGGER.debug("Unable to read built-in packaged tool specs: %s", err)
+            return ()
+
+    def _is_builtin_package_enabled(
+        self,
+        spec: BuiltInToolToggleSpec,
+    ) -> bool:
+        """Return whether a built-in packaged tool is enabled by shared settings."""
+        return is_builtin_package_enabled_for_shared_settings(
+            spec,
+            self._get_shared_setting,
+            search_provider=self._get_search_provider(),
+        )
+
     def _get_domain_capability_error(self, domain: str) -> str | None:
         """Return a settings-based capability error for a domain, if any."""
         if (
@@ -393,6 +450,10 @@ class MCPServer:
 
     def _is_tool_enabled(self, tool_name: str) -> bool:
         """Return whether an optional tool is enabled by settings."""
+        built_in_spec = self._get_builtin_toggle_spec(tool_name)
+        if built_in_spec is not None:
+            return self._is_builtin_package_enabled(built_in_spec)
+
         if tool_name == "get_weather_forecast":
             return self._weather_forecast_tool_enabled()
         if tool_name == "convert_unit":
@@ -440,6 +501,13 @@ class MCPServer:
             self._device_tools_enabled(),
             self._music_assistant_support_enabled(),
             self._external_custom_tools_enabled(),
+            tuple(
+                (
+                    spec.package_id,
+                    self._is_builtin_package_enabled(spec),
+                )
+                for spec in self._get_builtin_toggle_specs()
+            ),
             custom_tool_signature,
         )
 
