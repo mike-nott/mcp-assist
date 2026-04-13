@@ -315,10 +315,91 @@ class CustomToolsLoader:
         return (tool_definitions, external_prompt_instructions)
 
     async def reload_external_tools(self) -> dict[str, Any]:
-        """Reload external custom-tool packages and return diagnostics."""
+        """Backward-compatible alias that reloads all manifest-based tool packages."""
+        return await self.reload_tool_packages()
+
+    async def reload_tool_packages(self) -> dict[str, Any]:
+        """Reload built-in and external manifest-based tool packages."""
+        await self._initialize_builtin_tools()
         await self._initialize_external_tools()
         self._refresh_tool_registry()
-        return self.get_external_diagnostics()
+        return self.get_package_diagnostics()
+
+    def get_loaded_builtin_tool_info(self) -> list[dict[str, Any]]:
+        """Return metadata for loaded built-in tool packages."""
+        return [
+            {
+                "id": loaded_tool.manifest.tool_id,
+                "name": loaded_tool.manifest.name,
+                "version": loaded_tool.manifest.version,
+                "description": loaded_tool.manifest.description,
+                "tool_names": list(loaded_tool.tool_names),
+                "capabilities": list(loaded_tool.manifest.capabilities),
+            }
+            for loaded_tool in self.builtin_packages
+        ]
+
+    def get_package_diagnostics(self) -> dict[str, Any]:
+        """Return diagnostics for all manifest-based tool packages."""
+        return {
+            "built_in_tools_root": str(self._builtin_loader.get_tools_root()),
+            "built_in_last_loaded_at": self._builtin_loader.last_loaded_at,
+            "built_in_scanned_packages": list(self._builtin_loader.last_scanned_packages),
+            "built_in_load_errors": list(self._builtin_loader.last_load_errors),
+            "built_in_packages": [
+                {
+                    "id": loaded_tool.manifest.tool_id,
+                    "name": loaded_tool.manifest.name,
+                    "version": loaded_tool.manifest.version,
+                    "tool_names": list(loaded_tool.tool_names),
+                    "capabilities": list(loaded_tool.manifest.capabilities),
+                    "shared_settings_path": loaded_tool.shared_settings_path,
+                    "has_settings_schema": bool(loaded_tool.settings_schema),
+                }
+                for loaded_tool in self.builtin_packages
+            ],
+            "external_custom_tools_enabled": self._external_custom_tools_enabled(),
+            "external_tools_root": str(self._external_loader.get_tools_root()),
+            "external_settings_root": str(self._external_loader.get_settings_root()),
+            "external_last_loaded_at": self._external_loader.last_loaded_at,
+            "external_scanned_packages": list(self._external_loader.last_scanned_packages),
+            "external_load_errors": list(self._external_loader.last_load_errors),
+            "external_packages": [
+                {
+                    "id": loaded_tool.manifest.tool_id,
+                    "name": loaded_tool.manifest.name,
+                    "version": loaded_tool.manifest.version,
+                    "tool_names": list(loaded_tool.tool_names),
+                    "capabilities": list(loaded_tool.manifest.capabilities),
+                    "shared_settings_path": loaded_tool.shared_settings_path,
+                    "has_settings_schema": bool(loaded_tool.settings_schema),
+                }
+                for loaded_tool in self.external_tools
+            ],
+        }
+
+    def get_external_diagnostics(self) -> dict[str, Any]:
+        """Return detailed diagnostics for external custom-tool loading."""
+        package_diagnostics = self.get_package_diagnostics()
+        return {
+            "enabled": package_diagnostics["external_custom_tools_enabled"],
+            "tools_root": package_diagnostics["external_tools_root"],
+            "settings_root": package_diagnostics["external_settings_root"],
+            "last_loaded_at": package_diagnostics["external_last_loaded_at"],
+            "scanned_packages": package_diagnostics["external_scanned_packages"],
+            "load_errors": package_diagnostics["external_load_errors"],
+            "loaded_tools": [
+                {
+                    **loaded_tool,
+                }
+                for loaded_tool in package_diagnostics["external_packages"]
+            ],
+            "built_in_tools_root": package_diagnostics["built_in_tools_root"],
+            "built_in_last_loaded_at": package_diagnostics["built_in_last_loaded_at"],
+            "built_in_scanned_packages": package_diagnostics["built_in_scanned_packages"],
+            "built_in_load_errors": package_diagnostics["built_in_load_errors"],
+            "built_in_packages": package_diagnostics["built_in_packages"],
+        }
 
     def get_loaded_external_tool_info(self) -> list[dict[str, Any]]:
         """Return metadata for loaded external tool packages."""
@@ -333,29 +414,6 @@ class CustomToolsLoader:
             }
             for loaded_tool in self.external_tools
         ]
-
-    def get_external_diagnostics(self) -> dict[str, Any]:
-        """Return detailed diagnostics for external custom-tool loading."""
-        return {
-            "enabled": self._external_custom_tools_enabled(),
-            "tools_root": str(self._external_loader.get_tools_root()),
-            "settings_root": str(self._external_loader.get_settings_root()),
-            "last_loaded_at": self._external_loader.last_loaded_at,
-            "scanned_packages": list(self._external_loader.last_scanned_packages),
-            "load_errors": list(self._external_loader.last_load_errors),
-            "loaded_tools": [
-                {
-                    "id": loaded_tool.manifest.tool_id,
-                    "name": loaded_tool.manifest.name,
-                    "version": loaded_tool.manifest.version,
-                    "tool_names": list(loaded_tool.tool_names),
-                    "capabilities": list(loaded_tool.manifest.capabilities),
-                    "shared_settings_path": loaded_tool.shared_settings_path,
-                    "has_settings_schema": bool(loaded_tool.settings_schema),
-                }
-                for loaded_tool in self.external_tools
-            ],
-        }
 
     def _get_builtin_tool_definitions(self) -> list[dict[str, Any]]:
         """Return built-in MCP tool definitions for reserved-name checks."""

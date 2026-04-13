@@ -627,9 +627,27 @@ class MCPServer:
             health_info["external_custom_tools_enabled"] = (
                 self._external_custom_tools_enabled()
             )
+            get_loaded_builtin_tool_info = getattr(
+                self.custom_tools,
+                "get_loaded_builtin_tool_info",
+                None,
+            )
+            if callable(get_loaded_builtin_tool_info):
+                health_info["built_in_tool_packages_loaded"] = (
+                    get_loaded_builtin_tool_info()
+                )
             health_info["external_custom_tools_loaded"] = (
                 self.custom_tools.get_loaded_external_tool_info()
             )
+            get_package_diagnostics = getattr(
+                self.custom_tools,
+                "get_package_diagnostics",
+                None,
+            )
+            if callable(get_package_diagnostics):
+                health_info["tool_package_diagnostics"] = (
+                    get_package_diagnostics()
+                )
             get_external_diagnostics = getattr(
                 self.custom_tools,
                 "get_external_diagnostics",
@@ -644,7 +662,7 @@ class MCPServer:
     async def handle_external_tool_diagnostics(
         self, request: web.Request
     ) -> web.Response:
-        """Return detailed diagnostics for external custom tools."""
+        """Return detailed diagnostics for manifest-based tool packages."""
         client_ip = request.remote
         _LOGGER.info("🧰 External tool diagnostics request from %s", client_ip)
 
@@ -660,12 +678,19 @@ class MCPServer:
             "loaded": [],
         }
         if self.custom_tools:
+            get_package_diagnostics = getattr(
+                self.custom_tools,
+                "get_package_diagnostics",
+                None,
+            )
+            if callable(get_package_diagnostics):
+                diagnostics = get_package_diagnostics()
             get_external_diagnostics = getattr(
                 self.custom_tools,
                 "get_external_diagnostics",
                 None,
             )
-            if callable(get_external_diagnostics):
+            if callable(get_external_diagnostics) and not callable(get_package_diagnostics):
                 diagnostics = get_external_diagnostics()
 
         return web.json_response(diagnostics)
@@ -679,15 +704,26 @@ class MCPServer:
                 "load_errors": ["Custom tools are not initialized"],
             }
 
-        reload_external_tools = getattr(self.custom_tools, "reload_external_tools", None)
-        if not callable(reload_external_tools):
+        reload_tool_packages = getattr(self.custom_tools, "reload_tool_packages", None)
+        if callable(reload_tool_packages):
+            diagnostics = await reload_tool_packages()
+        else:
+            reload_external_tools = getattr(self.custom_tools, "reload_external_tools", None)
+            if not callable(reload_external_tools):
+                return {
+                    "enabled": self._external_custom_tools_enabled(),
+                    "loaded_tools": [],
+                    "load_errors": ["Reload is not supported by the current custom tool loader"],
+                }
+
+            diagnostics = await reload_external_tools()
+
+        if diagnostics is None:
             return {
                 "enabled": self._external_custom_tools_enabled(),
                 "loaded_tools": [],
                 "load_errors": ["Reload is not supported by the current custom tool loader"],
             }
-
-        diagnostics = await reload_external_tools()
         self._cached_tools_list = None
         self._cached_tools_signature = None
         await self.broadcast_notification("notifications/tools/list_changed")

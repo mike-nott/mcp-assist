@@ -1082,15 +1082,19 @@ async def test_reload_external_custom_tools_clears_cache_and_notifies_clients(
     server._cached_tools_list = [{"name": "stale"}]
     server._cached_tools_signature = ("stale",)
     server.custom_tools = SimpleNamespace(
-        reload_external_tools=AsyncMock(
-            return_value={"enabled": True, "loaded_tools": [], "load_errors": []}
+        reload_tool_packages=AsyncMock(
+            return_value={
+                "external_custom_tools_enabled": True,
+                "external_packages": [],
+                "built_in_packages": [],
+            }
         )
     )
     server.broadcast_notification = AsyncMock()
 
     diagnostics = await server.reload_external_custom_tools()
 
-    assert diagnostics["enabled"] is True
+    assert diagnostics["external_custom_tools_enabled"] is True
     assert server._cached_tools_list is None
     assert server._cached_tools_signature is None
     server.broadcast_notification.assert_awaited_once_with(

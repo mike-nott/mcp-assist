@@ -197,6 +197,30 @@ async def test_builtin_tool_packages_use_executor_for_manifest_reads(
 
 
 @pytest.mark.asyncio
+async def test_package_diagnostics_include_loaded_builtin_packages(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Manifest-package diagnostics should include built-in package metadata."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    diagnostics = loader.get_package_diagnostics()
+
+    assert diagnostics["built_in_packages"][0]["id"] == "calculator"
+    assert diagnostics["external_custom_tools_enabled"] is False
+    assert loader.get_loaded_builtin_tool_info()[0]["tool_names"]
+
+
+@pytest.mark.asyncio
 async def test_initialize_loads_search_and_read_url_for_brave(
     hass, profile_entry_factory, system_entry_factory, monkeypatch
 ) -> None:
