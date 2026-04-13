@@ -104,6 +104,44 @@ def _builtin_profile_key(package_id: str) -> str:
     return BUILTIN_SPEC_BY_PACKAGE[package_id].profile_disable_label
 
 
+PROFILE_TOOL_ORDER = [
+    DISABLE_ASSIST_BRIDGE_FIELD,
+    _builtin_profile_key("calculator"),
+    DISABLE_CUSTOM_TOOLS_FIELD,
+    DISABLE_DEVICE_FIELD,
+    DISABLE_MEMORY_FIELD,
+    DISABLE_MUSIC_ASSISTANT_FIELD,
+    _builtin_profile_key("read_url"),
+    DISABLE_RECORDER_FIELD,
+    DISABLE_RESPONSE_SERVICE_FIELD,
+    _builtin_profile_key("search"),
+    _builtin_profile_key("unit_conversion"),
+    DISABLE_WEATHER_FORECAST_FIELD,
+]
+
+SHARED_TOOL_ORDER = [
+    CONF_ENABLE_ASSIST_BRIDGE,
+    _builtin_shared_key("calculator"),
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    _builtin_shared_key("read_url"),
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    _builtin_shared_key("search"),
+    _builtin_shared_key("unit_conversion"),
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+]
+
+
+def test_builtin_tool_toggle_specs_include_ui_descriptions() -> None:
+    """Built-in packaged-tool metadata should carry UI subtitles for both forms."""
+    for spec in BUILTIN_SPECS:
+        assert spec.shared_description
+        assert spec.profile_disable_description
+
+
 def test_infer_prompt_mode_defaults_when_prompt_matches_builtin() -> None:
     """Legacy prompt storage should infer default mode when the prompt matches the built-in text."""
     assert _infer_prompt_mode(None, "builtin prompt", "builtin prompt") == PROMPT_MODE_DEFAULT
@@ -378,18 +416,16 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
     section_keys = [
         getattr(key, "schema", key) for key in tools_section.schema.schema.keys()
     ]
-    assert section_keys == [
-        DISABLE_ASSIST_BRIDGE_FIELD,
-        DISABLE_CUSTOM_TOOLS_FIELD,
-        DISABLE_DEVICE_FIELD,
-        DISABLE_MEMORY_FIELD,
-        DISABLE_MUSIC_ASSISTANT_FIELD,
-        DISABLE_RECORDER_FIELD,
-        DISABLE_RESPONSE_SERVICE_FIELD,
-        DISABLE_WEATHER_FORECAST_FIELD,
-        *PROFILE_BUILTIN_ORDER,
-    ]
+    assert section_keys == PROFILE_TOOL_ORDER
     assert all(value is bool for value in tools_section.schema.schema.values())
+    marker_by_key = {
+        getattr(marker, "schema", marker): marker
+        for marker in tools_section.schema.schema.keys()
+    }
+    assert marker_by_key[_builtin_profile_key("calculator")].description[
+        "description"
+    ]
+    assert marker_by_key[_builtin_profile_key("search")].description["description"]
 
 
 async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
@@ -437,15 +473,7 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
         CONF_MEMORY_MAX_ITEMS,
     }
     assert tool_keys == [
-        CONF_ENABLE_ASSIST_BRIDGE,
-        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
-        CONF_ENABLE_DEVICE_TOOLS,
-        CONF_ENABLE_MEMORY_TOOLS,
-        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
-        CONF_ENABLE_RECORDER_TOOLS,
-        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
-        CONF_ENABLE_WEATHER_FORECAST_TOOL,
-        *SHARED_BUILTIN_ORDER,
+        *SHARED_TOOL_ORDER,
         CONF_SEARCH_PROVIDER,
         CONF_BRAVE_API_KEY,
     ]
@@ -455,6 +483,8 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     external_default = tool_markers[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS].default
     assert external_default() is False if callable(external_default) else external_default is False
+    assert tool_markers[_builtin_shared_key("calculator")].description["description"]
+    assert tool_markers[_builtin_shared_key("read_url")].description["description"]
 
 
 def test_optional_tool_family_checkbox_sets_stay_in_sync() -> None:

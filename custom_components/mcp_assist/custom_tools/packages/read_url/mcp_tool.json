@@ -19,6 +19,8 @@
     "profile_default": true,
     "shared_label": "Read URL",
     "profile_disable_label": "Disable Read URL",
+    "shared_description": "Expose URL reading so the assistant can inspect specific web pages.",
+    "profile_disable_description": "Prevents this profile from opening and extracting page content from URLs.",
     "legacy_shared_setting_keys": [
       "enable_web_search"
     ],

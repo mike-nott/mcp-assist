@@ -19,6 +19,8 @@
     "profile_default": true,
     "shared_label": "Search",
     "profile_disable_label": "Disable Search",
+    "shared_description": "Expose web search using the configured shared provider.",
+    "profile_disable_description": "Prevents this profile from using the built-in web search helper.",
     "legacy_shared_setting_keys": [
       "enable_web_search"
     ],

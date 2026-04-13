@@ -311,6 +311,28 @@ PROFILE_DISABLE_FIELD_BY_FAMILY = {
     TOOL_FAMILY_WEATHER_FORECAST: DISABLE_WEATHER_FORECAST_FIELD,
 }
 
+STATIC_TOOL_FAMILY_SHARED_LABELS = {
+    TOOL_FAMILY_ASSIST_BRIDGE: "Assist Bridge",
+    TOOL_FAMILY_EXTERNAL_CUSTOM: "Custom Tools",
+    TOOL_FAMILY_DEVICE: "Device Tools",
+    TOOL_FAMILY_MEMORY: "Memory",
+    TOOL_FAMILY_MUSIC_ASSISTANT: "Music Assistant",
+    TOOL_FAMILY_RECORDER: "Recorder History",
+    TOOL_FAMILY_RESPONSE_SERVICE: "Response Service Reads",
+    TOOL_FAMILY_WEATHER_FORECAST: "Weather Forecast",
+}
+
+STATIC_TOOL_FAMILY_PROFILE_DISABLE_LABELS = {
+    TOOL_FAMILY_ASSIST_BRIDGE: "Disable Assist Bridge",
+    TOOL_FAMILY_EXTERNAL_CUSTOM: "Disable Custom Tools",
+    TOOL_FAMILY_DEVICE: "Disable Device Tools",
+    TOOL_FAMILY_MEMORY: "Disable Memory",
+    TOOL_FAMILY_MUSIC_ASSISTANT: "Disable Music Assistant",
+    TOOL_FAMILY_RECORDER: "Disable Recorder History",
+    TOOL_FAMILY_RESPONSE_SERVICE: "Disable Response Service Reads",
+    TOOL_FAMILY_WEATHER_FORECAST: "Disable Weather Forecast",
+}
+
 
 def _flatten_section_values(
     user_input: dict[str, Any], *section_keys: str
@@ -493,38 +515,51 @@ def _build_profile_tools_section(
     """Build the per-profile tool preferences section."""
     options = options or {}
     data = data or {}
-    profile_tool_fields = {}
+    profile_tool_entries: list[tuple[str, vol.Optional, type[bool]]] = []
     for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
         disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
-        profile_tool_fields[
-            vol.Optional(
-                disable_field,
-                default=_profile_tool_disabled_default(
-                    current_values, family, options, data
+        profile_tool_entries.append(
+            (
+                STATIC_TOOL_FAMILY_PROFILE_DISABLE_LABELS[family].casefold(),
+                vol.Optional(
+                    disable_field,
+                    default=_profile_tool_disabled_default(
+                        current_values, family, options, data
+                    ),
                 ),
+                bool,
             )
-        ] = bool
+        )
 
-    for spec in sorted(
-        built_in_specs,
-        key=lambda item: item.profile_disable_label.casefold(),
-    ):
-        profile_tool_fields[
-            vol.Optional(
-                _builtin_profile_disable_field_key(spec),
-                description=(
-                    {"description": spec.profile_disable_description}
-                    if spec.profile_disable_description
-                    else None
+    for spec in built_in_specs:
+        profile_tool_entries.append(
+            (
+                spec.profile_disable_label.casefold(),
+                vol.Optional(
+                    _builtin_profile_disable_field_key(spec),
+                    description=(
+                        {"description": spec.profile_disable_description}
+                        if spec.profile_disable_description
+                        else None
+                    ),
+                    default=_builtin_profile_tool_disabled_default(
+                        current_values,
+                        spec,
+                        options,
+                        data,
+                    ),
                 ),
-                default=_builtin_profile_tool_disabled_default(
-                    current_values,
-                    spec,
-                    options,
-                    data,
-                ),
+                bool,
             )
-        ] = bool
+        )
+
+    profile_tool_fields = {
+        marker: value_type
+        for _label, marker, value_type in sorted(
+            profile_tool_entries,
+            key=lambda item: item[0],
+        )
+    }
 
     return section(
         vol.Schema(profile_tool_fields),
@@ -537,35 +572,48 @@ def _build_shared_tools_section(
     built_in_specs: tuple[BuiltInToolToggleSpec, ...],
 ) -> section:
     """Build the shared MCP server optional tools section."""
-    shared_tool_fields = {}
+    shared_tool_entries: list[tuple[str, vol.Optional, type[bool]]] = []
     for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
         setting_key, default = TOOL_FAMILY_SHARED_SETTINGS[family]
-        shared_tool_fields[
-            vol.Optional(
-                setting_key,
-                default=_get_form_value(defaults, setting_key, default),
+        shared_tool_entries.append(
+            (
+                STATIC_TOOL_FAMILY_SHARED_LABELS[family].casefold(),
+                vol.Optional(
+                    setting_key,
+                    default=_get_form_value(defaults, setting_key, default),
+                ),
+                bool,
             )
-        ] = bool
+        )
 
-    for spec in sorted(
-        built_in_specs,
-        key=lambda item: item.shared_label.casefold(),
-    ):
-        shared_tool_fields[
-            vol.Optional(
-                _builtin_shared_field_key(spec),
-                description=(
-                    {"description": spec.shared_description}
-                    if spec.shared_description
-                    else None
+    for spec in built_in_specs:
+        shared_tool_entries.append(
+            (
+                spec.shared_label.casefold(),
+                vol.Optional(
+                    _builtin_shared_field_key(spec),
+                    description=(
+                        {"description": spec.shared_description}
+                        if spec.shared_description
+                        else None
+                    ),
+                    default=_get_form_value(
+                        defaults,
+                        spec.shared_setting_key,
+                        spec.shared_default,
+                    ),
                 ),
-                default=_get_form_value(
-                    defaults,
-                    spec.shared_setting_key,
-                    spec.shared_default,
-                ),
+                bool,
             )
-        ] = bool
+        )
+
+    shared_tool_fields = {
+        marker: value_type
+        for _label, marker, value_type in sorted(
+            shared_tool_entries,
+            key=lambda item: item[0],
+        )
+    }
 
     return section(
         vol.Schema(

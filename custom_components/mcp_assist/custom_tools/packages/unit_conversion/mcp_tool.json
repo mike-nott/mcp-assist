@@ -19,6 +19,8 @@
     "profile_default": true,
     "shared_label": "Unit Conversion",
     "profile_disable_label": "Disable Unit Conversion",
+    "shared_description": "Expose exact unit-conversion helpers.",
+    "profile_disable_description": "Prevents this profile from using exact unit-conversion helpers.",
     "legacy_shared_setting_keys": [
       "enable_calculator_tools"
     ],

@@ -28,6 +28,8 @@
     "shared_default": false,
     "profile_default": true,
     "shared_label": "Calculator",
-    "profile_disable_label": "Disable Calculator"
+    "shared_description": "Expose exact arithmetic and expression-evaluation helpers.",
+    "profile_disable_label": "Disable Calculator",
+    "profile_disable_description": "Prevents this profile from using arithmetic and expression-evaluation tools."
   }
 }
