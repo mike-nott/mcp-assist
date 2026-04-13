@@ -353,6 +353,7 @@ class CustomToolsLoader:
 
     async def reload_tool_packages(self) -> dict[str, Any]:
         """Reload built-in and external manifest-based tool packages."""
+        await self._load_builtin_toggle_specs()
         await self._initialize_builtin_tools()
         await self._initialize_external_tools()
         self._refresh_tool_registry()

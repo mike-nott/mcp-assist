@@ -6,6 +6,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -988,6 +989,44 @@ class SharedTool(MCPAssistExternalTool):
 
     assert result["isError"] is False
     assert result["content"][0]["text"] == "shared helper ok"
+
+    (shared_dir / "helpers.py").write_text(
+        "def message():\n    return 'shared helper updated'\n",
+        encoding="utf-8",
+    )
+
+    await loader.reload_tool_packages()
+    reloaded_result = await loader.handle_tool_call("shared_tool_status", {})
+
+    assert reloaded_result["isError"] is False
+    assert reloaded_result["content"][0]["text"] == "shared helper updated"
+
+
+@pytest.mark.asyncio
+async def test_reload_tool_packages_refreshes_builtin_toggle_specs(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Reloading package tools should refresh built-in toggle metadata first."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    loader._load_builtin_toggle_specs = AsyncMock()
+    loader._initialize_builtin_tools = AsyncMock()
+    loader._initialize_external_tools = AsyncMock()
+
+    await loader.reload_tool_packages()
+
+    loader._load_builtin_toggle_specs.assert_awaited_once()
+    loader._initialize_builtin_tools.assert_awaited_once()
+    loader._initialize_external_tools.assert_awaited_once()
 
 
 @pytest.mark.asyncio

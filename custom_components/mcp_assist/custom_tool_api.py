@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+import hashlib
 import importlib.util
 from pathlib import Path
 import sys
@@ -27,6 +28,7 @@ _CURRENT_EXTERNAL_TOOL_CALL_CONTEXT: ContextVar[dict[str, Any] | None] = Context
     "mcp_assist_external_tool_call_context",
     default=None,
 )
+_EXTERNAL_SHARED_MODULE_CACHE: dict[str, tuple[int, str]] = {}
 
 
 @dataclass(frozen=True)
@@ -200,11 +202,29 @@ def load_external_shared_module(
     except ValueError as err:
         raise ImportError("Shared helper module must stay within __shared__") from err
 
+    module_path = module_path.resolve()
+    module_cache_key = str(module_path)
+    module_mtime_ns = module_path.stat().st_mtime_ns
+    cached = _EXTERNAL_SHARED_MODULE_CACHE.get(module_cache_key)
+    if cached is not None:
+        cached_mtime_ns, cached_module_name = cached
+        if cached_mtime_ns == module_mtime_ns:
+            module = sys.modules.get(cached_module_name)
+            if module is not None:
+                return module
+        else:
+            sys.modules.pop(cached_module_name, None)
+
+    path_hash = hashlib.sha1(module_cache_key.encode("utf-8")).hexdigest()[:12]
     unique_module_name = (
-        f"mcp_assist_external_tools.shared.{module_name.replace('.', '_')}"
+        f"mcp_assist_external_tools.shared.{module_name.replace('.', '_')}.{path_hash}_{module_mtime_ns}"
     )
     module = sys.modules.get(unique_module_name)
     if module is not None:
+        _EXTERNAL_SHARED_MODULE_CACHE[module_cache_key] = (
+            module_mtime_ns,
+            unique_module_name,
+        )
         return module
 
     spec = importlib.util.spec_from_file_location(unique_module_name, module_path)
@@ -218,6 +238,10 @@ def load_external_shared_module(
     except Exception:
         sys.modules.pop(unique_module_name, None)
         raise
+    _EXTERNAL_SHARED_MODULE_CACHE[module_cache_key] = (
+        module_mtime_ns,
+        unique_module_name,
+    )
     return module
 
 
