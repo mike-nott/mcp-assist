@@ -1,1 +1,1 @@
-Use `search` for current-events, web, or news questions that need internet lookup through the configured provider.
+Use `search` for current-events, latest, today, or right-now news questions that need internet lookup through the configured provider; if snippets are too thin, follow with `read_url` on a promising result.

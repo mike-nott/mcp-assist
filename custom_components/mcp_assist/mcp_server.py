@@ -7821,15 +7821,22 @@ class MCPServer:
             return resolved_target, selected, False
 
         explicit_name_filter = bool(name_contains)
-        discovery_name = name_contains or query
-        candidates = await self.discovery.discover_entities(
-            domain="calendar",
-            area=area,
-            floor=floor,
-            label=label,
-            name_contains=discovery_name,
-            limit=25,
+        candidates: list[Dict[str, Any]] = []
+        name_filters = self._build_calendar_name_filters(
+            query=query,
+            name_contains=name_contains,
         )
+        for discovery_name in name_filters:
+            candidates = await self.discovery.discover_entities(
+                domain="calendar",
+                area=area,
+                floor=floor,
+                label=label,
+                name_contains=discovery_name,
+                limit=25,
+            )
+            if candidates:
+                break
         fallback_used = False
         if not candidates and query and not explicit_name_filter:
             candidates = await self.discovery.discover_entities(
@@ -7861,6 +7868,43 @@ class MCPServer:
         ]
         selected.sort(key=lambda item: item["name"].casefold())
         return {"entity_id": [item["entity_id"] for item in selected]}, selected, fallback_used
+
+    def _build_calendar_name_filters(
+        self,
+        *,
+        query: str | None,
+        name_contains: str | None,
+    ) -> list[str | None]:
+        """Build progressively broader calendar-name filters before event-text fallback."""
+        explicit_name = str(name_contains or "").strip()
+        if explicit_name:
+            return [explicit_name]
+
+        raw_query = str(query or "").strip()
+        if not raw_query:
+            return [None]
+
+        filters: list[str | None] = [raw_query]
+        generic_words = {
+            "calendar",
+            "event",
+            "events",
+            "game",
+            "games",
+            "match",
+            "matches",
+            "schedule",
+            "schedules",
+            "next",
+            "upcoming",
+        }
+        query_tokens = re.findall(r"[a-z0-9']+", raw_query.casefold())
+        simplified_tokens = [token for token in query_tokens if token not in generic_words]
+        simplified_query = " ".join(simplified_tokens).strip()
+        if simplified_query and simplified_query != raw_query.casefold():
+            filters.append(simplified_query)
+
+        return filters
 
     @staticmethod
     def _weather_entity_candidate_sort_key(entity: Dict[str, Any]) -> Tuple[int, int, str, str]:

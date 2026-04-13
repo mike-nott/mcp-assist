@@ -12,10 +12,22 @@ import pytest
 from custom_components.mcp_assist.custom_tools import brave_search as brave_module
 from custom_components.mcp_assist.custom_tools import read_url as read_url_module
 
+sys.modules.setdefault("ddgs", types.SimpleNamespace(DDGS=object))
 sys.modules.setdefault("duckduckgo_search", types.SimpleNamespace(DDGS=object))
 ddg_module = importlib.import_module(
     "custom_components.mcp_assist.custom_tools.duckduckgo_search"
 )
+
+
+def test_search_tool_definitions_include_current_events_routing_metadata(hass) -> None:
+    """Built-in search helpers should advertise live-news routing hints."""
+    brave_definition = brave_module.BraveSearchTool(hass, api_key="secret").get_tool_definitions()[0]
+    ddg_definition = ddg_module.DuckDuckGoSearchTool(hass).get_tool_definitions()[0]
+
+    for definition in (brave_definition, ddg_definition):
+        assert "news" in definition["keywords"]
+        assert definition["preferred_when"]
+        assert definition["returns"]
 
 
 class _FakeResponse:
@@ -98,6 +110,8 @@ async def test_brave_search_formats_successful_results(hass, monkeypatch) -> Non
 
     assert "Weather Result" in result["content"][0]["text"]
     assert "https://example.com/weather" in result["content"][0]["text"]
+    assert result["structuredContent"]["mode"] == "web"
+    assert result["structuredContent"]["results"][0]["url"] == "https://example.com/weather"
     assert fake_session.calls[0][1]["params"]["count"] == "20"
     assert fake_session.calls[0][1]["headers"]["X-Subscription-Token"] == "secret"
 
@@ -123,14 +137,17 @@ async def test_duckduckgo_search_formats_executor_results(hass, monkeypatch) -> 
     """DuckDuckGo search should format normalized executor results."""
     tool = ddg_module.DuckDuckGoSearchTool(hass)
 
-    def _search_sync(query: str, count: int):
+    def _search_sync(query: str, count: int, mode: str):
         assert query == "mariners"
         assert count == 2
+        assert mode == "web"
         return [
             {
                 "title": "Schedule",
-                "href": "https://example.com/schedule",
-                "body": "Upcoming games",
+                "url": "https://example.com/schedule",
+                "snippet": "Upcoming games",
+                "source": "",
+                "date": "",
             }
         ]
 
@@ -140,6 +157,8 @@ async def test_duckduckgo_search_formats_executor_results(hass, monkeypatch) -> 
 
     assert "Schedule" in result["content"][0]["text"]
     assert "https://example.com/schedule" in result["content"][0]["text"]
+    assert result["structuredContent"]["mode"] == "web"
+    assert result["structuredContent"]["results"][0]["url"] == "https://example.com/schedule"
 
 
 def test_duckduckgo_search_sync_normalizes_ddgs_results(monkeypatch, hass) -> None:
@@ -156,13 +175,51 @@ def test_duckduckgo_search_sync_normalizes_ddgs_results(monkeypatch, hass) -> No
     monkeypatch.setattr(ddg_module, "DDGS", _FakeDDGS)
     tool = ddg_module.DuckDuckGoSearchTool(hass)
 
-    results = tool._search_sync("bus", 3)
+    results = tool._search_sync("bus", 3, "web")
 
     assert results == [
         {
             "title": "Route 372",
-            "href": "https://example.com/372",
-            "body": "ETA",
+            "url": "https://example.com/372",
+            "snippet": "ETA",
+            "source": "",
+            "date": "",
+        }
+    ]
+
+
+def test_duckduckgo_search_sync_uses_news_mode_for_news_queries(monkeypatch, hass) -> None:
+    """News-mode DDGS searches should use the provider news endpoint."""
+
+    class _FakeDDGS:
+        def news(self, **kwargs):
+            assert kwargs["keywords"] == "Iran latest"
+            assert kwargs["max_results"] == 2
+            return [
+                {
+                    "title": "Iran update",
+                    "url": "https://example.com/iran",
+                    "body": "Top development",
+                    "source": "Reuters",
+                    "date": "2026-04-12",
+                }
+            ]
+
+        def text(self, **kwargs):
+            raise AssertionError("news mode should not call text()")
+
+    monkeypatch.setattr(ddg_module, "DDGS", _FakeDDGS)
+    tool = ddg_module.DuckDuckGoSearchTool(hass)
+
+    results = tool._search_sync("Iran latest", 2, "news")
+
+    assert results == [
+        {
+            "title": "Iran update",
+            "url": "https://example.com/iran",
+            "snippet": "Top development",
+            "source": "Reuters",
+            "date": "2026-04-12",
         }
     ]
 
@@ -174,8 +231,8 @@ async def test_duckduckgo_search_returns_error_payload_on_failure(
     """DuckDuckGo search failures should become MCP error text."""
     tool = ddg_module.DuckDuckGoSearchTool(hass)
 
-    def _search_sync(query: str, count: int):
-        del query, count
+    def _search_sync(query: str, count: int, mode: str):
+        del query, count, mode
         raise RuntimeError("search backend failed")
 
     monkeypatch.setattr(tool, "_search_sync", _search_sync)

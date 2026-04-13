@@ -880,6 +880,75 @@ async def test_get_calendar_events_falls_back_to_event_text_search(
 
 
 @pytest.mark.asyncio
+async def test_get_calendar_events_prefers_named_sports_calendar_over_personal_event_match(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Generic words like 'game' should not force a fallback to personal calendar events."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "calendar.mariners_baseball",
+        "off",
+        {"friendly_name": "Mariners Baseball"},
+    )
+    hass.states.async_set(
+        "calendar.ash_jason",
+        "off",
+        {"friendly_name": "Ash & Jason"},
+    )
+    server.discovery.discover_entities = AsyncMock(
+        side_effect=[
+            [],
+            [
+                {
+                    "entity_id": "calendar.mariners_baseball",
+                    "name": "Mariners Baseball",
+                }
+            ],
+        ]
+    )
+    server.tool_call_service_with_response = AsyncMock(
+        return_value={
+            "content": [{"type": "text", "text": "ok"}],
+            "response": {
+                "calendar.mariners_baseball": {
+                    "events": [
+                        {
+                            "summary": "Astros @ Mariners",
+                            "start": "2026-04-12T13:10:00-07:00",
+                            "end": "2026-04-12T16:10:00-07:00",
+                            "location": "T-Mobile Park",
+                        }
+                    ]
+                },
+                "calendar.ash_jason": {
+                    "events": [
+                        {
+                            "summary": "Mariners Game <3",
+                            "start": "2026-04-18T15:00:00-07:00",
+                            "end": "2026-04-18T20:00:00-07:00",
+                        }
+                    ]
+                },
+            },
+        }
+    )
+
+    result = await server.tool_get_calendar_events({"query": "Mariners game", "limit": 1})
+
+    assert server.discovery.discover_entities.await_count == 2
+    first_call = server.discovery.discover_entities.await_args_list[0]
+    second_call = server.discovery.discover_entities.await_args_list[1]
+    assert first_call.kwargs["name_contains"] == "Mariners game"
+    assert second_call.kwargs["name_contains"] == "mariners"
+
+    request_args = server.tool_call_service_with_response.await_args.args[0]
+    assert request_args["target"] == {"entity_id": ["calendar.mariners_baseball"]}
+    assert "Astros @ Mariners" in result["content"][0]["text"]
+    assert "Mariners Game <3" not in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_resolve_weather_forecast_target_uses_generic_ranking(
     hass, profile_entry_factory, system_entry_factory
 ) -> None:

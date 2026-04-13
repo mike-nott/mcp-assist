@@ -6,6 +6,19 @@ from typing import Dict, Any, List
 
 _LOGGER = logging.getLogger(__name__)
 
+NEWS_QUERY_HINTS = (
+    "news",
+    "headline",
+    "headlines",
+    "latest",
+    "today",
+    "current",
+    "right now",
+    "breaking",
+    "what's happening",
+    "what is happening",
+)
+
 class BraveSearchTool:
     """Brave Search API tool."""
 
@@ -28,7 +41,21 @@ class BraveSearchTool:
         """Get MCP tool definition for Brave Search."""
         return [{
             "name": "search",
-            "description": "Search the web for current information using Brave Search",
+            "description": (
+                "Search the web for up-to-date information, including current events and live news, "
+                "using Brave Search."
+            ),
+            "keywords": ["news", "latest", "current", "today", "right now", "web"],
+            "example_queries": [
+                "What's happening right now in Iran?",
+                "Latest Seahawks news today",
+            ],
+            "preferred_when": (
+                "Use for web, internet, current-events, breaking-news, and latest-information questions."
+            ),
+            "returns": (
+                "Search results with titles, URLs, snippets, and structured result metadata."
+            ),
             "inputSchema": {
                 "$schema": "http://json-schema.org/draft-07/schema#",
                 "type": "object",
@@ -43,6 +70,12 @@ class BraveSearchTool:
                         "minimum": 1,
                         "maximum": 20,
                         "default": 5
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Search mode: auto treats current-events style queries as news-oriented.",
+                        "enum": ["auto", "web", "news"],
+                        "default": "auto",
                     }
                 },
                 "required": ["query"],
@@ -54,8 +87,10 @@ class BraveSearchTool:
         """Execute Brave Search."""
         query = arguments.get("query")
         count = min(arguments.get("count", 5), 20)  # Enforce max limit
+        mode = self._normalize_mode(arguments.get("mode"), query)
+        query_to_send = self._query_for_mode(query, mode)
 
-        _LOGGER.debug(f"Brave Search: '{query}' (count: {count})")
+        _LOGGER.debug("Brave Search: '%s' (count: %s, mode: %s)", query_to_send, count, mode)
 
         headers = {
             "Accept": "application/json",
@@ -65,7 +100,7 @@ class BraveSearchTool:
 
         # Fix: Convert all values to strings for URL parameters
         params = {
-            "q": query,
+            "q": query_to_send,
             "count": str(count),  # Convert to string
             "text_decorations": "false",  # String not boolean
             "search_lang": "en",
@@ -102,7 +137,8 @@ class BraveSearchTool:
                         })
 
                     # Format as text for the LLM
-                    text_results = f"🔍 Search results for '{query}':\n\n"
+                    heading = "News results" if mode == "news" else "Search results"
+                    text_results = f"🔍 {heading} for '{query}':\n\n"
                     for i, result in enumerate(results, 1):
                         text_results += f"{i}. **{result['title']}**\n"
                         text_results += f"   {result['url']}\n"
@@ -112,7 +148,14 @@ class BraveSearchTool:
                         "content": [{
                             "type": "text",
                             "text": text_results
-                        }]
+                        }],
+                        "structuredContent": {
+                            "query": query,
+                            "provider_query": query_to_send,
+                            "mode": mode,
+                            "count": len(results),
+                            "results": results,
+                        },
                     }
 
         except asyncio.TimeoutError:  # Fix: Correct exception
@@ -131,3 +174,25 @@ class BraveSearchTool:
                     "text": f"❌ Search error: {str(e)}"
                 }]
             }
+
+    def _normalize_mode(self, raw_mode: Any, query: Any) -> str:
+        """Normalize requested search mode."""
+        normalized = str(raw_mode or "auto").strip().lower()
+        if normalized not in {"auto", "web", "news"}:
+            normalized = "auto"
+        if normalized == "auto":
+            lowered_query = str(query or "").strip().lower()
+            if any(hint in lowered_query for hint in NEWS_QUERY_HINTS):
+                return "news"
+            return "web"
+        return normalized
+
+    def _query_for_mode(self, query: Any, mode: str) -> str:
+        """Slightly bias news queries toward fresher web results."""
+        normalized_query = str(query or "").strip()
+        if mode != "news":
+            return normalized_query
+        lowered_query = normalized_query.lower()
+        if any(hint in lowered_query for hint in NEWS_QUERY_HINTS):
+            return normalized_query
+        return f"{normalized_query} latest news"
