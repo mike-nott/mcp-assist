@@ -134,6 +134,7 @@ from .const import (
     TOOL_FAMILY_ASSIST_BRIDGE,
     TOOL_FAMILY_CALCULATOR,
     TOOL_FAMILY_DEVICE,
+    TOOL_FAMILY_EXTERNAL_CUSTOM,
     TOOL_FAMILY_MUSIC_ASSISTANT,
     TOOL_FAMILY_MEMORY,
     TOOL_FAMILY_PROFILE_SETTINGS,
@@ -279,6 +280,7 @@ PROVIDER_SECTION_KEY = "provider"
 ADVANCED_SECTION_KEY = "advanced_settings"
 DISABLE_ASSIST_BRIDGE_FIELD = "disable_assist_bridge"
 DISABLE_CALCULATOR_FIELD = "disable_calculator"
+DISABLE_CUSTOM_TOOLS_FIELD = "disable_custom_tools"
 DISABLE_DEVICE_FIELD = "disable_device"
 DISABLE_MEMORY_FIELD = "disable_memory"
 DISABLE_MUSIC_ASSISTANT_FIELD = "disable_music_assistant"
@@ -291,6 +293,7 @@ DISABLE_WEB_SEARCH_FIELD = "disable_web_search"
 TOOL_FAMILY_ALPHABETICAL = [
     TOOL_FAMILY_ASSIST_BRIDGE,
     TOOL_FAMILY_CALCULATOR,
+    TOOL_FAMILY_EXTERNAL_CUSTOM,
     TOOL_FAMILY_DEVICE,
     TOOL_FAMILY_MEMORY,
     TOOL_FAMILY_MUSIC_ASSISTANT,
@@ -304,6 +307,7 @@ TOOL_FAMILY_ALPHABETICAL = [
 PROFILE_DISABLE_FIELD_BY_FAMILY = {
     TOOL_FAMILY_ASSIST_BRIDGE: DISABLE_ASSIST_BRIDGE_FIELD,
     TOOL_FAMILY_CALCULATOR: DISABLE_CALCULATOR_FIELD,
+    TOOL_FAMILY_EXTERNAL_CUSTOM: DISABLE_CUSTOM_TOOLS_FIELD,
     TOOL_FAMILY_DEVICE: DISABLE_DEVICE_FIELD,
     TOOL_FAMILY_MEMORY: DISABLE_MEMORY_FIELD,
     TOOL_FAMILY_MUSIC_ASSISTANT: DISABLE_MUSIC_ASSISTANT_FIELD,
@@ -465,17 +469,6 @@ def _build_shared_tools_section(
                 default=_get_form_value(defaults, setting_key, default),
             )
         ] = bool
-        if family == TOOL_FAMILY_CALCULATOR:
-            shared_tool_fields[
-                vol.Optional(
-                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
-                    default=_get_form_value(
-                        defaults,
-                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
-                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
-                    ),
-                )
-            ] = bool
 
     return section(
         vol.Schema(

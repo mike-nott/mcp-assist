@@ -378,11 +378,24 @@ class MCPServer:
 
     def _get_tools_list_signature(self, max_limit: int) -> tuple[Any, ...]:
         """Return a cache signature for the current MCP tool surface."""
-        custom_tool_names: tuple[str, ...] = ()
+        custom_tool_signature: tuple[Any, ...] = ()
         if self.custom_tools:
-            custom_tool_store = getattr(self.custom_tools, "tools", {})
-            if isinstance(custom_tool_store, dict):
-                custom_tool_names = tuple(sorted(custom_tool_store.keys()))
+            get_cache_signature = getattr(self.custom_tools, "get_cache_signature", None)
+            if callable(get_cache_signature):
+                try:
+                    raw_signature = get_cache_signature()
+                    if isinstance(raw_signature, tuple):
+                        custom_tool_signature = raw_signature
+                    else:
+                        custom_tool_signature = (raw_signature,)
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Unable to build custom tool cache signature: %s", err
+                    )
+            else:
+                custom_tool_store = getattr(self.custom_tools, "tools", {})
+                if isinstance(custom_tool_store, dict):
+                    custom_tool_signature = (tuple(sorted(custom_tool_store.keys())),)
 
         return (
             max_limit,
@@ -398,7 +411,7 @@ class MCPServer:
             self._device_tools_enabled(),
             self._music_assistant_support_enabled(),
             self._external_custom_tools_enabled(),
-            custom_tool_names,
+            custom_tool_signature,
         )
 
     async def start(self) -> None:

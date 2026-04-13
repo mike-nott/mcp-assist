@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import voluptuous as vol
@@ -14,6 +16,7 @@ from custom_components.mcp_assist.config_flow import (
     DISCOVERY_SECTION_KEY,
     DISABLE_ASSIST_BRIDGE_FIELD,
     DISABLE_CALCULATOR_FIELD,
+    DISABLE_CUSTOM_TOOLS_FIELD,
     DISABLE_DEVICE_FIELD,
     DISABLE_MEMORY_FIELD,
     DISABLE_MUSIC_ASSISTANT_FIELD,
@@ -29,7 +32,9 @@ from custom_components.mcp_assist.config_flow import (
     PERFORMANCE_SECTION_KEY,
     PROFILE_SECTION_KEY,
     PROMPTS_SECTION_KEY,
+    PROFILE_DISABLE_FIELD_BY_FAMILY,
     TOOLS_SECTION_KEY,
+    TOOL_FAMILY_ALPHABETICAL,
     _apply_profile_tool_disables,
     _infer_prompt_mode,
     _needs_prompt_followup,
@@ -60,6 +65,7 @@ from custom_components.mcp_assist.const import (
     CONF_LMSTUDIO_URL,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
     CONF_PROFILE_ENABLE_DEVICE_TOOLS,
+    CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_SEARCH_PROVIDER,
     CONF_SERVER_TYPE,
     CONF_SYSTEM_PROMPT,
@@ -71,6 +77,8 @@ from custom_components.mcp_assist.const import (
     PROMPT_MODE_DEFAULT,
     SERVER_TYPE_OLLAMA,
     SERVER_TYPE_MOLTBOT,
+    TOOL_FAMILY_PROFILE_SETTINGS,
+    TOOL_FAMILY_SHARED_SETTINGS,
 )
 
 
@@ -239,11 +247,13 @@ def test_apply_profile_tool_disables_marks_checked_tools_disabled() -> None:
         {
             DISABLE_DEVICE_FIELD: True,
             DISABLE_ASSIST_BRIDGE_FIELD: True,
+            DISABLE_CUSTOM_TOOLS_FIELD: True,
         }
     )
 
     assert normalized[CONF_PROFILE_ENABLE_DEVICE_TOOLS] is False
     assert normalized[CONF_PROFILE_ENABLE_ASSIST_BRIDGE] is False
+    assert normalized[CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS] is False
 
 
 def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
@@ -252,13 +262,16 @@ def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
         {
             DISABLE_DEVICE_FIELD: False,
             DISABLE_ASSIST_BRIDGE_FIELD: False,
+            DISABLE_CUSTOM_TOOLS_FIELD: False,
             CONF_PROFILE_ENABLE_DEVICE_TOOLS: False,
             CONF_PROFILE_ENABLE_ASSIST_BRIDGE: False,
+            CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
         }
     )
 
     assert CONF_PROFILE_ENABLE_DEVICE_TOOLS not in normalized
     assert CONF_PROFILE_ENABLE_ASSIST_BRIDGE not in normalized
+    assert CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS not in normalized
 
 
 async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) -> None:
@@ -281,6 +294,7 @@ async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) ->
     assert section_keys == [
         DISABLE_ASSIST_BRIDGE_FIELD,
         DISABLE_CALCULATOR_FIELD,
+        DISABLE_CUSTOM_TOOLS_FIELD,
         DISABLE_DEVICE_FIELD,
         DISABLE_MEMORY_FIELD,
         DISABLE_MUSIC_ASSISTANT_FIELD,
@@ -358,6 +372,35 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     external_default = tool_markers[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS].default
     assert external_default() is False if callable(external_default) else external_default is False
+
+
+def test_optional_tool_family_checkbox_sets_stay_in_sync() -> None:
+    """Every optional tool family should exist in both shared and profile checkbox builders."""
+    assert set(TOOL_FAMILY_ALPHABETICAL) == set(TOOL_FAMILY_PROFILE_SETTINGS)
+    assert set(TOOL_FAMILY_ALPHABETICAL) == set(TOOL_FAMILY_SHARED_SETTINGS)
+    assert set(TOOL_FAMILY_ALPHABETICAL) == set(PROFILE_DISABLE_FIELD_BY_FAMILY)
+
+
+def test_tool_checkbox_translations_cover_all_declared_tool_fields() -> None:
+    """All shared/profile tool checkbox fields should have labels and descriptions."""
+    strings = json.loads(
+        Path("custom_components/mcp_assist/strings.json").read_text(encoding="utf-8")
+    )
+    for root, advanced_step in (("config", "advanced"), ("options", "init")):
+        advanced_tools = strings[root]["step"][advanced_step]["sections"][TOOLS_SECTION_KEY]
+        shared_tools = strings[root]["step"]["mcp_server"]["sections"][TOOLS_SECTION_KEY]
+
+        expected_profile_fields = {
+            PROFILE_DISABLE_FIELD_BY_FAMILY[family] for family in TOOL_FAMILY_ALPHABETICAL
+        }
+        expected_shared_fields = {
+            TOOL_FAMILY_SHARED_SETTINGS[family][0] for family in TOOL_FAMILY_ALPHABETICAL
+        }
+
+        assert expected_profile_fields <= set(advanced_tools["data"])
+        assert expected_profile_fields <= set(advanced_tools["data_description"])
+        assert expected_shared_fields <= set(shared_tools["data"])
+        assert expected_shared_fields <= set(shared_tools["data_description"])
 
 
 async def test_options_step_groups_profile_settings_into_sections(

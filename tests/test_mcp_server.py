@@ -208,6 +208,7 @@ async def test_handle_tools_list_uses_cache_for_stable_signature(
     server = MCPServer(hass, 8099, profile_entry_factory())
     custom_tools = SimpleNamespace(
         tools={},
+        get_cache_signature=lambda: ("stable",),
         get_tool_definitions=lambda: [
             {"name": "search", "description": "search", "inputSchema": {"type": "object", "properties": {}}},
         ],
@@ -221,6 +222,51 @@ async def test_handle_tools_list_uses_cache_for_stable_signature(
     result_two = await server.handle_tools_list()
 
     assert result_one == result_two
+
+
+@pytest.mark.asyncio
+async def test_handle_tools_list_invalidates_cache_when_custom_tool_surface_changes(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """A changed external custom-tool surface should invalidate the cached tools/list response."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    state = {
+        "signature": ("v1",),
+        "definitions": [
+            {
+                "name": "sample_tool_status",
+                "description": "sample status",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ],
+    }
+    server.custom_tools = SimpleNamespace(
+        tools={},
+        get_cache_signature=lambda: state["signature"],
+        get_tool_definitions=lambda: state["definitions"],
+    )
+
+    first = await server.handle_tools_list()
+
+    state["signature"] = ("v2",)
+    state["definitions"] = [
+        {
+            "name": "sample_tool_history",
+            "description": "sample history",
+            "inputSchema": {"type": "object", "properties": {}},
+        }
+    ]
+
+    second = await server.handle_tools_list()
+
+    first_names = {tool["name"] for tool in first["tools"]}
+    second_names = {tool["name"] for tool in second["tools"]}
+
+    assert "sample_tool_status" in first_names
+    assert "sample_tool_history" not in first_names
+    assert "sample_tool_history" in second_names
+    assert "sample_tool_status" not in second_names
 
 
 @pytest.mark.asyncio

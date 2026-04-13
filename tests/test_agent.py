@@ -11,6 +11,7 @@ from custom_components.mcp_assist.agent import MCPAssistConversationEntity
 from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
@@ -20,6 +21,7 @@ from custom_components.mcp_assist.const import (
     CONF_TECHNICAL_PROMPT,
     CONF_TECHNICAL_PROMPT_MODE,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
+    CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_PROFILE_ENABLE_DEVICE_TOOLS,
     DOMAIN,
@@ -113,13 +115,15 @@ def test_profile_tool_filtering_hides_disabled_optional_tools(
 
 
 def test_optional_technical_instructions_include_external_custom_tool_guidance(
-    hass, profile_entry_factory
+    hass, profile_entry_factory, system_entry_factory
 ) -> None:
     """Loaded external custom tools should be able to extend prompt guidance."""
+    system_entry_factory(data={CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True})
     entry = profile_entry_factory()
     agent = MCPAssistConversationEntity(hass, entry)
     hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
         custom_tools=SimpleNamespace(
+            is_external_custom_tool=lambda name: name == "sample_tool_status",
             get_external_prompt_instructions=lambda: "## External Custom Tools\nUse sample_tool_status when asked for custom status."
         )
     )
@@ -128,6 +132,55 @@ def test_optional_technical_instructions_include_external_custom_tool_guidance(
 
     assert "External Custom Tools" in instructions
     assert "sample_tool_status" in instructions
+
+
+def test_profile_tool_filtering_hides_disabled_external_custom_tools(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """External custom tools should also respect profile-level tool disables."""
+    system_entry_factory(data={CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True})
+    entry = profile_entry_factory(
+        options={CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS: False}
+    )
+    agent = MCPAssistConversationEntity(hass, entry)
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
+        custom_tools=SimpleNamespace(
+            is_external_custom_tool=lambda name: name == "sample_tool_status"
+        )
+    )
+
+    filtered = agent._filter_mcp_tools_for_profile(
+        [
+            _tool("discover_entities"),
+            _tool("sample_tool_status"),
+        ]
+    )
+
+    tool_names = {tool["name"] for tool in filtered}
+    assert "discover_entities" in tool_names
+    assert "sample_tool_status" not in tool_names
+
+
+def test_optional_technical_instructions_omit_external_custom_tool_guidance_when_disabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """External custom tool prompt guidance should disappear when the profile disables it."""
+    system_entry_factory(data={CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True})
+    entry = profile_entry_factory(
+        options={CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS: False}
+    )
+    agent = MCPAssistConversationEntity(hass, entry)
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
+        custom_tools=SimpleNamespace(
+            is_external_custom_tool=lambda name: name == "sample_tool_status",
+            get_external_prompt_instructions=lambda: "## External Custom Tools\nUse sample_tool_status when asked for custom status.",
+        )
+    )
+
+    instructions = agent._build_optional_technical_instructions("Kitchen")
+
+    assert "External Custom Tools" not in instructions
+    assert "sample_tool_status" not in instructions
 
 
 @pytest.mark.asyncio
@@ -304,6 +357,35 @@ async def test_get_mcp_tools_uses_short_lived_cache(
 
     assert first == second
     fetch_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_tools_refetches_when_external_custom_tool_signature_changes(
+    hass, profile_entry_factory, monkeypatch
+) -> None:
+    """External custom tool changes should invalidate the profile MCP-tool cache immediately."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+    state = {"signature": ("v1",)}
+    hass.data.setdefault(DOMAIN, {})["shared_mcp_server"] = SimpleNamespace(
+        custom_tools=SimpleNamespace(get_cache_signature=lambda: state["signature"])
+    )
+    fetch_mock = AsyncMock(
+        side_effect=[
+            [{"type": "function", "function": {"name": "sample_tool_status"}}],
+            [{"type": "function", "function": {"name": "sample_tool_history"}}],
+        ]
+    )
+    monkeypatch.setattr(agent, "_fetch_mcp_tools_from_server", fetch_mock)
+
+    first = await agent._get_mcp_tools()
+    state["signature"] = ("v2",)
+    second = await agent._get_mcp_tools()
+
+    assert first != second
+    assert first[0]["function"]["name"] == "sample_tool_status"
+    assert second[0]["function"]["name"] == "sample_tool_history"
+    assert fetch_mock.await_count == 2
 
 
 @pytest.mark.asyncio

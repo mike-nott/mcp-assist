@@ -142,6 +142,7 @@
             "data": {
               "disable_assist_bridge": "Disable Assist Bridge",
               "disable_calculator": "Disable Calculator",
+              "disable_custom_tools": "Disable Custom Tools",
               "disable_device": "Disable Device Tools",
               "disable_memory": "Disable Memory",
               "disable_music_assistant": "Disable Music Assistant",
@@ -154,6 +155,7 @@
             "data_description": {
               "disable_assist_bridge": "Prevents this profile from using Home Assistant's native Assist tools, prompt, and context snapshot.",
               "disable_calculator": "Prevents this profile from using math and expression-evaluation tools.",
+              "disable_custom_tools": "Prevents this profile from using external custom tool packages loaded through the shared MCP server.",
               "disable_device": "Prevents this profile from discovering physical devices and device details.",
               "disable_memory": "Prevents this profile from storing, recalling, or forgetting shared persisted memories.",
               "disable_music_assistant": "Prevents this profile from using Music Assistant search, queue, library, and playback tools.",
@@ -395,6 +397,7 @@
             "data": {
               "disable_assist_bridge": "Disable Assist Bridge",
               "disable_calculator": "Disable Calculator",
+              "disable_custom_tools": "Disable Custom Tools",
               "disable_device": "Disable Device Tools",
               "disable_memory": "Disable Memory",
               "disable_music_assistant": "Disable Music Assistant",
@@ -407,6 +410,7 @@
             "data_description": {
               "disable_assist_bridge": "Prevents this profile from using Home Assistant's native Assist tools, prompt, and context snapshot.",
               "disable_calculator": "Prevents this profile from using math and expression-evaluation tools.",
+              "disable_custom_tools": "Prevents this profile from using external custom tool packages loaded through the shared MCP server.",
               "disable_unit_conversion": "Prevents this profile from using exact unit-conversion tools such as °C to °F, distance, storage, and data-rate conversions.",
               "disable_device": "Prevents this profile from discovering physical devices and device details.",
               "disable_memory": "Prevents this profile from storing, recalling, or forgetting shared persisted memories.",

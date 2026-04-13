@@ -110,6 +110,7 @@ from .const import (
     GEMINI_BASE_URL,
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
+    TOOL_FAMILY_EXTERNAL_CUSTOM,
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_SHARED_SETTINGS,
     get_optional_tool_family,
@@ -277,9 +278,11 @@ class MCPAssistConversationEntity(ConversationEntity):
     def _is_tool_enabled_for_profile(self, tool_name: str) -> bool:
         """Return whether a tool should be visible to this profile."""
         family = get_optional_tool_family(tool_name)
-        if family is None:
-            return True
-        return self._is_optional_tool_family_enabled(family)
+        if family is not None:
+            return self._is_optional_tool_family_enabled(family)
+        if self._is_external_custom_tool(tool_name):
+            return self.external_custom_tools_enabled
+        return True
 
     # Dynamic configuration properties - read from entry.options/data each time
     @property
@@ -434,6 +437,11 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
     @property
+    def external_custom_tools_enabled(self) -> bool:
+        """Get effective external custom tool setting for this profile."""
+        return self._is_optional_tool_family_enabled(TOOL_FAMILY_EXTERNAL_CUSTOM)
+
+    @property
     def recorder_tools_enabled(self) -> bool:
         """Get effective recorder tool setting for this profile."""
         return self._is_optional_tool_family_enabled("recorder")
@@ -462,6 +470,29 @@ class MCPAssistConversationEntity(ConversationEntity):
     def web_search_tools_enabled(self) -> bool:
         """Get effective web-search tool setting for this profile."""
         return self._is_optional_tool_family_enabled("web_search")
+
+    def _get_shared_custom_tools_loader(self) -> Any | None:
+        """Return the shared custom tool loader, if available."""
+        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+        return getattr(server, "custom_tools", None) if server else None
+
+    def _is_external_custom_tool(self, tool_name: str) -> bool:
+        """Return whether a tool name comes from an external custom tool package."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return False
+
+        checker = getattr(custom_tools, "is_external_custom_tool", None)
+        if not callable(checker):
+            return False
+
+        try:
+            return bool(checker(tool_name))
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to classify external custom tool %s: %s", tool_name, err
+            )
+            return False
 
     def _build_disabled_tool_family_instructions(self) -> str:
         """Build prompt instructions for disabled optional tool families."""
@@ -506,6 +537,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "- Calculator tools are disabled. Do not call arithmetic or expression-evaluation tools."
             )
 
+        if not self.external_custom_tools_enabled:
+            lines.append(
+                "- External custom tools are disabled. Do not call tools provided by user-defined packages."
+            )
+
         if not self.unit_conversion_tools_enabled:
             lines.append(
                 "- Unit-conversion tools are disabled. Do not call convert_unit."
@@ -548,18 +584,21 @@ class MCPAssistConversationEntity(ConversationEntity):
                 ).strip()
             )
 
-        external_custom_tool_instructions = (
-            self._get_external_custom_tool_instructions()
-        )
-        if external_custom_tool_instructions:
-            sections.append(external_custom_tool_instructions)
+        if self.external_custom_tools_enabled:
+            external_custom_tool_instructions = (
+                self._get_external_custom_tool_instructions()
+            )
+            if external_custom_tool_instructions:
+                sections.append(external_custom_tool_instructions)
 
         return "\n\n".join(section for section in sections if section)
 
     def _get_external_custom_tool_instructions(self) -> str:
         """Return prompt additions from loaded external custom tool packages."""
-        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
-        custom_tools = getattr(server, "custom_tools", None) if server else None
+        if not self.external_custom_tools_enabled:
+            return ""
+
+        custom_tools = self._get_shared_custom_tools_loader()
         if custom_tools is None:
             return ""
 
@@ -684,11 +723,45 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.recorder_tools_enabled,
             self.memory_tools_enabled,
             self.calculator_tools_enabled,
+            self.external_custom_tools_enabled,
             self.unit_conversion_tools_enabled,
             self.device_tools_enabled,
             self.music_assistant_support_enabled,
             self.web_search_tools_enabled,
+            self._get_external_custom_tool_cache_signature(),
         )
+
+    def _get_external_custom_tool_cache_signature(self) -> tuple[Any, ...]:
+        """Return a cache signature for loaded external custom tools."""
+        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+        custom_tools = getattr(server, "custom_tools", None) if server else None
+        if custom_tools is None:
+            return ()
+
+        get_cache_signature = getattr(custom_tools, "get_cache_signature", None)
+        if callable(get_cache_signature):
+            try:
+                raw_signature = get_cache_signature()
+                if isinstance(raw_signature, tuple):
+                    return raw_signature
+                return (raw_signature,)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Unable to read external custom tool cache signature: %s", err
+                )
+
+        get_external_prompt_instructions = getattr(
+            custom_tools, "get_external_prompt_instructions", None
+        )
+        if callable(get_external_prompt_instructions):
+            try:
+                return (str(get_external_prompt_instructions() or "").strip(),)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Unable to read external custom tool prompt instructions: %s", err
+                )
+
+        return ()
 
     def _compact_tool_result_for_llm(self, tool_name: str, content: Any) -> str:
         """Keep tool results useful while avoiding oversized follow-up payloads."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -224,9 +225,34 @@ class CustomToolsLoader:
         """Check if a tool name is provided by the custom tool loader."""
         return any(tool.handles_tool(tool_name) for tool in self.tools.values())
 
+    def is_external_custom_tool(self, tool_name: str) -> bool:
+        """Check if a tool name comes from an external custom tool package."""
+        return any(tool_name in loaded_tool.tool_names for loaded_tool in self.external_tools)
+
     def get_external_prompt_instructions(self) -> str:
         """Return aggregated prompt additions from loaded external tool packages."""
         return self._external_prompt_instructions
+
+    def get_cache_signature(self) -> tuple[Any, ...]:
+        """Return a stable cache signature for the current tool surface."""
+        try:
+            tool_definitions = tuple(
+                json.dumps(tool_definition, sort_keys=True, separators=(",", ":"))
+                for tool_definition in self.get_tool_definitions()
+            )
+        except Exception as err:
+            _LOGGER.debug("Unable to serialize tool definitions for cache key: %s", err)
+            tool_definitions = ()
+
+        try:
+            external_prompt_instructions = self.get_external_prompt_instructions()
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read external prompt instructions for cache key: %s", err
+            )
+            external_prompt_instructions = ""
+
+        return (tool_definitions, external_prompt_instructions)
 
     def get_loaded_external_tool_info(self) -> list[dict[str, Any]]:
         """Return metadata for loaded external tool packages."""
