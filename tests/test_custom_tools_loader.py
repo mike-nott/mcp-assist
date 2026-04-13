@@ -310,6 +310,43 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
 
 
 @pytest.mark.asyncio
+async def test_external_custom_tool_package_uses_executor_for_manifest_and_prompt_reads(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """External package file reads should be delegated to the executor."""
+    _write_external_tool_package(tmp_path)
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    executor_calls: list[str] = []
+    original_async_add_executor_job = hass.async_add_executor_job
+
+    async def _track_executor_job(func, *args):
+        executor_calls.append(getattr(func, "__name__", repr(func)))
+        return await original_async_add_executor_job(func, *args)
+
+    monkeypatch.setattr(hass, "async_add_executor_job", _track_executor_job)
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert "_discover_package_dirs" in executor_calls
+    assert "_load_manifest_from_disk" in executor_calls
+    assert "_read_prompt_append_file_from_disk" in executor_calls
+
+
+@pytest.mark.asyncio
 async def test_invalid_external_tool_package_is_skipped_without_crashing(
     hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
 ) -> None:
@@ -436,6 +473,57 @@ async def test_external_custom_tool_uses_shared_and_profile_settings(
 
     assert shared_result["content"][0]["text"] == "shared status"
     assert profile_result["content"][0]["text"] == "profile status"
+
+
+@pytest.mark.asyncio
+async def test_external_custom_tool_profile_settings_use_executor(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Per-profile settings should be loaded through the executor on tool calls."""
+    _write_external_tool_package(tmp_path)
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    settings_root = tmp_path / CUSTOM_TOOL_SETTINGS_DIRECTORY
+    settings_root.mkdir(parents=True, exist_ok=True)
+    profile_settings_dir = settings_root / "profiles" / profile_entry.entry_id
+    profile_settings_dir.mkdir(parents=True, exist_ok=True)
+    (profile_settings_dir / "sample_tool.json").write_text(
+        json.dumps({"status_text": "profile status"}),
+        encoding="utf-8",
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    executor_calls: list[str] = []
+    original_async_add_executor_job = hass.async_add_executor_job
+
+    async def _track_executor_job(func, *args):
+        executor_calls.append(getattr(func, "__name__", repr(func)))
+        return await original_async_add_executor_job(func, *args)
+
+    monkeypatch.setattr(hass, "async_add_executor_job", _track_executor_job)
+
+    result = await loader.handle_tool_call(
+        "sample_tool_status",
+        {},
+        context={"profile_entry_id": profile_entry.entry_id},
+    )
+
+    assert result["content"][0]["text"] == "profile status"
+    assert "_load_settings_file_with_status" in executor_calls
 
 
 @pytest.mark.asyncio

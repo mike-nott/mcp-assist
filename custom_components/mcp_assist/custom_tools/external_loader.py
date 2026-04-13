@@ -73,7 +73,7 @@ class ExternalCustomToolLoader:
         self.last_tools_root = tools_root
         self.last_load_errors = []
         self.last_loaded_at = datetime.now(timezone.utc).isoformat()
-        if not tools_root.exists():
+        if not await self.hass.async_add_executor_job(tools_root.exists):
             _LOGGER.info(
                 "External custom tools enabled, but %s does not exist yet.",
                 tools_root,
@@ -81,7 +81,7 @@ class ExternalCustomToolLoader:
             self.last_scanned_packages = ()
             return []
 
-        if not tools_root.is_dir():
+        if not await self.hass.async_add_executor_job(tools_root.is_dir):
             _LOGGER.warning(
                 "External custom tools path %s exists but is not a directory. Skipping.",
                 tools_root,
@@ -90,18 +90,15 @@ class ExternalCustomToolLoader:
             return []
 
         loaded: list[LoadedExternalTool] = []
-        package_dirs = [
-            tool_dir
-            for tool_dir in sorted(
-                tools_root.iterdir(), key=lambda item: item.name.casefold()
-            )
-            if tool_dir.is_dir() and not tool_dir.name.startswith((".", "__"))
-        ]
-        self.last_scanned_packages = tuple(tool_dir.name for tool_dir in package_dirs)
-        for tool_dir in package_dirs:
-            if tool_dir.name.startswith((".", "__")):
-                continue
-            if tool_dir.is_symlink():
+        package_dirs = await self.hass.async_add_executor_job(
+            self._discover_package_dirs,
+            tools_root,
+        )
+        self.last_scanned_packages = tuple(
+            tool_dir.name for tool_dir, _is_symlink in package_dirs
+        )
+        for tool_dir, is_symlink in package_dirs:
+            if is_symlink:
                 _LOGGER.warning(
                     "Skipping external custom tool package %s because symlinked directories are not allowed.",
                     tool_dir,
@@ -113,7 +110,7 @@ class ExternalCustomToolLoader:
 
             tool: MCPAssistExternalTool | None = None
             try:
-                manifest = self._load_manifest(tool_dir)
+                manifest = await self._load_manifest(tool_dir)
                 if manifest.tool_id in seen_tool_ids:
                     raise ValueError(
                         f"Duplicate manifest id {manifest.tool_id!r} is not allowed"
@@ -123,7 +120,7 @@ class ExternalCustomToolLoader:
                     manifest,
                     tool.get_settings_schema(),
                 )
-                shared_settings, shared_settings_path = self._load_shared_settings(
+                shared_settings, shared_settings_path = await self._load_shared_settings(
                     manifest,
                     settings_schema,
                 )
@@ -138,7 +135,7 @@ class ExternalCustomToolLoader:
                     str(tool_definition["name"]) for tool_definition in tool_definitions
                 )
                 reserved.update(tool_names)
-                prompt_instructions = self._build_prompt_instructions(
+                prompt_instructions = await self._build_prompt_instructions(
                     tool_dir,
                     manifest,
                     tool,
@@ -182,7 +179,25 @@ class ExternalCustomToolLoader:
 
         return loaded
 
-    def _load_manifest(self, tool_dir: Path) -> MCPAssistCustomToolManifest:
+    def _discover_package_dirs(self, tools_root: Path) -> list[tuple[Path, bool]]:
+        """Return sorted candidate package directories and whether they are symlinks."""
+        return [
+            (tool_dir, tool_dir.is_symlink())
+            for tool_dir in sorted(
+                tools_root.iterdir(),
+                key=lambda item: item.name.casefold(),
+            )
+            if tool_dir.is_dir() and not tool_dir.name.startswith((".", "__"))
+        ]
+
+    async def _load_manifest(self, tool_dir: Path) -> MCPAssistCustomToolManifest:
+        """Load and validate a custom tool manifest without blocking the event loop."""
+        return await self.hass.async_add_executor_job(
+            self._load_manifest_from_disk,
+            tool_dir,
+        )
+
+    def _load_manifest_from_disk(self, tool_dir: Path) -> MCPAssistCustomToolManifest:
         """Load and validate a custom tool manifest."""
         manifest_path = tool_dir / CUSTOM_TOOL_MANIFEST_FILENAME
         if not manifest_path.is_file():
@@ -467,22 +482,23 @@ class ExternalCustomToolLoader:
             normalized["properties"] = {}
         return normalized
 
-    def _load_shared_settings(
+    async def _load_shared_settings(
         self,
         manifest: MCPAssistCustomToolManifest,
         settings_schema: dict[str, Any],
     ) -> tuple[dict[str, Any], str | None]:
         """Load and validate shared package settings for a tool."""
         settings_path = self.get_settings_root() / f"{manifest.tool_id}.json"
-        settings = self._load_settings_file(
+        settings, file_exists = await self.hass.async_add_executor_job(
+            self._load_settings_file_with_status,
             settings_path,
             settings_schema,
-            allow_missing=True,
-            path_label=f"{manifest.tool_id} shared settings",
+            True,
+            f"{manifest.tool_id} shared settings",
         )
-        return settings, str(settings_path) if settings_path.exists() else None
+        return settings, str(settings_path) if file_exists else None
 
-    def load_profile_settings(
+    async def load_profile_settings(
         self,
         loaded_tool: LoadedExternalTool,
         profile_entry_id: str,
@@ -497,13 +513,12 @@ class ExternalCustomToolLoader:
             / profile_entry_id
             / f"{loaded_tool.manifest.tool_id}.json"
         )
-        profile_settings = self._load_settings_file(
+        profile_settings, file_exists = await self.hass.async_add_executor_job(
+            self._load_settings_file_with_status,
             profile_path,
             {},
-            allow_missing=True,
-            path_label=(
-                f"{loaded_tool.manifest.tool_id} profile settings for {profile_entry_id}"
-            ),
+            True,
+            f"{loaded_tool.manifest.tool_id} profile settings for {profile_entry_id}",
         )
         merged_settings = self._deep_merge_dicts(
             loaded_tool.shared_settings,
@@ -518,23 +533,26 @@ class ExternalCustomToolLoader:
         return (
             merged_settings,
             profile_settings,
-            str(profile_path) if profile_path.exists() else None,
+            str(profile_path) if file_exists else None,
         )
 
-    def _load_settings_file(
+    def _load_settings_file_with_status(
         self,
         path: Path,
         schema: dict[str, Any],
-        *,
         allow_missing: bool,
         path_label: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], bool]:
         """Load a JSON settings file and validate it."""
-        if not path.exists():
+        file_exists = path.exists()
+        if not file_exists:
             if allow_missing:
                 if schema:
-                    return validate_and_normalize_json_value(schema, {}, path=path_label)
-                return {}
+                    return (
+                        validate_and_normalize_json_value(schema, {}, path=path_label),
+                        False,
+                    )
+                return {}, False
             raise ValueError(f"{path_label} file was not found: {path}")
 
         try:
@@ -547,11 +565,21 @@ class ExternalCustomToolLoader:
 
         try:
             if schema:
-                return validate_and_normalize_json_value(schema, raw_data, path=path_label)
-            return validate_and_normalize_json_value(
-                {"type": "object", "properties": {}},
-                raw_data,
-                path=path_label,
+                return (
+                    validate_and_normalize_json_value(
+                        schema,
+                        raw_data,
+                        path=path_label,
+                    ),
+                    True,
+                )
+            return (
+                validate_and_normalize_json_value(
+                    {"type": "object", "properties": {}},
+                    raw_data,
+                    path=path_label,
+                ),
+                True,
             )
         except SchemaValidationError as err:
             raise ValueError(str(err)) from err
@@ -574,7 +602,7 @@ class ExternalCustomToolLoader:
                 merged[key] = deepcopy(value)
         return merged
 
-    def _build_prompt_instructions(
+    async def _build_prompt_instructions(
         self,
         tool_dir: Path,
         manifest: MCPAssistCustomToolManifest,
@@ -592,7 +620,7 @@ class ExternalCustomToolLoader:
                 for capability in manifest.capabilities
             )
 
-        prompt_file_text = self._read_prompt_append_file(tool_dir, manifest)
+        prompt_file_text = await self._read_prompt_append_file(tool_dir, manifest)
         runtime_instructions = str(tool.get_prompt_instructions() or "").strip()
         if prompt_file_text:
             parts.append(prompt_file_text)
@@ -607,7 +635,19 @@ class ExternalCustomToolLoader:
             combined += "\n\n[Prompt appendix truncated to keep context small.]"
         return combined
 
-    def _read_prompt_append_file(
+    async def _read_prompt_append_file(
+        self,
+        tool_dir: Path,
+        manifest: MCPAssistCustomToolManifest,
+    ) -> str:
+        """Read optional static prompt instructions from the package asynchronously."""
+        return await self.hass.async_add_executor_job(
+            self._read_prompt_append_file_from_disk,
+            tool_dir,
+            manifest,
+        )
+
+    def _read_prompt_append_file_from_disk(
         self,
         tool_dir: Path,
         manifest: MCPAssistCustomToolManifest,

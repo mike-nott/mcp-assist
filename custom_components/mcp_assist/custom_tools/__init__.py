@@ -435,7 +435,7 @@ class CustomToolsLoader:
                 effective_settings,
                 profile_settings,
                 profile_settings_path,
-            ) = self._external_loader.load_profile_settings(
+            ) = await self._external_loader.load_profile_settings(
                 loaded_tool,
                 profile_entry_id,
             )
