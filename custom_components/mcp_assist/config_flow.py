@@ -356,13 +356,13 @@ async def _async_load_builtin_tool_toggle_specs(
 
 
 def _builtin_shared_field_key(spec: BuiltInToolToggleSpec) -> str:
-    """Return the human-readable shared-form checkbox key for a built-in package."""
-    return spec.shared_label
+    """Return the stable shared-form checkbox key for a built-in package."""
+    return spec.shared_setting_key
 
 
 def _builtin_profile_disable_field_key(spec: BuiltInToolToggleSpec) -> str:
-    """Return the human-readable profile disable checkbox key for a built-in package."""
-    return spec.profile_disable_label
+    """Return the stable profile disable checkbox key for a built-in package."""
+    return f"disable_{spec.package_id}"
 
 
 def _profile_tool_disabled_default(
@@ -421,6 +421,8 @@ def _apply_profile_tool_disables(
     for spec in built_in_specs:
         disable_field = _builtin_profile_disable_field_key(spec)
         disabled = bool(normalized.pop(disable_field, False))
+        if not disabled and spec.profile_disable_label in normalized:
+            disabled = bool(normalized.pop(spec.profile_disable_label, False))
         if disabled:
             normalized[spec.profile_setting_key] = False
         else:
@@ -462,6 +464,11 @@ def _normalize_shared_tool_inputs(
         field_key = _builtin_shared_field_key(spec)
         if field_key in normalized:
             normalized[spec.shared_setting_key] = bool(normalized.pop(field_key))
+            continue
+
+        legacy_label_key = spec.shared_label
+        if legacy_label_key in normalized:
+            normalized[spec.shared_setting_key] = bool(normalized.pop(legacy_label_key))
 
     search_provider = _normalize_search_provider(
         normalized.get(CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER)

@@ -737,13 +737,19 @@ async def test_get_weather_forecast_discovers_entity_and_summarizes_tomorrow(
                 "weather.home": {
                     "forecast": [
                         {
-                            "datetime": "2026-04-13T09:00:00-07:00",
+                            "datetime": (
+                                dt_util.now().replace(hour=9, minute=0, second=0, microsecond=0)
+                                + timedelta(days=1)
+                            ).isoformat(),
                             "condition": "sunny",
                             "temperature": 72,
                             "is_daytime": True,
                         },
                         {
-                            "datetime": "2026-04-13T21:00:00-07:00",
+                            "datetime": (
+                                dt_util.now().replace(hour=21, minute=0, second=0, microsecond=0)
+                                + timedelta(days=1)
+                            ).isoformat(),
                             "condition": "cloudy",
                             "temperature": 61,
                             "is_daytime": False,

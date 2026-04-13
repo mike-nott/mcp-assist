@@ -98,13 +98,13 @@ SHARED_BUILTIN_ORDER = [
 
 
 def _builtin_shared_key(package_id: str) -> str:
-    """Return the shared form label for a built-in packaged tool."""
-    return BUILTIN_SPEC_BY_PACKAGE[package_id].shared_label
+    """Return the shared form key for a built-in packaged tool."""
+    return BUILTIN_SPEC_BY_PACKAGE[package_id].shared_setting_key
 
 
 def _builtin_profile_key(package_id: str) -> str:
-    """Return the profile-disable form label for a built-in packaged tool."""
-    return BUILTIN_SPEC_BY_PACKAGE[package_id].profile_disable_label
+    """Return the profile-disable form key for a built-in packaged tool."""
+    return f"disable_{package_id}"
 
 
 PROFILE_TOOL_ORDER = [
@@ -346,8 +346,8 @@ def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
     assert "profile_enable_calculator_tools" not in normalized
 
 
-def test_normalize_shared_tool_inputs_maps_built_in_labels_to_setting_keys() -> None:
-    """Human-readable built-in toggle labels should store real setting keys."""
+def test_normalize_shared_tool_inputs_maps_built_in_fields_to_setting_keys() -> None:
+    """Built-in toggle fields should store real shared setting keys."""
     normalized = _normalize_shared_tool_inputs(
         {
             _builtin_shared_key("search"): True,
@@ -359,9 +359,24 @@ def test_normalize_shared_tool_inputs_maps_built_in_labels_to_setting_keys() -> 
 
     assert normalized["enable_search_tool"] is True
     assert normalized["enable_read_url_tool"] is True
-    assert _builtin_shared_key("search") not in normalized
-    assert _builtin_shared_key("read_url") not in normalized
     assert normalized[CONF_SEARCH_PROVIDER] == "duckduckgo"
+
+
+def test_normalize_shared_tool_inputs_accepts_legacy_built_in_labels() -> None:
+    """Older in-flight form data using built-in labels should still normalize."""
+    normalized = _normalize_shared_tool_inputs(
+        {
+            BUILTIN_SPEC_BY_PACKAGE["search"].shared_label: True,
+            BUILTIN_SPEC_BY_PACKAGE["read_url"].shared_label: True,
+            CONF_SEARCH_PROVIDER: "",
+        },
+        BUILTIN_SPECS,
+    )
+
+    assert normalized["enable_search_tool"] is True
+    assert normalized["enable_read_url_tool"] is True
+    assert BUILTIN_SPEC_BY_PACKAGE["search"].shared_label not in normalized
+    assert BUILTIN_SPEC_BY_PACKAGE["read_url"].shared_label not in normalized
 
 
 def test_normalize_shared_tool_inputs_infers_provider_from_legacy_web_search() -> None:
@@ -493,22 +508,28 @@ def test_built_in_tool_checkbox_descriptions_serialize_as_plain_strings() -> Non
     shared_section = _build_shared_tools_section({}, BUILTIN_SPECS)
     profile_section = _build_profile_tools_section({}, BUILTIN_SPECS, {}, {})
 
+    shared_names = {
+        _builtin_shared_key("calculator"),
+        _builtin_shared_key("read_url"),
+        _builtin_shared_key("search"),
+        _builtin_shared_key("unit_conversion"),
+    }
+    profile_names = {
+        _builtin_profile_key("calculator"),
+        _builtin_profile_key("read_url"),
+        _builtin_profile_key("search"),
+        _builtin_profile_key("unit_conversion"),
+    }
+
     shared_checkbox_fields = {
         marker: value
         for marker, value in shared_section.schema.schema.items()
-        if getattr(marker, "schema", marker)
-        in {"Calculator", "Read URL", "Search", "Unit Conversion"}
+        if getattr(marker, "schema", marker) in shared_names
     }
     profile_checkbox_fields = {
         marker: value
         for marker, value in profile_section.schema.schema.items()
-        if getattr(marker, "schema", marker)
-        in {
-            "Disable Calculator",
-            "Disable Read URL",
-            "Disable Search",
-            "Disable Unit Conversion",
-        }
+        if getattr(marker, "schema", marker) in profile_names
     }
 
     shared_serialized = voluptuous_serialize.convert(vol.Schema(shared_checkbox_fields))
@@ -517,16 +538,11 @@ def test_built_in_tool_checkbox_descriptions_serialize_as_plain_strings() -> Non
     shared_by_name = {item["name"]: item for item in shared_serialized}
     profile_by_name = {item["name"]: item for item in profile_serialized}
 
-    for name in ("Calculator", "Read URL", "Search", "Unit Conversion"):
+    for name in shared_names:
         assert isinstance(shared_by_name[name]["description"], str)
         assert shared_by_name[name]["description"]
 
-    for name in (
-        "Disable Calculator",
-        "Disable Read URL",
-        "Disable Search",
-        "Disable Unit Conversion",
-    ):
+    for name in profile_names:
         assert isinstance(profile_by_name[name]["description"], str)
         assert profile_by_name[name]["description"]
 
@@ -555,6 +571,12 @@ def test_tool_checkbox_translations_cover_all_declared_tool_fields() -> None:
             TOOL_FAMILY_SHARED_SETTINGS[family][0]
             for family in STATIC_TOOL_FAMILY_ALPHABETICAL
         }
+        expected_profile_fields.update(
+            _builtin_profile_key(spec.package_id) for spec in BUILTIN_SPECS
+        )
+        expected_shared_fields.update(
+            _builtin_shared_key(spec.package_id) for spec in BUILTIN_SPECS
+        )
 
         assert expected_profile_fields <= set(advanced_tools["data"])
         assert expected_profile_fields <= set(advanced_tools["data_description"])
