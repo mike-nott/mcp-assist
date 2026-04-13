@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from datetime import datetime, timezone
 import importlib.util
 import json
 import logging
@@ -14,9 +16,11 @@ from typing import Any
 from ..const import (
     CUSTOM_TOOL_MANIFEST_FILENAME,
     CUSTOM_TOOL_SCHEMA_VERSION,
+    CUSTOM_TOOL_SETTINGS_DIRECTORY,
     CUSTOM_TOOLS_DIRECTORY,
 )
 from ..custom_tool_api import MCPAssistCustomToolManifest, MCPAssistExternalTool
+from .schema_utils import SchemaValidationError, validate_and_normalize_json_value
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +39,9 @@ class LoadedExternalTool:
     tool_definitions: tuple[dict[str, Any], ...]
     tool_names: tuple[str, ...]
     prompt_instructions: str
+    settings_schema: dict[str, Any]
+    shared_settings: dict[str, Any]
+    shared_settings_path: str | None
 
 
 class ExternalCustomToolLoader:
@@ -43,10 +50,18 @@ class ExternalCustomToolLoader:
     def __init__(self, hass) -> None:
         """Initialize the loader."""
         self.hass = hass
+        self.last_load_errors: list[dict[str, str]] = []
+        self.last_tools_root: Path = self.get_tools_root()
+        self.last_scanned_packages: tuple[str, ...] = ()
+        self.last_loaded_at: str = ""
 
     def get_tools_root(self) -> Path:
         """Return the shared custom tools directory inside HA config."""
         return Path(self.hass.config.path(CUSTOM_TOOLS_DIRECTORY))
+
+    def get_settings_root(self) -> Path:
+        """Return the shared package-settings directory inside HA config."""
+        return Path(self.hass.config.path(CUSTOM_TOOL_SETTINGS_DIRECTORY))
 
     async def load(
         self, *, reserved_tool_names: set[str] | None = None
@@ -55,11 +70,15 @@ class ExternalCustomToolLoader:
         reserved = set(reserved_tool_names or set())
         seen_tool_ids: set[str] = set()
         tools_root = self.get_tools_root()
+        self.last_tools_root = tools_root
+        self.last_load_errors = []
+        self.last_loaded_at = datetime.now(timezone.utc).isoformat()
         if not tools_root.exists():
             _LOGGER.info(
                 "External custom tools enabled, but %s does not exist yet.",
                 tools_root,
             )
+            self.last_scanned_packages = ()
             return []
 
         if not tools_root.is_dir():
@@ -67,10 +86,19 @@ class ExternalCustomToolLoader:
                 "External custom tools path %s exists but is not a directory. Skipping.",
                 tools_root,
             )
+            self.last_scanned_packages = ()
             return []
 
         loaded: list[LoadedExternalTool] = []
-        for tool_dir in sorted(tools_root.iterdir(), key=lambda item: item.name.casefold()):
+        package_dirs = [
+            tool_dir
+            for tool_dir in sorted(
+                tools_root.iterdir(), key=lambda item: item.name.casefold()
+            )
+            if tool_dir.is_dir() and not tool_dir.name.startswith((".", "__"))
+        ]
+        self.last_scanned_packages = tuple(tool_dir.name for tool_dir in package_dirs)
+        for tool_dir in package_dirs:
             if tool_dir.name.startswith((".", "__")):
                 continue
             if tool_dir.is_symlink():
@@ -78,8 +106,9 @@ class ExternalCustomToolLoader:
                     "Skipping external custom tool package %s because symlinked directories are not allowed.",
                     tool_dir,
                 )
-                continue
-            if not tool_dir.is_dir():
+                self.last_load_errors.append(
+                    {"tool_dir": tool_dir.name, "error": "Symlinked package directories are not allowed"}
+                )
                 continue
 
             tool: MCPAssistExternalTool | None = None
@@ -90,6 +119,15 @@ class ExternalCustomToolLoader:
                         f"Duplicate manifest id {manifest.tool_id!r} is not allowed"
                     )
                 tool = self._instantiate_tool(tool_dir, manifest)
+                settings_schema = self._normalize_settings_schema(
+                    manifest,
+                    tool.get_settings_schema(),
+                )
+                shared_settings, shared_settings_path = self._load_shared_settings(
+                    manifest,
+                    settings_schema,
+                )
+                tool._set_loaded_settings(shared_settings)
                 await tool.initialize()
                 tool_definitions = self._normalize_tool_definitions(
                     manifest,
@@ -112,6 +150,9 @@ class ExternalCustomToolLoader:
                         tool_definitions=tuple(tool_definitions),
                         tool_names=tool_names,
                         prompt_instructions=prompt_instructions,
+                        settings_schema=settings_schema,
+                        shared_settings=shared_settings,
+                        shared_settings_path=shared_settings_path,
                     )
                 )
                 seen_tool_ids.add(manifest.tool_id)
@@ -134,6 +175,9 @@ class ExternalCustomToolLoader:
                     "Failed to load external custom tool package from %s: %s",
                     tool_dir,
                     err,
+                )
+                self.last_load_errors.append(
+                    {"tool_dir": tool_dir.name, "error": str(err)}
                 )
 
         return loaded
@@ -308,6 +352,10 @@ class ExternalCustomToolLoader:
                 normalized_schema = {"type": "object", "properties": {}}
             elif normalized_schema.get("type") == "object" and "properties" not in normalized_schema:
                 normalized_schema["properties"] = {}
+            routing_hints = self._normalize_routing_hints(
+                tool_name,
+                tool_definition,
+            )
 
             normalized.append(
                 {
@@ -315,11 +363,216 @@ class ExternalCustomToolLoader:
                     "name": tool_name,
                     "description": description,
                     "inputSchema": normalized_schema,
+                    **({"routingHints": routing_hints} if routing_hints else {}),
                 }
             )
             seen_names.add(tool_name)
 
         return normalized
+
+    def _normalize_routing_hints(
+        self,
+        tool_name: str,
+        tool_definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize optional tool-selection hints without bloating prompts."""
+        routing = tool_definition.get("routing")
+        if not isinstance(routing, dict):
+            routing = {}
+
+        keywords = self._normalize_string_list(
+            routing.get("keywords", tool_definition.get("keywords")),
+            max_items=8,
+            max_len=40,
+        )
+        example_queries = self._normalize_string_list(
+            routing.get("example_queries", tool_definition.get("example_queries")),
+            max_items=4,
+            max_len=100,
+        )
+        preferred_when = self._compact_text(
+            str(
+                routing.get("preferred_when", tool_definition.get("preferred_when"))
+                or ""
+            ),
+            max_len=180,
+        )
+        returns = self._compact_text(
+            str(routing.get("returns", tool_definition.get("returns")) or ""),
+            max_len=160,
+        )
+
+        hints: dict[str, Any] = {}
+        if keywords:
+            hints["keywords"] = keywords
+        if example_queries:
+            hints["example_queries"] = example_queries
+        if preferred_when:
+            hints["preferred_when"] = preferred_when
+        if returns:
+            hints["returns"] = returns
+
+        raw_routing = tool_definition.get("routing")
+        if raw_routing is not None and not isinstance(raw_routing, dict):
+            raise ValueError(
+                f"Tool {tool_name!r} routing metadata must be an object when provided"
+            )
+
+        return hints
+
+    @staticmethod
+    def _normalize_string_list(
+        value: Any,
+        *,
+        max_items: int,
+        max_len: int,
+    ) -> list[str]:
+        """Normalize a short list of compact routing strings."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+
+        normalized: list[str] = []
+        for item in value:
+            compact = ExternalCustomToolLoader._compact_text(
+                str(item or ""),
+                max_len=max_len,
+            )
+            if not compact or compact in normalized:
+                continue
+            normalized.append(compact)
+            if len(normalized) >= max_items:
+                break
+        return normalized
+
+    def _normalize_settings_schema(
+        self,
+        manifest: MCPAssistCustomToolManifest,
+        schema: Any,
+    ) -> dict[str, Any]:
+        """Normalize an optional settings schema declared by the tool."""
+        if schema in (None, {}):
+            return {}
+        if not isinstance(schema, dict):
+            raise ValueError(
+                f"Tool package {manifest.tool_id!r} get_settings_schema() must return an object"
+            )
+        normalized = dict(schema)
+        if not normalized:
+            return {}
+        if not normalized.get("type"):
+            normalized["type"] = "object"
+        if normalized.get("type") == "object" and "properties" not in normalized:
+            normalized["properties"] = {}
+        return normalized
+
+    def _load_shared_settings(
+        self,
+        manifest: MCPAssistCustomToolManifest,
+        settings_schema: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None]:
+        """Load and validate shared package settings for a tool."""
+        settings_path = self.get_settings_root() / f"{manifest.tool_id}.json"
+        settings = self._load_settings_file(
+            settings_path,
+            settings_schema,
+            allow_missing=True,
+            path_label=f"{manifest.tool_id} shared settings",
+        )
+        return settings, str(settings_path) if settings_path.exists() else None
+
+    def load_profile_settings(
+        self,
+        loaded_tool: LoadedExternalTool,
+        profile_entry_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+        """Load an optional per-profile settings overlay for a tool."""
+        if not profile_entry_id:
+            return loaded_tool.shared_settings, {}, None
+
+        profile_path = (
+            self.get_settings_root()
+            / "profiles"
+            / profile_entry_id
+            / f"{loaded_tool.manifest.tool_id}.json"
+        )
+        profile_settings = self._load_settings_file(
+            profile_path,
+            {},
+            allow_missing=True,
+            path_label=(
+                f"{loaded_tool.manifest.tool_id} profile settings for {profile_entry_id}"
+            ),
+        )
+        merged_settings = self._deep_merge_dicts(
+            loaded_tool.shared_settings,
+            profile_settings,
+        )
+        if loaded_tool.settings_schema:
+            merged_settings = validate_and_normalize_json_value(
+                loaded_tool.settings_schema,
+                merged_settings,
+                path=f"{loaded_tool.manifest.tool_id} settings",
+            )
+        return (
+            merged_settings,
+            profile_settings,
+            str(profile_path) if profile_path.exists() else None,
+        )
+
+    def _load_settings_file(
+        self,
+        path: Path,
+        schema: dict[str, Any],
+        *,
+        allow_missing: bool,
+        path_label: str,
+    ) -> dict[str, Any]:
+        """Load a JSON settings file and validate it."""
+        if not path.exists():
+            if allow_missing:
+                if schema:
+                    return validate_and_normalize_json_value(schema, {}, path=path_label)
+                return {}
+            raise ValueError(f"{path_label} file was not found: {path}")
+
+        try:
+            raw_data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as err:
+            raise ValueError(f"Invalid JSON in {path}: {err}") from err
+
+        if not isinstance(raw_data, dict):
+            raise ValueError(f"{path} must contain a JSON object")
+
+        try:
+            if schema:
+                return validate_and_normalize_json_value(schema, raw_data, path=path_label)
+            return validate_and_normalize_json_value(
+                {"type": "object", "properties": {}},
+                raw_data,
+                path=path_label,
+            )
+        except SchemaValidationError as err:
+            raise ValueError(str(err)) from err
+
+    def _deep_merge_dicts(
+        self,
+        base: dict[str, Any],
+        overlay: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge nested settings dictionaries with overlay precedence."""
+        merged = deepcopy(base)
+        for key, value in overlay.items():
+            if (
+                key in merged
+                and isinstance(merged[key], dict)
+                and isinstance(value, dict)
+            ):
+                merged[key] = self._deep_merge_dicts(merged[key], value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
 
     def _build_prompt_instructions(
         self,

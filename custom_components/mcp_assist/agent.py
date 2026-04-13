@@ -697,13 +697,23 @@ class MCPAssistConversationEntity(ConversationEntity):
             elif parameters.get("type") == "object" and "properties" not in parameters:
                 parameters["properties"] = {}
 
+            base_description = self._compact_text(
+                tool.get("description", ""),
+                max_len=180,
+            )
+            description_parts = [base_description.rstrip(" .")]
+            routing_summary = self._build_tool_routing_summary(tool.get("routingHints"))
+            if routing_summary:
+                description_parts.append(routing_summary)
+
             openai_tools.append(
                 {
                     "type": "function",
                     "function": {
                         "name": tool["name"],
                         "description": self._compact_text(
-                            tool.get("description", ""), max_len=180
+                            " | ".join(part for part in description_parts if part),
+                            max_len=320,
                         ),
                         "parameters": parameters,
                     },
@@ -711,6 +721,44 @@ class MCPAssistConversationEntity(ConversationEntity):
             )
 
         return openai_tools
+
+    def _build_tool_routing_summary(self, routing_hints: Any) -> str:
+        """Build a compact description suffix from optional routing hints."""
+        if not isinstance(routing_hints, dict):
+            return ""
+
+        summary_parts: list[str] = []
+        keywords = routing_hints.get("keywords")
+        if isinstance(keywords, list):
+            cleaned_keywords = [
+                str(item).strip()
+                for item in keywords
+                if str(item).strip()
+            ][:6]
+            if cleaned_keywords:
+                summary_parts.append(f"Keywords: {', '.join(cleaned_keywords)}")
+
+        preferred_when = str(routing_hints.get("preferred_when") or "").strip()
+        if preferred_when:
+            summary_parts.append(f"Preferred when: {preferred_when}")
+
+        returns = str(routing_hints.get("returns") or "").strip()
+        if returns:
+            summary_parts.append(f"Returns: {returns}")
+
+        example_queries = routing_hints.get("example_queries")
+        if isinstance(example_queries, list):
+            cleaned_examples = [
+                str(item).strip()
+                for item in example_queries
+                if str(item).strip()
+            ][:2]
+            if cleaned_examples:
+                summary_parts.append(
+                    f"Example queries: {' || '.join(cleaned_examples)}"
+                )
+
+        return " | ".join(summary_parts).strip()
 
     def _build_mcp_tool_cache_key(self) -> tuple[Any, ...]:
         """Build a cache key for the current profile-visible MCP tool surface."""
@@ -1875,7 +1923,14 @@ class MCPAssistConversationEntity(ConversationEntity):
             payload = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "context": {
+                        "profile_entry_id": self.entry.entry_id,
+                        "profile_name": self.profile_name,
+                    },
+                },
                 "id": request_id,
             }
 
@@ -1894,31 +1949,111 @@ class MCPAssistConversationEntity(ConversationEntity):
                     data = await response.json()
                     _LOGGER.debug(f"MCP response: {json.dumps(data, indent=2)}")
 
-                    if "result" in data and "content" in data["result"]:
-                        # Extract the text content from the MCP response
-                        content = data["result"]["content"]
-                        if isinstance(content, list) and len(content) > 0:
-                            text_result = content[0].get("text", "")
-                            if self.debug_mode:
-                                _LOGGER.info(
-                                    f"🔍 MCP tool '{tool_name}' returned {len(text_result)} chars"
-                                )
-                                _LOGGER.info(
-                                    f"🔍 Full result (repr): {repr(text_result)}"
-                                )
-                                # Also log each line separately for readability
-                                for i, line in enumerate(text_result.split("\n")):
-                                    _LOGGER.info(f"  Line {i}: {line}")
-                            return {"result": text_result}
-                        return {"result": str(content)}
-                    elif "error" in data:
+                    if "result" in data:
+                        return self._normalize_mcp_tool_response(data["result"])
+                    if "error" in data:
                         return {"error": data["error"]}
-                    else:
-                        return {"result": str(data.get("result", ""))}
+                    return {"result": str(data.get("result", ""))}
 
         except Exception as e:
             _LOGGER.error(f"Error calling MCP tool {tool_name}: {e}")
             return {"error": str(e)}
+
+    def _normalize_mcp_tool_response(self, result: Any) -> Dict[str, Any]:
+        """Normalize an MCP JSON-RPC tool result into one predictable shape."""
+        if isinstance(result, dict):
+            if any(
+                key in result
+                for key in ("content", "structuredContent", "isError", "_meta")
+            ):
+                return result
+            return {"result": result}
+        return {"result": result}
+
+    def _format_tool_result_for_llm(self, tool_name: str, result: Dict[str, Any]) -> str:
+        """Serialize a tool result for follow-up LLM turns without losing structure."""
+        if "error" in result:
+            error_data = result["error"]
+            if isinstance(error_data, dict):
+                error_message = error_data.get("message", str(error_data))
+            else:
+                error_message = str(error_data)
+            return self._compact_tool_result_for_llm(
+                tool_name,
+                f"ERROR: {error_message}",
+            )
+
+        simple_text = self._extract_simple_text_result(result)
+        if simple_text is not None:
+            return self._compact_tool_result_for_llm(tool_name, simple_text)
+
+        if "result" in result and not any(
+            key in result for key in ("content", "structuredContent", "isError", "_meta")
+        ):
+            raw_result = result["result"]
+            if isinstance(raw_result, str):
+                return self._compact_tool_result_for_llm(tool_name, raw_result)
+            return self._compact_tool_result_for_llm(
+                tool_name,
+                json.dumps(
+                    self._sanitize_tool_result_for_llm(raw_result),
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
+
+        return self._compact_tool_result_for_llm(
+            tool_name,
+            json.dumps(
+                self._sanitize_tool_result_for_llm(result),
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+
+    def _extract_simple_text_result(self, result: Dict[str, Any]) -> str | None:
+        """Return plain text when the MCP result is a single text block."""
+        content = result.get("content")
+        if (
+            isinstance(content, list)
+            and len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get("type") == "text"
+            and "structuredContent" not in result
+            and "_meta" not in result
+        ):
+            return str(content[0].get("text") or "")
+        return None
+
+    def _sanitize_tool_result_for_llm(self, value: Any) -> Any:
+        """Sanitize structured tool results so binary/image payloads stay compact."""
+        if isinstance(value, dict):
+            if value.get("type") == "image":
+                data_field = value.get("data")
+                omitted_bytes = 0
+                if isinstance(data_field, str):
+                    omitted_bytes = int(len(data_field) * 0.75)
+                return {
+                    "type": "image",
+                    "mimeType": value.get("mimeType"),
+                    "data": f"[binary image omitted: ~{omitted_bytes} bytes]",
+                }
+
+            sanitized: dict[str, Any] = {}
+            for key, item in value.items():
+                if key in {"data", "blob", "b64_json"} and isinstance(item, str):
+                    sanitized[key] = f"[omitted {len(item)} chars]"
+                    continue
+                sanitized[key] = self._sanitize_tool_result_for_llm(item)
+            return sanitized
+
+        if isinstance(value, list):
+            return [self._sanitize_tool_result_for_llm(item) for item in value]
+
+        if isinstance(value, str) and len(value) > 2000:
+            return self._compact_tool_result_for_llm("structured_result", value)
+
+        return value
 
     def _strip_thinking_tags(self, text: str) -> tuple[str, str]:
         """Strip thinking/reasoning tags from model output.
@@ -2078,17 +2213,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             result = await self._call_mcp_tool(tool_name, arguments)
 
             # Format result for LLM consumption
-            if "error" in result:
-                error_data = result["error"]
-                if isinstance(error_data, dict):
-                    error_msg = error_data.get("message", str(error_data))
-                else:
-                    error_msg = str(error_data)
-                content = f"ERROR: {error_msg}"
-            else:
-                content = result.get("result", "")
-
-            content = self._compact_tool_result_for_llm(tool_name, content)
+            content = self._format_tool_result_for_llm(tool_name, result)
 
             if tool_name == "set_conversation_state" and content:
                 if "conversation_state:true" in content.lower():

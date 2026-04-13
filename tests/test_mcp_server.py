@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -936,3 +937,98 @@ async def test_analyze_history_falls_back_to_related_contact_sensor_when_primary
     assert "Using related entity binary_sensor.front_door" in text
     assert "Front Door (binary_sensor.front_door)" in text
     assert "Recorded opened event in the last 24 hours: 1" in text
+
+
+@pytest.mark.asyncio
+async def test_handle_tools_list_includes_media_tools(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """The core MCP tool list should include the generic image/media helpers."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+
+    result = await server.handle_tools_list()
+    tool_names = {tool["name"] for tool in result["tools"]}
+
+    assert "analyze_image" in tool_names
+    assert "get_image" in tool_names
+    assert "generate_image" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_reload_external_custom_tools_clears_cache_and_notifies_clients(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Reloading external tools should invalidate the cached surface and notify clients."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server._cached_tools_list = [{"name": "stale"}]
+    server._cached_tools_signature = ("stale",)
+    server.custom_tools = SimpleNamespace(
+        reload_external_tools=AsyncMock(
+            return_value={"enabled": True, "loaded_tools": [], "load_errors": []}
+        )
+    )
+    server.broadcast_notification = AsyncMock()
+
+    diagnostics = await server.reload_external_custom_tools()
+
+    assert diagnostics["enabled"] is True
+    assert server._cached_tools_list is None
+    assert server._cached_tools_signature is None
+    server.broadcast_notification.assert_awaited_once_with(
+        "notifications/tools/list_changed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tool_get_image_returns_image_block_from_local_file(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """get_image should return an MCP image block for local image files."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    image_path = tmp_path / "guest_wifi.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nsample")
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+
+    result = await server.tool_get_image({"image_path": "guest_wifi.png"})
+
+    assert result["isError"] is False
+    assert result["content"][1]["type"] == "image"
+    assert result["content"][1]["mimeType"] == "image/png"
+    assert base64.b64decode(result["content"][1]["data"]) == b"\x89PNG\r\n\x1a\nsample"
+
+
+@pytest.mark.asyncio
+async def test_tool_analyze_image_returns_answer_and_optional_image_block(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """analyze_image should return the model answer and optional image content."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    image_path = tmp_path / "driveway.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\ndriveway")
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    monkeypatch.setattr(
+        server,
+        "_analyze_image_with_provider",
+        AsyncMock(return_value="A white SUV is in the driveway."),
+    )
+
+    result = await server.tool_analyze_image(
+        {"image_path": "driveway.png", "include_image": True}
+    )
+
+    assert result["isError"] is False
+    assert result["content"][0]["text"] == "A white SUV is in the driveway."
+    assert result["content"][1]["type"] == "image"
+    assert result["structuredContent"]["source"]["type"] == "image_path"

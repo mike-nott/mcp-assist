@@ -10,6 +10,18 @@ from custom_components.mcp_assist.custom_tool_api import MCPAssistExternalTool
 class SampleTool(MCPAssistExternalTool):
     """Minimal example custom tool."""
 
+    def get_settings_schema(self) -> dict[str, Any]:
+        """Optional shared/profile settings schema for this package."""
+        return {
+            "type": "object",
+            "properties": {
+                "status_text": {
+                    "type": "string",
+                    "default": "Sample custom tool is working.",
+                }
+            },
+        }
+
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Expose one namespaced example tool."""
         return [
@@ -20,6 +32,10 @@ class SampleTool(MCPAssistExternalTool):
                     "type": "object",
                     "properties": {},
                 },
+                "keywords": ["sample", "status", "custom"],
+                "example_queries": ["What's the sample tool status?"],
+                "preferred_when": "Use when the user asks about the sample package.",
+                "returns": "A short status summary.",
             }
         ]
 
@@ -27,11 +43,15 @@ class SampleTool(MCPAssistExternalTool):
         self, tool_name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         """Return a normal MCP tool result."""
+        settings = self.get_settings()
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": "Sample custom tool is working.",
+                    "text": str(
+                        settings.get("status_text")
+                        or "Sample custom tool is working."
+                    ),
                 }
             ],
             "isError": False,

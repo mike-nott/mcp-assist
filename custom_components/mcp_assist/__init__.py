@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
@@ -36,6 +36,7 @@ from .const import (
     CONF_MEMORY_DEFAULT_TTL_DAYS,
     CONF_MEMORY_MAX_TTL_DAYS,
     CONF_MEMORY_MAX_ITEMS,
+    SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_INCLUDE_CURRENT_USER,
@@ -89,6 +90,51 @@ def get_system_entry(hass: HomeAssistant) -> ConfigEntry | None:
         if entry.unique_id == SYSTEM_ENTRY_UNIQUE_ID:
             return entry
     return None
+
+
+async def _async_handle_reload_external_custom_tools(call: ServiceCall) -> dict:
+    """Reload external custom tools on the shared MCP server."""
+    hass = call.hass
+    server = hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+    if server is None:
+        return {
+            "enabled": False,
+            "loaded_tools": [],
+            "load_errors": ["Shared MCP server is not running"],
+        }
+
+    reload_external_custom_tools = getattr(
+        server,
+        "reload_external_custom_tools",
+        None,
+    )
+    if not callable(reload_external_custom_tools):
+        return {
+            "enabled": False,
+            "loaded_tools": [],
+            "load_errors": ["Reload is not supported by this MCP server build"],
+        }
+
+    return await reload_external_custom_tools()
+
+
+async def _async_register_services(hass: HomeAssistant) -> None:
+    """Register MCP Assist domain services once."""
+    if hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS):
+        return
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
+        _async_handle_reload_external_custom_tools,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+
+async def _async_unregister_services(hass: HomeAssistant) -> None:
+    """Unregister MCP Assist domain services when the last profile unloads."""
+    if hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS):
+        hass.services.async_remove(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS)
 
 
 async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
@@ -368,10 +414,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.data[DOMAIN]["mcp_port"] = mcp_port
 
                 _LOGGER.info("✅ Shared MCP server and index manager created successfully")
+                await _async_register_services(hass)
             else:
                 # Reuse existing MCP server
                 mcp_port = hass.data[DOMAIN]["mcp_port"]
                 _LOGGER.info("Reusing existing shared MCP server on port %d", mcp_port)
+                await _async_register_services(hass)
 
             # Increment reference count
             hass.data[DOMAIN]["mcp_refcount"] += 1
@@ -439,6 +487,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN].pop("index_manager", None)
             hass.data[DOMAIN].pop("mcp_port", None)
             hass.data[DOMAIN].pop("mcp_refcount", None)
+            await _async_unregister_services(hass)
         else:
             _LOGGER.info("Shared MCP server still in use by %d profile(s)", refcount)
 

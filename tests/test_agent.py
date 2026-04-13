@@ -18,6 +18,7 @@ from custom_components.mcp_assist.const import (
     CONF_CLEAN_RESPONSES,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_MAX_HISTORY,
+    CONF_PROFILE_NAME,
     CONF_TECHNICAL_PROMPT,
     CONF_TECHNICAL_PROMPT_MODE,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
@@ -508,6 +509,115 @@ def test_convert_mcp_tools_to_llm_tools_keeps_empty_object_properties(
     parameters = compact_tools[0]["function"]["parameters"]
 
     assert parameters == {"type": "object", "properties": {}}
+
+
+def test_convert_mcp_tools_to_llm_tools_appends_routing_hints(
+    hass, profile_entry_factory
+) -> None:
+    """Routing hints should improve tool selection without needing long prompt text."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    tools = [
+        {
+            "name": "sample_tool_status",
+            "description": "Return custom status.",
+            "inputSchema": {"type": "object", "properties": {}},
+            "routingHints": {
+                "keywords": ["status", "custom"],
+                "preferred_when": "Use when the user asks for custom package health.",
+                "returns": "A short status summary.",
+                "example_queries": ["What's the custom status?"],
+            },
+        }
+    ]
+
+    compact_tools = agent._convert_mcp_tools_to_llm_tools(tools)
+    description = compact_tools[0]["function"]["description"]
+
+    assert "Return custom status" in description
+    assert "Keywords: status, custom" in description
+    assert "Preferred when: Use when the user asks for custom package health" in description
+
+
+def test_format_tool_result_for_llm_preserves_structured_results_without_binary(
+    hass, profile_entry_factory
+) -> None:
+    """Structured MCP results should survive, but binary image payloads should be compacted."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    formatted = agent._format_tool_result_for_llm(
+        "analyze_image",
+        {
+            "content": [
+                {"type": "text", "text": "White SUV in the driveway."},
+                {"type": "image", "mimeType": "image/jpeg", "data": "a" * 4096},
+            ],
+            "structuredContent": {"source": {"camera_entity_id": "camera.driveway"}},
+            "isError": False,
+        },
+    )
+
+    assert "White SUV in the driveway." in formatted
+    assert "[binary image omitted:" in formatted
+    assert "camera.driveway" in formatted
+
+
+@pytest.mark.asyncio
+async def test_call_mcp_tool_includes_profile_context(
+    hass, profile_entry_factory, monkeypatch
+) -> None:
+    """MCP tool calls should identify the active profile for settings-aware tools."""
+    entry = profile_entry_factory(data={CONF_PROFILE_NAME: "Kitchen Profile"})
+    agent = MCPAssistConversationEntity(hass, entry)
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [{"type": "text", "text": "ok"}],
+                    "isError": False,
+                },
+            }
+
+    class _FakeSession:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, json):
+            captured["url"] = url
+            captured["payload"] = json
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "custom_components.mcp_assist.agent.aiohttp.ClientSession",
+        _FakeSession,
+    )
+
+    result = await agent._call_mcp_tool("sample_tool_status", {})
+
+    assert result["content"][0]["text"] == "ok"
+    assert captured["payload"]["params"]["context"] == {
+        "profile_entry_id": entry.entry_id,
+        "profile_name": "Kitchen Profile",
+    }
 
 
 def test_clean_text_for_tts_removes_spaces_before_punctuation(

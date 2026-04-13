@@ -18,6 +18,7 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_WEB_SEARCH,
     CONF_SEARCH_PROVIDER,
     CUSTOM_TOOL_MANIFEST_FILENAME,
+    CUSTOM_TOOL_SETTINGS_DIRECTORY,
     CUSTOM_TOOLS_DIRECTORY,
 )
 from custom_components.mcp_assist.custom_tools import CustomToolsLoader
@@ -87,16 +88,32 @@ class SampleTool(MCPAssistExternalTool):
     async def initialize(self) -> None:
         return None
 
+    def get_settings_schema(self):
+        return {{
+            "type": "object",
+            "properties": {{
+                "status_text": {{
+                    "type": "string",
+                    "default": "sample ok",
+                }}
+            }},
+        }}
+
     def get_tool_definitions(self):
         return [{{
             "name": "{resolved_tool_name}",
             "description": "Return a sample status.",
             "inputSchema": {{"type": "object", "properties": {{}}}},
+            "keywords": ["sample", "status"],
+            "example_queries": ["What's the sample status?"],
+            "preferred_when": "Use for sample package status questions.",
+            "returns": "A short sample status string.",
         }}]
 
     async def handle_call(self, tool_name, arguments):
+        settings = self.get_settings()
         return {{
-            "content": [{{"type": "text", "text": "sample ok"}}],
+            "content": [{{"type": "text", "text": settings.get("status_text", "sample ok")}}],
             "isError": False,
         }}
 
@@ -280,6 +297,16 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
     assert result["isError"] is False
     assert result["content"][0]["text"] == "sample ok"
 
+    tool_definition = next(
+        tool
+        for tool in loader.get_tool_definitions()
+        if tool["name"] == "sample_tool_status"
+    )
+    assert tool_definition["routingHints"]["keywords"] == ["sample", "status"]
+    assert tool_definition["routingHints"]["preferred_when"] == (
+        "Use for sample package status questions."
+    )
+
 
 @pytest.mark.asyncio
 async def test_invalid_external_tool_package_is_skipped_without_crashing(
@@ -361,3 +388,193 @@ async def test_legacy_manifest_filename_is_not_supported(
     await loader.initialize()
 
     assert loader.get_loaded_external_tool_info() == []
+
+
+@pytest.mark.asyncio
+async def test_external_custom_tool_uses_shared_and_profile_settings(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """External tools should receive merged shared and per-profile settings."""
+    _write_external_tool_package(tmp_path)
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    settings_root = tmp_path / CUSTOM_TOOL_SETTINGS_DIRECTORY
+    settings_root.mkdir(parents=True, exist_ok=True)
+    (settings_root / "sample_tool.json").write_text(
+        json.dumps({"status_text": "shared status"}),
+        encoding="utf-8",
+    )
+    profile_settings_dir = settings_root / "profiles" / profile_entry.entry_id
+    profile_settings_dir.mkdir(parents=True, exist_ok=True)
+    (profile_settings_dir / "sample_tool.json").write_text(
+        json.dumps({"status_text": "profile status"}),
+        encoding="utf-8",
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    shared_result = await loader.handle_tool_call("sample_tool_status", {})
+    profile_result = await loader.handle_tool_call(
+        "sample_tool_status",
+        {},
+        context={"profile_entry_id": profile_entry.entry_id},
+    )
+
+    assert shared_result["content"][0]["text"] == "shared status"
+    assert profile_result["content"][0]["text"] == "profile status"
+
+
+@pytest.mark.asyncio
+async def test_external_custom_tool_argument_validation_returns_mcp_error(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Invalid external-tool arguments should be rejected before tool execution."""
+    package_dir = tmp_path / CUSTOM_TOOLS_DIRECTORY / "typed_tool"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / CUSTOM_TOOL_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "typed_tool",
+                "name": "Typed Tool",
+                "description": "Typed external tool for schema validation tests.",
+                "version": "1.0.0",
+                "entrypoint": "tool:TypedTool",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (package_dir / "tool.py").write_text(
+        """from custom_components.mcp_assist.custom_tool_api import MCPAssistExternalTool
+
+
+class TypedTool(MCPAssistExternalTool):
+    def get_tool_definitions(self):
+        return [{
+            "name": "typed_tool_echo",
+            "description": "Echo an integer value.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"count": {"type": "integer"}},
+                "required": ["count"],
+                "additionalProperties": False,
+            },
+        }]
+
+    async def handle_call(self, tool_name, arguments):
+        return {
+            "content": [{"type": "text", "text": str(arguments["count"])}],
+            "isError": False,
+        }
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    result = await loader.handle_tool_call("typed_tool_echo", {"count": "nope"})
+
+    assert result["isError"] is True
+    assert "typed_tool_echo arguments.count must be an integer" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_external_custom_tools_can_import_shared_helpers(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Packages should be able to import helper modules from __shared__ safely."""
+    shared_dir = tmp_path / CUSTOM_TOOLS_DIRECTORY / "__shared__"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    (shared_dir / "helpers.py").write_text(
+        "def message():\n    return 'shared helper ok'\n",
+        encoding="utf-8",
+    )
+
+    package_dir = tmp_path / CUSTOM_TOOLS_DIRECTORY / "shared_tool"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / CUSTOM_TOOL_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "shared_tool",
+                "name": "Shared Tool",
+                "description": "External tool that uses a shared helper.",
+                "version": "1.0.0",
+                "entrypoint": "tool:SharedTool",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (package_dir / "tool.py").write_text(
+        """from custom_components.mcp_assist.custom_tool_api import (
+    MCPAssistExternalTool,
+    load_external_shared_module,
+)
+
+helpers = load_external_shared_module(__file__, "helpers")
+
+
+class SharedTool(MCPAssistExternalTool):
+    def get_tool_definitions(self):
+        return [{
+            "name": "shared_tool_status",
+            "description": "Return shared helper output.",
+            "inputSchema": {"type": "object", "properties": {}},
+        }]
+
+    async def handle_call(self, tool_name, arguments):
+        return {
+            "content": [{"type": "text", "text": helpers.message()}],
+            "isError": False,
+        }
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    result = await loader.handle_tool_call("shared_tool_status", {})
+
+    assert result["isError"] is False
+    assert result["content"][0]["text"] == "shared helper ok"

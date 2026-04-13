@@ -41,6 +41,7 @@ from custom_components.mcp_assist.const import (
     DEFAULT_ENABLE_DEVICE_TOOLS,
     DEFAULT_MCP_PORT,
     DOMAIN,
+    SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
     SYSTEM_ENTRY_UNIQUE_ID,
 )
 
@@ -191,3 +192,53 @@ async def test_async_setup_and_unload_reuse_shared_runtime_objects(
         assert await async_unload_entry(hass, entry_two) is True
         mcp_server.stop.assert_awaited_once()
         assert "shared_mcp_server" not in hass.data[DOMAIN]
+
+
+@pytest.mark.asyncio
+async def test_async_setup_registers_reload_service_and_last_unload_removes_it(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """The shared external-tool reload service should track the shared server lifecycle."""
+    system_entry_factory()
+    entry = profile_entry_factory()
+    index_manager = SimpleNamespace(start=AsyncMock())
+    mcp_server = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        reload_external_custom_tools=AsyncMock(
+            return_value={"enabled": True, "loaded_tools": [], "load_errors": []}
+        ),
+    )
+
+    with (
+        patch("custom_components.mcp_assist.IndexManager", return_value=index_manager),
+        patch("custom_components.mcp_assist.MCPServer", return_value=mcp_server),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(return_value=True),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            AsyncMock(return_value=True),
+        ),
+    ):
+        assert await async_setup_entry(hass, entry) is True
+        assert hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS)
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
+            blocking=True,
+            return_response=True,
+        )
+
+        assert response == {"enabled": True, "loaded_tools": [], "load_errors": []}
+        mcp_server.reload_external_custom_tools.assert_awaited_once()
+
+        assert await async_unload_entry(hass, entry) is True
+        assert not hass.services.has_service(
+            DOMAIN,
+            SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
+        )

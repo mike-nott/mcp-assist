@@ -1,15 +1,19 @@
 """MCP Server for Home Assistant entity discovery."""
 
 import asyncio
+import base64
 from collections import Counter, defaultdict
 import ipaddress
 import json
 import logging
+import mimetypes
+from pathlib import Path
 import re
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
 from datetime import date, datetime, time, timedelta
 
+import aiohttp
 from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 import voluptuous as vol
@@ -43,9 +47,13 @@ from .const import (
     DOMAIN,
     MCP_SERVER_NAME,
     MAX_ENTITIES_PER_DISCOVERY,
+    CONF_API_KEY,
     CONF_LMSTUDIO_URL,
+    CONF_MODEL_NAME,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
+    CONF_SERVER_TYPE,
+    CONF_TIMEOUT,
     CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_ASSIST_BRIDGE,
     CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
@@ -61,9 +69,17 @@ from .const import (
     CONF_MEMORY_DEFAULT_TTL_DAYS,
     CONF_MEMORY_MAX_TTL_DAYS,
     CONF_MEMORY_MAX_ITEMS,
+    DEFAULT_API_KEY,
     DEFAULT_LMSTUDIO_URL,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_OLLAMA_URL,
+    DEFAULT_LLAMACPP_URL,
+    DEFAULT_MOLTBOT_URL,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_SERVER_TYPE,
     DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_TIMEOUT,
+    DEFAULT_VLLM_URL,
     DEFAULT_ENABLE_ASSIST_BRIDGE,
     DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
     DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
@@ -77,6 +93,17 @@ from .const import (
     DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
     DEFAULT_MEMORY_MAX_TTL_DAYS,
     DEFAULT_MEMORY_MAX_ITEMS,
+    OPENAI_BASE_URL,
+    GEMINI_BASE_URL,
+    ANTHROPIC_BASE_URL,
+    OPENROUTER_BASE_URL,
+    SERVER_TYPE_OLLAMA,
+    SERVER_TYPE_OPENAI,
+    SERVER_TYPE_GEMINI,
+    SERVER_TYPE_ANTHROPIC,
+    SERVER_TYPE_OPENROUTER,
+    SERVER_TYPE_MOLTBOT,
+    SERVER_TYPE_VLLM,
     TOOL_FAMILY_SHARED_SETTINGS,
     get_optional_tool_family,
 )
@@ -93,6 +120,8 @@ from .domain_registry import (
 from .memory_manager import MemoryManager
 
 _LOGGER = logging.getLogger(__name__)
+
+_MAX_INLINE_IMAGE_BYTES = 6 * 1024 * 1024
 
 
 class MCPServer:
@@ -430,6 +459,10 @@ class MCPServer:
             self.app.router.add_get("/ws", self.handle_websocket)
             self.app.router.add_get("/health", self.handle_health)
             self.app.router.add_get(
+                "/external-tools/diagnostics",
+                self.handle_external_tool_diagnostics,
+            )
+            self.app.router.add_get(
                 "/progress", self.handle_progress_stream
             )  # Progress streaming
 
@@ -597,7 +630,68 @@ class MCPServer:
             health_info["external_custom_tools_loaded"] = (
                 self.custom_tools.get_loaded_external_tool_info()
             )
+            get_external_diagnostics = getattr(
+                self.custom_tools,
+                "get_external_diagnostics",
+                None,
+            )
+            if callable(get_external_diagnostics):
+                health_info["external_custom_tool_diagnostics"] = (
+                    get_external_diagnostics()
+                )
         return web.json_response(health_info)
+
+    async def handle_external_tool_diagnostics(
+        self, request: web.Request
+    ) -> web.Response:
+        """Return detailed diagnostics for external custom tools."""
+        client_ip = request.remote
+        _LOGGER.info("🧰 External tool diagnostics request from %s", client_ip)
+
+        if not self._is_ip_allowed(client_ip):
+            _LOGGER.warning(
+                "🚫 Blocked external tool diagnostics request from unauthorized IP: %s",
+                client_ip,
+            )
+            return web.Response(status=403, text="Forbidden: IP not authorized")
+
+        diagnostics: dict[str, Any] = {
+            "enabled": self._external_custom_tools_enabled(),
+            "loaded": [],
+        }
+        if self.custom_tools:
+            get_external_diagnostics = getattr(
+                self.custom_tools,
+                "get_external_diagnostics",
+                None,
+            )
+            if callable(get_external_diagnostics):
+                diagnostics = get_external_diagnostics()
+
+        return web.json_response(diagnostics)
+
+    async def reload_external_custom_tools(self) -> dict[str, Any]:
+        """Reload external custom tools, clear caches, and notify clients."""
+        if not self.custom_tools:
+            return {
+                "enabled": self._external_custom_tools_enabled(),
+                "loaded_tools": [],
+                "load_errors": ["Custom tools are not initialized"],
+            }
+
+        reload_external_tools = getattr(self.custom_tools, "reload_external_tools", None)
+        if not callable(reload_external_tools):
+            return {
+                "enabled": self._external_custom_tools_enabled(),
+                "loaded_tools": [],
+                "load_errors": ["Reload is not supported by the current custom tool loader"],
+            }
+
+        diagnostics = await reload_external_tools()
+        self._cached_tools_list = None
+        self._cached_tools_signature = None
+        await self.broadcast_notification("notifications/tools/list_changed")
+        return diagnostics
 
     async def handle_progress_stream(self, request: web.Request) -> web.StreamResponse:
         """SSE endpoint for progress updates during tool execution."""
@@ -718,6 +812,174 @@ class MCPServer:
         """Get the tools list for health check."""
         tools_result = await self.handle_tools_list()
         return tools_result.get("tools", [])
+
+    def _get_media_tool_definitions(self) -> list[dict[str, Any]]:
+        """Return generic media/image MCP tools."""
+        return [
+            {
+                "name": "analyze_image",
+                "description": (
+                    "Analyze an image, camera snapshot, or image-like entity with the "
+                    "current profile's multimodal model. Use this for questions such as "
+                    "'what is in the driveway?' or 'who is at the door?' when an image "
+                    "source is available."
+                ),
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": (
+                                "Question to answer about the image. Defaults to a short factual description."
+                            ),
+                            "default": "Describe the image briefly and focus on factual observations.",
+                        },
+                        "camera_entity_id": {
+                            "type": "string",
+                            "description": "Camera entity to snapshot before analysis.",
+                        },
+                        "entity_id": {
+                            "type": "string",
+                            "description": (
+                                "Image-like entity to resolve. Camera entities are supported directly. "
+                                "Other entities may work when they expose a local or remote picture URL."
+                            ),
+                        },
+                        "image_url": {
+                            "type": "string",
+                            "description": (
+                                "Remote URL, data URL, or /local/... URL for the image to analyze."
+                            ),
+                        },
+                        "image_path": {
+                            "type": "string",
+                            "description": (
+                                "Local image path relative to the Home Assistant config directory, "
+                                "or an absolute path inside that directory."
+                            ),
+                        },
+                        "detail": {
+                            "type": "string",
+                            "enum": ["auto", "low", "high"],
+                            "default": "auto",
+                            "description": "Requested image detail level for OpenAI-compatible providers.",
+                        },
+                        "include_image": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Include the source image as an MCP image content block in the result.",
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+                "routingHints": {
+                    "keywords": ["camera", "image", "vision", "driveway", "door"],
+                    "example_queries": [
+                        "What's in the driveway?",
+                        "Who's at the front door?",
+                    ],
+                    "preferred_when": (
+                        "Use when the user wants a live or static visual answer from a camera, URL, or image."
+                    ),
+                    "returns": "A factual answer plus optional structured image metadata.",
+                },
+            },
+            {
+                "name": "get_image",
+                "description": (
+                    "Fetch an image from a camera, image-like entity, URL, or local file "
+                    "and return it as an MCP image content block for clients that can display images."
+                ),
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "camera_entity_id": {
+                            "type": "string",
+                            "description": "Camera entity to snapshot.",
+                        },
+                        "entity_id": {
+                            "type": "string",
+                            "description": (
+                                "Image-like entity to resolve. Camera entities are supported directly."
+                            ),
+                        },
+                        "image_url": {
+                            "type": "string",
+                            "description": "Remote URL, data URL, or /local/... URL for the image.",
+                        },
+                        "image_path": {
+                            "type": "string",
+                            "description": (
+                                "Local image path relative to the Home Assistant config directory, "
+                                "or an absolute path inside that directory."
+                            ),
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+                "routingHints": {
+                    "keywords": ["show", "display", "image", "qr", "camera"],
+                    "example_queries": [
+                        "Show me the guest wifi QR code.",
+                        "Display the latest driveway snapshot.",
+                    ],
+                    "preferred_when": (
+                        "Use when the client can render images or a downstream tool needs an image block."
+                    ),
+                    "returns": "An MCP image block plus lightweight source metadata.",
+                },
+            },
+            {
+                "name": "generate_image",
+                "description": (
+                    "Generate an image with the current profile's provider when it exposes "
+                    "an OpenAI-compatible image generation API. Returns an MCP image content block when available."
+                ),
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "What image to generate.",
+                        },
+                        "size": {
+                            "type": "string",
+                            "description": "Optional image size such as 1024x1024.",
+                        },
+                        "quality": {
+                            "type": "string",
+                            "description": "Optional provider-specific quality hint.",
+                        },
+                        "style": {
+                            "type": "string",
+                            "description": "Optional provider-specific style hint.",
+                        },
+                        "background": {
+                            "type": "string",
+                            "description": "Optional provider-specific background hint.",
+                        },
+                    },
+                    "required": ["prompt"],
+                    "additionalProperties": False,
+                },
+                "routingHints": {
+                    "keywords": ["generate", "image", "draw", "illustration", "qr"],
+                    "example_queries": [
+                        "Generate a guest wifi QR code poster.",
+                        "Create a simple front door instruction image.",
+                    ],
+                    "preferred_when": (
+                        "Use when the user explicitly wants a new image and the provider supports image generation."
+                    ),
+                    "returns": "An MCP image block or a clear unsupported-provider error.",
+                },
+            },
+        ]
 
     async def handle_websocket(self, request: web.Request) -> WebSocketResponse:
         """Handle WebSocket connections for MCP protocol."""
@@ -1980,6 +2242,7 @@ class MCPServer:
             },
             ]
         )
+        tools.extend(self._get_media_tool_definitions())
 
         # Add custom tool definitions if enabled
         if self.custom_tools:
@@ -2000,6 +2263,7 @@ class MCPServer:
         """Handle tools/call request."""
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
+        context = params.get("context") or {}
 
         _LOGGER.debug("Calling tool: %s with args: %s", tool_name, arguments)
 
@@ -2070,12 +2334,597 @@ class MCPServer:
             return await self.tool_recall_memories(arguments)
         elif tool_name == "forget_memory":
             return await self.tool_forget_memory(arguments)
+        elif tool_name == "analyze_image":
+            return await self.tool_analyze_image(arguments, context=context)
+        elif tool_name == "get_image":
+            return await self.tool_get_image(arguments)
+        elif tool_name == "generate_image":
+            return await self.tool_generate_image(arguments, context=context)
         else:
             # Check if it's a custom tool
             if self.custom_tools and self.custom_tools.is_custom_tool(tool_name):
-                return await self.custom_tools.handle_tool_call(tool_name, arguments)
+                return await self.custom_tools.handle_tool_call(
+                    tool_name,
+                    arguments,
+                    context=context,
+                )
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
+
+    def _build_text_tool_result(
+        self,
+        text: str,
+        *,
+        is_error: bool = False,
+        structured_content: dict[str, Any] | None = None,
+        extra_content: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Build a standard MCP text result with optional structured content."""
+        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        if extra_content:
+            content.extend(extra_content)
+
+        result: dict[str, Any] = {"content": content, "isError": is_error}
+        if structured_content is not None:
+            result["structuredContent"] = structured_content
+        return result
+
+    def _resolve_profile_entry(self, context: dict[str, Any] | None) -> Any:
+        """Resolve the active conversation profile entry for a tool call."""
+        if isinstance(context, dict):
+            profile_entry_id = str(context.get("profile_entry_id") or "").strip()
+            if profile_entry_id:
+                entry = self.hass.config_entries.async_get_entry(profile_entry_id)
+                if entry is not None:
+                    return entry
+        return self.entry
+
+    @staticmethod
+    def _get_entry_value(entry: Any, key: str, default: Any) -> Any:
+        """Read a config-entry value from options first, then data."""
+        if entry is None:
+            return default
+        value = entry.options.get(key, entry.data.get(key))
+        return default if value is None else value
+
+    def _get_model_provider_config(
+        self, context: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Resolve the current profile's model/provider config for media tools."""
+        entry = self._resolve_profile_entry(context)
+        server_type = str(
+            self._get_entry_value(entry, CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        )
+        model_name = str(
+            self._get_entry_value(entry, CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
+        )
+        api_key = str(self._get_entry_value(entry, CONF_API_KEY, DEFAULT_API_KEY) or "")
+        timeout = int(self._get_entry_value(entry, CONF_TIMEOUT, DEFAULT_TIMEOUT) or DEFAULT_TIMEOUT)
+        configured_url = str(
+            self._get_entry_value(entry, CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)
+            or DEFAULT_LMSTUDIO_URL
+        ).rstrip("/")
+
+        if server_type == SERVER_TYPE_OPENAI:
+            base_url = str(
+                self._get_entry_value(entry, CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
+                or OPENAI_BASE_URL
+            ).rstrip("/")
+        elif server_type == SERVER_TYPE_GEMINI:
+            base_url = GEMINI_BASE_URL.rstrip("/")
+        elif server_type == SERVER_TYPE_ANTHROPIC:
+            base_url = ANTHROPIC_BASE_URL.rstrip("/")
+        elif server_type == SERVER_TYPE_OPENROUTER:
+            base_url = OPENROUTER_BASE_URL.rstrip("/")
+        elif server_type == SERVER_TYPE_MOLTBOT:
+            base_url = configured_url or DEFAULT_MOLTBOT_URL
+        elif server_type == SERVER_TYPE_VLLM:
+            base_url = configured_url or DEFAULT_VLLM_URL
+        elif server_type == SERVER_TYPE_OLLAMA:
+            base_url = configured_url or DEFAULT_OLLAMA_URL
+        elif server_type == "llamacpp":
+            base_url = configured_url or DEFAULT_LLAMACPP_URL
+        else:
+            base_url = configured_url or DEFAULT_LMSTUDIO_URL
+
+        return {
+            "entry": entry,
+            "server_type": server_type,
+            "model_name": model_name,
+            "api_key": api_key,
+            "timeout": timeout,
+            "base_url": base_url.rstrip("/"),
+        }
+
+    def _get_model_auth_headers(self, provider_config: dict[str, Any]) -> dict[str, str]:
+        """Build provider auth headers using the same rules as the conversation agent."""
+        server_type = provider_config["server_type"]
+        api_key = provider_config["api_key"]
+        if server_type == SERVER_TYPE_OPENAI:
+            if (
+                api_key
+                and len(api_key) > 5
+                and api_key.lower() not in {"none", "null", "fake", "na", "n/a"}
+            ):
+                return {"Authorization": f"Bearer {api_key}"}
+            return {}
+        if server_type in {
+            SERVER_TYPE_GEMINI,
+            SERVER_TYPE_ANTHROPIC,
+            SERVER_TYPE_MOLTBOT,
+        }:
+            return {"Authorization": f"Bearer {api_key}"}
+        if server_type == SERVER_TYPE_OPENROUTER:
+            return {
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/Jason-Morcos/mcp-assist",
+                "X-Title": "MCP Assist for Home Assistant",
+            }
+        return {}
+
+    async def tool_get_image(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch an image and return it as an MCP image content block."""
+        try:
+            image_bytes, mime_type, source = await self._resolve_image_source(args)
+        except Exception as err:
+            return self._build_text_tool_result(str(err), is_error=True)
+
+        return self._build_text_tool_result(
+            f"Fetched image from {source['description']}.",
+            structured_content={
+                "source": source,
+                "mime_type": mime_type,
+                "size_bytes": len(image_bytes),
+            },
+            extra_content=[self._build_image_content_block(image_bytes, mime_type)],
+        )
+
+    async def tool_analyze_image(
+        self,
+        args: Dict[str, Any],
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Analyze an image or live camera snapshot with the active profile model."""
+        try:
+            image_bytes, mime_type, source = await self._resolve_image_source(args)
+            answer = await self._analyze_image_with_provider(
+                question=str(args.get("question") or "").strip()
+                or "Describe the image briefly and focus on factual observations.",
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                detail=str(args.get("detail") or "auto"),
+                context=context,
+            )
+        except Exception as err:
+            return self._build_text_tool_result(str(err), is_error=True)
+
+        extra_content: list[dict[str, Any]] = []
+        if bool(args.get("include_image")):
+            extra_content.append(self._build_image_content_block(image_bytes, mime_type))
+
+        return self._build_text_tool_result(
+            answer,
+            structured_content={
+                "answer": answer,
+                "source": source,
+                "mime_type": mime_type,
+                "size_bytes": len(image_bytes),
+            },
+            extra_content=extra_content,
+        )
+
+    async def tool_generate_image(
+        self,
+        args: Dict[str, Any],
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Generate an image with the active profile provider when supported."""
+        prompt = str(args.get("prompt") or "").strip()
+        if not prompt:
+            return self._build_text_tool_result(
+                "generate_image requires a prompt.",
+                is_error=True,
+            )
+
+        try:
+            image_bytes, mime_type, metadata = await self._generate_image_with_provider(
+                prompt=prompt,
+                size=str(args.get("size") or "").strip() or None,
+                quality=str(args.get("quality") or "").strip() or None,
+                style=str(args.get("style") or "").strip() or None,
+                background=str(args.get("background") or "").strip() or None,
+                context=context,
+            )
+        except Exception as err:
+            return self._build_text_tool_result(str(err), is_error=True)
+
+        return self._build_text_tool_result(
+            "Generated image successfully.",
+            structured_content=metadata,
+            extra_content=[self._build_image_content_block(image_bytes, mime_type)],
+        )
+
+    async def _resolve_image_source(
+        self,
+        args: dict[str, Any],
+    ) -> tuple[bytes, str, dict[str, Any]]:
+        """Resolve one image source from a camera, entity, URL, or local path."""
+        source_fields = {
+            "camera_entity_id": str(args.get("camera_entity_id") or "").strip(),
+            "entity_id": str(args.get("entity_id") or "").strip(),
+            "image_url": str(args.get("image_url") or "").strip(),
+            "image_path": str(args.get("image_path") or "").strip(),
+        }
+        provided = [key for key, value in source_fields.items() if value]
+        if len(provided) != 1:
+            raise ValueError(
+                "Provide exactly one of camera_entity_id, entity_id, image_url, or image_path."
+            )
+
+        field_name = provided[0]
+        field_value = source_fields[field_name]
+        if field_name == "camera_entity_id":
+            image_bytes, mime_type = await self._capture_camera_image(field_value)
+            return (
+                image_bytes,
+                mime_type,
+                {
+                    "type": "camera_entity_id",
+                    "value": field_value,
+                    "description": f"camera {field_value}",
+                },
+            )
+        if field_name == "entity_id":
+            image_bytes, mime_type, description = await self._resolve_entity_image(
+                field_value
+            )
+            return (
+                image_bytes,
+                mime_type,
+                {
+                    "type": "entity_id",
+                    "value": field_value,
+                    "description": description,
+                },
+            )
+        if field_name == "image_url":
+            image_bytes, mime_type = await self._fetch_image_reference(field_value)
+            return (
+                image_bytes,
+                mime_type,
+                {
+                    "type": "image_url",
+                    "value": field_value,
+                    "description": f"URL {field_value}",
+                },
+            )
+
+        local_path = self._resolve_local_image_path(field_value)
+        image_bytes, mime_type = self._read_local_image_path(local_path)
+        return (
+            image_bytes,
+            mime_type,
+            {
+                "type": "image_path",
+                "value": str(local_path),
+                "description": f"file {local_path.name}",
+            },
+        )
+
+    async def _capture_camera_image(self, entity_id: str) -> tuple[bytes, str]:
+        """Capture a camera snapshot using Home Assistant's native camera helper."""
+        if not entity_id.startswith("camera."):
+            raise ValueError("camera_entity_id must reference a camera entity.")
+
+        from homeassistant.components.camera import async_get_image
+
+        image = await async_get_image(self.hass, entity_id, timeout=10)
+        image_bytes = getattr(image, "content", None)
+        mime_type = getattr(image, "content_type", None)
+        if not isinstance(image_bytes, (bytes, bytearray)):
+            raise ValueError(f"Unable to capture image from {entity_id}.")
+        return self._normalize_image_payload(bytes(image_bytes), mime_type, entity_id)
+
+    async def _resolve_entity_image(
+        self,
+        entity_id: str,
+    ) -> tuple[bytes, str, str]:
+        """Resolve an image from a supported image-like entity."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            raise ValueError(f"Entity {entity_id!r} was not found.")
+
+        if entity_id.startswith("camera."):
+            image_bytes, mime_type = await self._capture_camera_image(entity_id)
+            return image_bytes, mime_type, f"camera {entity_id}"
+
+        entity_picture = (
+            str(state.attributes.get("entity_picture_local") or "").strip()
+            or str(state.attributes.get("entity_picture") or "").strip()
+        )
+        if not entity_picture:
+            raise ValueError(
+                f"Entity {entity_id!r} does not expose a usable picture URL."
+            )
+
+        image_bytes, mime_type = await self._fetch_image_reference(entity_picture)
+        return image_bytes, mime_type, f"entity picture for {entity_id}"
+
+    async def _fetch_image_reference(self, reference: str) -> tuple[bytes, str]:
+        """Fetch image bytes from a data URL, local URL, or remote URL."""
+        if reference.startswith("data:"):
+            return self._parse_data_url_image(reference)
+        if reference.startswith("/local/") or reference.startswith("/media/local/"):
+            local_path = self._resolve_local_image_path(reference)
+            return self._read_local_image_path(local_path)
+        if not reference.startswith(("http://", "https://")):
+            raise ValueError(
+                "Only data URLs, /local URLs, /media/local URLs, and http(s) image URLs are supported."
+            )
+
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(reference) as response:
+                if response.status != 200:
+                    raise ValueError(
+                        f"Unable to fetch image URL {reference!r}: HTTP {response.status}"
+                    )
+                image_bytes = await response.read()
+                mime_type = response.headers.get("Content-Type")
+        return self._normalize_image_payload(image_bytes, mime_type, reference)
+
+    def _parse_data_url_image(self, reference: str) -> tuple[bytes, str]:
+        """Decode a data URL into image bytes."""
+        match = re.match(
+            r"^data:(?P<mime>[-\w.+/]+);base64,(?P<data>[A-Za-z0-9+/=\s]+)$",
+            reference,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            raise ValueError("Unsupported data URL format for image input.")
+        mime_type = match.group("mime")
+        image_bytes = base64.b64decode(match.group("data"), validate=False)
+        return self._normalize_image_payload(image_bytes, mime_type, "data-url")
+
+    def _resolve_local_image_path(self, reference: str) -> Path:
+        """Resolve a local image path inside the Home Assistant config directory."""
+        config_root = Path(self.hass.config.path("")).resolve()
+        if reference.startswith("/local/"):
+            candidate = (config_root / "www" / reference.removeprefix("/local/")).resolve()
+        elif reference.startswith("/media/local/"):
+            candidate = (
+                config_root / "media" / reference.removeprefix("/media/local/")
+            ).resolve()
+        else:
+            raw_path = Path(reference)
+            if raw_path.is_absolute():
+                candidate = raw_path.resolve()
+            else:
+                candidate = (config_root / raw_path).resolve()
+
+        try:
+            candidate.relative_to(config_root)
+        except ValueError as err:
+            raise ValueError(
+                "Local image paths must stay inside the Home Assistant config directory."
+            ) from err
+
+        if not candidate.is_file():
+            raise ValueError(f"Image file was not found: {candidate}")
+        return candidate
+
+    def _read_local_image_path(self, path: Path) -> tuple[bytes, str]:
+        """Read and validate a local image file."""
+        image_bytes = path.read_bytes()
+        mime_type = mimetypes.guess_type(path.name)[0]
+        return self._normalize_image_payload(image_bytes, mime_type, str(path))
+
+    def _normalize_image_payload(
+        self,
+        image_bytes: bytes,
+        mime_type: str | None,
+        source_label: str,
+    ) -> tuple[bytes, str]:
+        """Validate an image payload and normalize its mime type."""
+        if not image_bytes:
+            raise ValueError(f"No image bytes were available from {source_label}.")
+        if len(image_bytes) > _MAX_INLINE_IMAGE_BYTES:
+            raise ValueError(
+                f"Image source {source_label!r} is too large ({len(image_bytes)} bytes)."
+            )
+
+        normalized_mime = str(mime_type or "").split(";", 1)[0].strip().lower()
+        if not normalized_mime:
+            normalized_mime = mimetypes.guess_type(source_label)[0] or "image/jpeg"
+        if not normalized_mime.startswith("image/"):
+            raise ValueError(
+                f"Source {source_label!r} did not resolve to an image mime type."
+            )
+
+        return image_bytes, normalized_mime
+
+    def _build_image_content_block(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+    ) -> dict[str, Any]:
+        """Build an MCP image content block."""
+        return {
+            "type": "image",
+            "mimeType": mime_type,
+            "data": base64.b64encode(image_bytes).decode("ascii"),
+        }
+
+    async def _analyze_image_with_provider(
+        self,
+        *,
+        question: str,
+        image_bytes: bytes,
+        mime_type: str,
+        detail: str,
+        context: dict[str, Any] | None,
+    ) -> str:
+        """Run image analysis through the active profile provider."""
+        provider_config = self._get_model_provider_config(context)
+        server_type = provider_config["server_type"]
+        timeout = aiohttp.ClientTimeout(total=provider_config["timeout"])
+        headers = self._get_model_auth_headers(provider_config)
+        base_url = provider_config["base_url"]
+
+        if server_type == SERVER_TYPE_OLLAMA:
+            payload = {
+                "model": provider_config["model_name"],
+                "stream": False,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": question,
+                        "images": [base64.b64encode(image_bytes).decode("ascii")],
+                    }
+                ],
+            }
+            url = f"{base_url}/api/chat"
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status != 200:
+                        raise ValueError(
+                            f"Image analysis failed for {server_type}: HTTP {response.status} {await response.text()}"
+                        )
+                    data = await response.json()
+            return str(data.get("message", {}).get("content") or "").strip()
+
+        payload = {
+            "model": provider_config["model_name"],
+            "stream": False,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}",
+                                "detail": detail if detail in {"auto", "low", "high"} else "auto",
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+        url = f"{base_url}/v1/chat/completions"
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status != 200:
+                    raise ValueError(
+                        f"Image analysis failed for {server_type}: HTTP {response.status} {await response.text()}"
+                    )
+                data = await response.json()
+
+        message = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content")
+        )
+        return self._extract_provider_message_text(message).strip()
+
+    async def _generate_image_with_provider(
+        self,
+        *,
+        prompt: str,
+        size: str | None,
+        quality: str | None,
+        style: str | None,
+        background: str | None,
+        context: dict[str, Any] | None,
+    ) -> tuple[bytes, str, dict[str, Any]]:
+        """Generate an image through an OpenAI-compatible images API when supported."""
+        provider_config = self._get_model_provider_config(context)
+        server_type = provider_config["server_type"]
+        if server_type == SERVER_TYPE_OLLAMA:
+            raise ValueError(
+                "Image generation is not supported for Ollama profiles through MCP Assist yet."
+            )
+
+        payload: dict[str, Any] = {
+            "model": provider_config["model_name"],
+            "prompt": prompt,
+            "response_format": "b64_json",
+        }
+        if size:
+            payload["size"] = size
+        if quality:
+            payload["quality"] = quality
+        if style:
+            payload["style"] = style
+        if background:
+            payload["background"] = background
+
+        timeout = aiohttp.ClientTimeout(total=provider_config["timeout"])
+        headers = self._get_model_auth_headers(provider_config)
+        url = f"{provider_config['base_url']}/v1/images/generations"
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status != 200:
+                    raise ValueError(
+                        f"Image generation failed for {server_type}: HTTP {response.status} {await response.text()}"
+                    )
+                data = await response.json()
+
+        items = data.get("data")
+        if not isinstance(items, list) or not items:
+            raise ValueError("The image generation provider did not return any images.")
+        item = items[0]
+        if not isinstance(item, dict):
+            raise ValueError("Unexpected image generation payload from provider.")
+
+        image_bytes: bytes
+        mime_type = "image/png"
+        if item.get("b64_json"):
+            image_bytes = base64.b64decode(str(item["b64_json"]), validate=False)
+        elif item.get("url"):
+            image_bytes, mime_type = await self._fetch_image_reference(str(item["url"]))
+        else:
+            raise ValueError("The image generation provider returned no usable image data.")
+
+        image_bytes, mime_type = self._normalize_image_payload(
+            image_bytes,
+            mime_type,
+            "generated-image",
+        )
+        metadata = {
+            "prompt": prompt,
+            "provider": server_type,
+            "model": provider_config["model_name"],
+            "mime_type": mime_type,
+            "size_bytes": len(image_bytes),
+        }
+        revised_prompt = str(item.get("revised_prompt") or "").strip()
+        if revised_prompt:
+            metadata["revised_prompt"] = revised_prompt
+
+        return image_bytes, mime_type, metadata
+
+    @staticmethod
+    def _extract_provider_message_text(message_content: Any) -> str:
+        """Extract text from provider chat-completion message content."""
+        if isinstance(message_content, str):
+            return message_content
+        if isinstance(message_content, list):
+            parts: list[str] = []
+            for item in message_content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text = str(item.get("text") or "").strip()
+                    if text:
+                        parts.append(text)
+            if parts:
+                return "\n".join(parts)
+        return json.dumps(message_content, ensure_ascii=False)
 
     async def tool_discover_entities(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Discover entities based on criteria with progress notifications."""

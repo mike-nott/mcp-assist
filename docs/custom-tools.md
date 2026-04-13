@@ -36,6 +36,8 @@ When enabled, MCP Assist will:
 - discover valid packages at startup
 - expose their MCP tools alongside built-in tools
 - append short tool-specific prompt guidance when provided
+- validate external-tool arguments against `inputSchema` before dispatch
+- merge optional shared/profile settings when a package declares a settings schema
 
 ## Directory Layout
 
@@ -44,6 +46,8 @@ Each tool package lives in its own folder:
 ```text
 <home-assistant-config>/
   mcp-assist-tools/
+    __shared__/
+      helpers.py
     my_tool/
       mcp_tool.json
       tool.py
@@ -55,6 +59,7 @@ Rules:
 - The package folder name must match the manifest `id`
 - Hidden folders and `__*` folders are ignored
 - Symlinked package folders are rejected
+- `__shared__/` is reserved for helper modules that multiple packages can import
 
 ## Manifest Format
 
@@ -128,6 +133,56 @@ The entrypoint class must subclass `MCPAssistExternalTool`.
 - `initialize(self) -> None`
 - `async_shutdown(self) -> None`
 - `get_prompt_instructions(self) -> str`
+- `get_settings_schema(self) -> dict[str, Any]`
+
+### Shared helpers
+
+If you want several narrow packages to share code, use the first-class helper loader:
+
+```python
+from custom_components.mcp_assist.custom_tool_api import (
+    MCPAssistExternalTool,
+    load_external_shared_module,
+)
+
+shared = load_external_shared_module(__file__, "helpers")
+```
+
+MCP Assist loads these helpers from:
+
+- `<home-assistant-config>/mcp-assist-tools/__shared__/`
+
+This avoids ad-hoc `sys.path` shims and keeps package imports collision-safe.
+
+### Package settings
+
+External packages can declare an optional settings schema:
+
+```python
+def get_settings_schema(self) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "default_camera": {"type": "string"},
+            "zones": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+        },
+    }
+```
+
+When present, MCP Assist will load and validate settings from:
+
+- Shared: `<home-assistant-config>/mcp-assist-tool-settings/<tool_id>.json`
+- Per-profile override: `<home-assistant-config>/mcp-assist-tool-settings/profiles/<profile_entry_id>/<tool_id>.json`
+
+During a tool call, packages can read:
+
+- `self.get_settings()`
+- `self.get_shared_settings()`
+- `self.get_profile_settings()`
+- `self.get_call_context()`
 
 ## Tool Definition Rules
 
@@ -152,6 +207,24 @@ Example:
 
 MCP Assist rejects tool-name collisions with built-in tools or other external packages.
 
+## Routing Metadata
+
+To keep the initial prompt small, external tools can add lightweight routing hints directly on the tool definition instead of inflating prompt appendices:
+
+```python
+{
+    "name": "my_tool_status",
+    "description": "Return package status.",
+    "inputSchema": {"type": "object", "properties": {}},
+    "keywords": ["status", "health", "custom"],
+    "example_queries": ["What's the custom system status?"],
+    "preferred_when": "Use when the user asks about this package's state.",
+    "returns": "A short status summary.",
+}
+```
+
+You can also place the same fields under a nested `routing` object. MCP Assist normalizes these hints into `routingHints` and uses them when converting MCP tools into compact LLM tool descriptions.
+
 ## Prompt Guidance
 
 External tools can teach the model how to use them in two ways:
@@ -170,6 +243,8 @@ They should not:
 - restate the entire system prompt
 - include long examples unless absolutely necessary
 - dump large environment-specific data
+
+Prefer routing metadata over longer prompt text when a hint can be expressed structurally.
 
 MCP Assist automatically truncates overly long external prompt additions to keep context usage small.
 
@@ -197,6 +272,14 @@ return {
 }
 ```
 
+External tools may also return structured MCP results such as:
+
+- multiple content blocks
+- `structuredContent`
+- image content blocks for clients that support image rendering
+
+MCP Assist preserves these results in the MCP server response, and conversation profiles now compact them for the LLM without flattening everything to the first text block.
+
 ## Best Practices
 
 Follow these guidelines to keep packages portable and maintainable:
@@ -205,11 +288,26 @@ Follow these guidelines to keep packages portable and maintainable:
 - Use Home Assistant APIs and current state instead of hardcoded assumptions
 - Keep tool names stable
 - Keep prompt additions concise
+- Prefer routing metadata for discoverability before adding more prompt text
 - Use async-safe Home Assistant patterns
 - Avoid blocking I/O in tool calls
 - Avoid installing or expecting third-party Python dependencies
 - Do not assume a specific entity ID, area name, floor name, or user
 - Return structured, factual results and let the model phrase them naturally
+
+## Reloading and Diagnostics
+
+You no longer need a full restart just to iterate on package code:
+
+- Home Assistant service: `mcp_assist.reload_external_custom_tools`
+- Diagnostics endpoint: `GET /external-tools/diagnostics`
+
+The diagnostics endpoint reports:
+
+- whether external tools are enabled
+- which package folders were scanned
+- current load errors
+- loaded package ids, tool names, and settings status
 
 ## Example Package
 
@@ -231,6 +329,7 @@ Check:
 - the manifest file is named `mcp_tool.json` and uses `schema_version: 1`
 - the tool names are properly prefixed with `<tool_id>_`
 - Home Assistant logs for `Failed to load external custom tool package`
+- the diagnostics endpoint or reload service output for package-specific load errors
 
 ### My tool package loads but the model never uses it
 
@@ -243,4 +342,4 @@ Check:
 
 ### Can packages add profile-specific settings?
 
-Not today. External custom tools are shared MCP server extensions. If you need per-profile behavior, handle that inside the tool logic based on Home Assistant state or add future package-level configuration support in a backward-compatible way.
+Yes. Declare `get_settings_schema()` and use the shared/profile JSON settings paths described above.
