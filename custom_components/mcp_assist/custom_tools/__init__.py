@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from ..custom_tool_api import MCPAssistExternalTool
@@ -21,7 +22,11 @@ from ..const import (
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     DEFAULT_ENABLE_WEB_SEARCH,
 )
-from .external_loader import ExternalCustomToolLoader, LoadedExternalTool, combine_prompt_instructions
+from .external_loader import (
+    ExternalCustomToolLoader,
+    LoadedToolPackage,
+    combine_prompt_instructions,
+)
 from .schema_utils import SchemaValidationError, validate_and_normalize_json_value
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,7 +41,8 @@ class _RegisteredTool:
     instance: Any
     provider_key: str
     is_external: bool
-    loaded_external_tool: LoadedExternalTool | None = None
+    loaded_tool_package: LoadedToolPackage | None = None
+    package_loader: ExternalCustomToolLoader | None = None
 
 
 class CustomToolsLoader:
@@ -47,7 +53,16 @@ class CustomToolsLoader:
         self.hass = hass
         self.entry = entry
         self.tools: dict[str, Any] = {}
-        self.external_tools: list[LoadedExternalTool] = []
+        self.builtin_packages: list[LoadedToolPackage] = []
+        self.external_tools: list[LoadedToolPackage] = []
+        self._builtin_loader = ExternalCustomToolLoader(
+            self.hass,
+            tools_root=Path(__file__).resolve().parent / "packages",
+            module_namespace="mcp_assist_builtin_tools",
+            require_tool_name_prefix=False,
+            package_log_label="built-in tool package",
+            prompt_package_label="Built-in tool package",
+        )
         self._external_loader = ExternalCustomToolLoader(self.hass)
         self._external_prompt_instructions = ""
         self._tool_registry: dict[str, _RegisteredTool] = {}
@@ -61,6 +76,9 @@ class CustomToolsLoader:
 
     async def _initialize_builtin_tools(self) -> None:
         """Load built-in tool bundles that ship with MCP Assist."""
+        await self._shutdown_builtin_tools()
+
+        selected_tool_ids: set[str] = set()
         calculator_enabled = self._get_shared_setting(
             CONF_ENABLE_CALCULATOR_TOOLS, DEFAULT_ENABLE_CALCULATOR_TOOLS
         )
@@ -71,17 +89,7 @@ class CustomToolsLoader:
             unit_conversion_enabled = calculator_enabled
 
         if calculator_enabled or unit_conversion_enabled:
-            try:
-                from .calculator import CalculatorTool
-
-                self.tools["calculator"] = CalculatorTool(self.hass)
-                await self.tools["calculator"].initialize()
-                _LOGGER.debug("✅ Calculator and/or unit-conversion tools initialized")
-            except Exception as err:
-                _LOGGER.error(
-                    "Failed to initialize calculator/unit-conversion tools: %s",
-                    err,
-                )
+            selected_tool_ids.add("calculator")
         else:
             _LOGGER.debug(
                 "Calculator and unit-conversion tools disabled in shared MCP settings"
@@ -95,37 +103,25 @@ class CustomToolsLoader:
 
         if not web_search_enabled:
             _LOGGER.debug("Web search tools disabled in shared MCP settings")
+        elif search_provider in {"brave", "duckduckgo"}:
+            selected_tool_ids.update({"search", "read_url"})
+        else:
+            _LOGGER.debug("Web search enabled, but no supported search provider is configured")
+
+        if not selected_tool_ids:
             return
 
-        if search_provider == "brave":
-            try:
-                from .brave_search import BraveSearchTool
+        self.builtin_packages = await self._builtin_loader.load(
+            allowed_tool_ids=selected_tool_ids,
+        )
+        for loaded_tool in self.builtin_packages:
+            self.tools[loaded_tool.manifest.tool_id] = loaded_tool.instance
 
-                api_key = self._get_brave_api_key()
-                self.tools["search"] = BraveSearchTool(self.hass, api_key)
-                await self.tools["search"].initialize()
-                _LOGGER.debug("✅ Brave Search tool initialized")
-            except Exception as err:
-                _LOGGER.error("Failed to initialize Brave Search tool: %s", err)
-        elif search_provider == "duckduckgo":
-            try:
-                from .duckduckgo_search import DuckDuckGoSearchTool
-
-                self.tools["search"] = DuckDuckGoSearchTool(self.hass)
-                await self.tools["search"].initialize()
-                _LOGGER.debug("✅ DuckDuckGo Search tool initialized")
-            except Exception as err:
-                _LOGGER.error("Failed to initialize DuckDuckGo Search tool: %s", err)
-
-        if search_provider in {"brave", "duckduckgo"}:
-            try:
-                from .read_url import ReadUrlTool
-
-                self.tools["read_url"] = ReadUrlTool(self.hass)
-                await self.tools["read_url"].initialize()
-                _LOGGER.debug("✅ Read URL tool initialized")
-            except Exception as err:
-                _LOGGER.error("Failed to initialize read_url tool: %s", err)
+        if self.builtin_packages:
+            _LOGGER.info(
+                "✅ Loaded %d built-in tool package(s)",
+                len(self.builtin_packages),
+            )
 
     async def _initialize_external_tools(self) -> None:
         """Load opt-in user-defined tool packages from the HA config directory."""
@@ -141,8 +137,12 @@ class CustomToolsLoader:
             str(tool_definition.get("name") or "")
             for tool_definition in self._get_builtin_tool_definitions()
         }
+        reserved_tool_ids = {
+            loaded_tool.manifest.tool_id for loaded_tool in self.builtin_packages
+        }
         self.external_tools = await self._external_loader.load(
-            reserved_tool_names=reserved_tool_names
+            reserved_tool_names=reserved_tool_names,
+            reserved_tool_ids=reserved_tool_ids,
         )
         for loaded_tool in self.external_tools:
             self.tools[loaded_tool.manifest.tool_id] = loaded_tool.instance
@@ -161,7 +161,24 @@ class CustomToolsLoader:
 
     async def shutdown(self) -> None:
         """Shut down any loaded tool packages cleanly."""
+        await self._shutdown_builtin_tools()
         await self._shutdown_external_tools()
+
+    async def _shutdown_builtin_tools(self) -> None:
+        """Shut down the currently loaded built-in tool packages."""
+        for loaded_tool in self.builtin_packages:
+            try:
+                await loaded_tool.instance.async_shutdown()
+            except Exception as err:
+                _LOGGER.warning(
+                    "Built-in tool package %s failed during shutdown: %s",
+                    loaded_tool.manifest.tool_id,
+                    err,
+                )
+            finally:
+                self.tools.pop(loaded_tool.manifest.tool_id, None)
+
+        self.builtin_packages = []
 
     async def _shutdown_external_tools(self) -> None:
         """Shut down only the currently loaded external custom tool packages."""
@@ -244,7 +261,7 @@ class CustomToolsLoader:
             raise ValueError(f"Unknown custom tool: {tool_name}")
 
         normalized_arguments = dict(arguments or {})
-        if registry_entry.is_external:
+        if registry_entry.loaded_tool_package is not None:
             try:
                 normalized_arguments = validate_and_normalize_json_value(
                     registry_entry.definition.get("inputSchema") or {},
@@ -254,7 +271,7 @@ class CustomToolsLoader:
             except SchemaValidationError as err:
                 return self._build_error_result(str(err))
 
-            return await self._handle_external_tool_call(
+            return await self._handle_package_tool_call(
                 registry_entry,
                 tool_name,
                 normalized_arguments,
@@ -343,28 +360,21 @@ class CustomToolsLoader:
     def _get_builtin_tool_definitions(self) -> list[dict[str, Any]]:
         """Return built-in MCP tool definitions for reserved-name checks."""
         builtin_definitions: list[dict[str, Any]] = []
-        external_tool_keys = {
-            loaded_tool.manifest.tool_id for loaded_tool in self.external_tools
-        }
-        for tool_key, tool in self.tools.items():
-            if tool_key in external_tool_keys:
-                continue
-            try:
-                builtin_definitions.extend(tool.get_tool_definitions())
-            except Exception as err:
-                _LOGGER.error("Error getting tool definitions from %s: %s", tool_key, err)
+        for loaded_tool in self.builtin_packages:
+            builtin_definitions.extend(loaded_tool.tool_definitions)
         return builtin_definitions
 
     def _refresh_tool_registry(self) -> None:
         """Build a validated tool-name registry for dispatch and caching."""
         registry: dict[str, _RegisteredTool] = {}
         ordered_definitions: list[dict[str, Any]] = []
-        external_tool_keys = {
-            loaded_tool.manifest.tool_id for loaded_tool in self.external_tools
+        packaged_tool_keys = {
+            loaded_tool.manifest.tool_id
+            for loaded_tool in [*self.builtin_packages, *self.external_tools]
         }
 
         for tool_key, tool in self.tools.items():
-            if tool_key in external_tool_keys:
+            if tool_key in packaged_tool_keys:
                 continue
             try:
                 tool_definitions = tool.get_tool_definitions()
@@ -388,6 +398,28 @@ class CustomToolsLoader:
                 )
                 ordered_definitions.append(tool_definition)
 
+        for loaded_tool in self.builtin_packages:
+            for tool_definition in loaded_tool.tool_definitions:
+                tool_name = str(tool_definition.get("name") or "")
+                if not tool_name:
+                    continue
+                if tool_name in registry:
+                    _LOGGER.warning(
+                        "Skipping duplicate built-in custom tool definition %s",
+                        tool_name,
+                    )
+                    continue
+                registry[tool_name] = _RegisteredTool(
+                    name=tool_name,
+                    definition=tool_definition,
+                    instance=loaded_tool.instance,
+                    provider_key=loaded_tool.manifest.tool_id,
+                    is_external=False,
+                    loaded_tool_package=loaded_tool,
+                    package_loader=self._builtin_loader,
+                )
+                ordered_definitions.append(tool_definition)
+
         for loaded_tool in self.external_tools:
             for tool_definition in loaded_tool.tool_definitions:
                 tool_name = str(tool_definition.get("name") or "")
@@ -405,14 +437,15 @@ class CustomToolsLoader:
                     instance=loaded_tool.instance,
                     provider_key=loaded_tool.manifest.tool_id,
                     is_external=True,
-                    loaded_external_tool=loaded_tool,
+                    loaded_tool_package=loaded_tool,
+                    package_loader=self._external_loader,
                 )
                 ordered_definitions.append(tool_definition)
 
         self._tool_registry = registry
         self._tool_definitions_cache = ordered_definitions
 
-    async def _handle_external_tool_call(
+    async def _handle_package_tool_call(
         self,
         registry_entry: _RegisteredTool,
         tool_name: str,
@@ -420,12 +453,17 @@ class CustomToolsLoader:
         *,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Execute an external custom tool with settings and scoped call context."""
-        loaded_tool = registry_entry.loaded_external_tool
+        """Execute a manifest-based tool package with scoped call context."""
+        loaded_tool = registry_entry.loaded_tool_package
+        package_loader = registry_entry.package_loader
         instance = registry_entry.instance
-        if loaded_tool is None or not isinstance(instance, MCPAssistExternalTool):
+        if (
+            loaded_tool is None
+            or package_loader is None
+            or not isinstance(instance, MCPAssistExternalTool)
+        ):
             return self._build_error_result(
-                f"External tool {tool_name!r} is not available right now."
+                f"Tool package for {tool_name!r} is not available right now."
             )
 
         call_context = dict(context or {})
@@ -435,13 +473,14 @@ class CustomToolsLoader:
                 effective_settings,
                 profile_settings,
                 profile_settings_path,
-            ) = await self._external_loader.load_profile_settings(
+            ) = await package_loader.load_profile_settings(
                 loaded_tool,
                 profile_entry_id,
             )
         except Exception as err:
             _LOGGER.error(
-                "Failed to load settings for external custom tool %s: %s",
+                "Failed to load settings for %s %s: %s",
+                "external custom tool" if registry_entry.is_external else "built-in tool package",
                 tool_name,
                 err,
             )
@@ -463,7 +502,7 @@ class CustomToolsLoader:
         try:
             return await instance.handle_call(tool_name, arguments)
         except Exception as err:
-            _LOGGER.error("Error executing external custom tool %s: %s", tool_name, err)
+            _LOGGER.error("Error executing tool package %s: %s", tool_name, err)
             return self._build_error_result(str(err))
         finally:
             instance._reset_call_context(token)

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "read_url",
+  "name": "Read URL Tool",
+  "description": "Built-in URL content reader for web search follow-up flows.",
+  "version": "1.0.0",
+  "entrypoint": "tool:ReadUrlPackageTool",
+  "capabilities": [
+    "Fetches and extracts page text from a URL so the assistant can inspect a specific search result."
+  ]
+}

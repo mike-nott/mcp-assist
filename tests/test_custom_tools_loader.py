@@ -36,7 +36,13 @@ class _StubTool:
         return None
 
     def get_tool_definitions(self):
-        return [{"name": self.__class__.__name__}]
+        return [
+            {
+                "name": self.__class__.__name__,
+                "description": "Stub tool definition.",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
 
     def handles_tool(self, tool_name: str) -> bool:
         return tool_name == self.__class__.__name__
@@ -157,6 +163,37 @@ async def test_initialize_loads_calculator_bundle_when_only_unit_conversion_enab
     await loader.initialize()
 
     assert "calculator" in loader.tools
+
+
+@pytest.mark.asyncio
+async def test_builtin_tool_packages_use_executor_for_manifest_reads(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Built-in package manifests should load through the shared package loader."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    executor_calls: list[str] = []
+    original_async_add_executor_job = hass.async_add_executor_job
+
+    async def _track_executor_job(func, *args):
+        executor_calls.append(getattr(func, "__name__", repr(func)))
+        return await original_async_add_executor_job(func, *args)
+
+    monkeypatch.setattr(hass, "async_add_executor_job", _track_executor_job)
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert "calculator" in loader.tools
+    assert "_discover_package_dirs" in executor_calls
+    assert "_load_manifest_from_disk" in executor_calls
 
 
 @pytest.mark.asyncio
@@ -307,6 +344,56 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
     assert tool_definition["routingHints"]["preferred_when"] == (
         "Use for sample package status questions."
     )
+
+
+@pytest.mark.asyncio
+async def test_external_tool_package_id_cannot_conflict_with_builtin_package(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """External package ids should not collide with built-in package ids."""
+    _write_external_tool_package(
+        tmp_path,
+        tool_id="search",
+        tool_name="search_status",
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: True,
+            CONF_SEARCH_PROVIDER: "brave",
+            CONF_BRAVE_API_KEY: "secret",
+        }
+    )
+
+    brave_module = types.SimpleNamespace(
+        BraveSearchTool=type("BraveSearchTool", (_StubTool,), {})
+    )
+    read_url_module = types.SimpleNamespace(
+        ReadUrlTool=type("ReadUrlTool", (_StubTool,), {})
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "custom_components.mcp_assist.custom_tools.brave_search",
+        brave_module,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "custom_components.mcp_assist.custom_tools.read_url",
+        read_url_module,
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert "search" in loader.tools
+    assert loader.get_loaded_external_tool_info() == []
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "calculator",
+  "name": "Calculator Tools",
+  "description": "Built-in arithmetic, expression, and unit-conversion tools.",
+  "version": "1.0.0",
+  "entrypoint": "tool:CalculatorPackageTool",
+  "capabilities": [
+    "Performs arithmetic, evaluates math expressions, and converts between common units."
+  ]
+}

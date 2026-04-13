@@ -1,4 +1,4 @@
-"""Loader for user-defined MCP Assist custom tools."""
+"""Loader for manifest-based MCP Assist tool packages."""
 
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ _MAX_PROMPT_CHARS_TOTAL = 5000
 
 
 @dataclass
-class LoadedExternalTool:
-    """Loaded and validated external custom tool package."""
+class LoadedToolPackage:
+    """Loaded and validated MCP Assist tool package."""
 
     manifest: MCPAssistCustomToolManifest
     instance: MCPAssistExternalTool
@@ -44,30 +44,58 @@ class LoadedExternalTool:
     shared_settings_path: str | None
 
 
-class ExternalCustomToolLoader:
-    """Load user-defined custom tool packages from the HA config directory."""
+LoadedExternalTool = LoadedToolPackage
 
-    def __init__(self, hass) -> None:
+
+class ExternalCustomToolLoader:
+    """Load manifest-based tool packages from a configured root directory."""
+
+    def __init__(
+        self,
+        hass,
+        *,
+        tools_root: Path | None = None,
+        settings_root: Path | None = None,
+        module_namespace: str = "mcp_assist_external_tools",
+        require_tool_name_prefix: bool = True,
+        package_log_label: str = "external custom tool package",
+        prompt_package_label: str = "Custom tool package",
+    ) -> None:
         """Initialize the loader."""
         self.hass = hass
+        self._tools_root = tools_root
+        self._settings_root = settings_root
+        self._module_namespace = module_namespace
+        self._require_tool_name_prefix = require_tool_name_prefix
+        self._package_log_label = package_log_label
+        self._prompt_package_label = prompt_package_label
         self.last_load_errors: list[dict[str, str]] = []
         self.last_tools_root: Path = self.get_tools_root()
         self.last_scanned_packages: tuple[str, ...] = ()
         self.last_loaded_at: str = ""
 
     def get_tools_root(self) -> Path:
-        """Return the shared custom tools directory inside HA config."""
+        """Return the package root directory for this loader."""
+        if self._tools_root is not None:
+            return self._tools_root
         return Path(self.hass.config.path(CUSTOM_TOOLS_DIRECTORY))
 
     def get_settings_root(self) -> Path:
-        """Return the shared package-settings directory inside HA config."""
+        """Return the package-settings directory for this loader."""
+        if self._settings_root is not None:
+            return self._settings_root
         return Path(self.hass.config.path(CUSTOM_TOOL_SETTINGS_DIRECTORY))
 
     async def load(
-        self, *, reserved_tool_names: set[str] | None = None
-    ) -> list[LoadedExternalTool]:
-        """Load and validate all external custom tool packages."""
+        self,
+        *,
+        reserved_tool_names: set[str] | None = None,
+        reserved_tool_ids: set[str] | None = None,
+        allowed_tool_ids: set[str] | None = None,
+    ) -> list[LoadedToolPackage]:
+        """Load and validate all matching tool packages."""
         reserved = set(reserved_tool_names or set())
+        reserved_ids = set(reserved_tool_ids or set())
         seen_tool_ids: set[str] = set()
         tools_root = self.get_tools_root()
         self.last_tools_root = tools_root
@@ -89,7 +117,7 @@ class ExternalCustomToolLoader:
             self.last_scanned_packages = ()
             return []
 
-        loaded: list[LoadedExternalTool] = []
+        loaded: list[LoadedToolPackage] = []
         package_dirs = await self.hass.async_add_executor_job(
             self._discover_package_dirs,
             tools_root,
@@ -98,9 +126,13 @@ class ExternalCustomToolLoader:
             tool_dir.name for tool_dir, _is_symlink in package_dirs
         )
         for tool_dir, is_symlink in package_dirs:
+            if allowed_tool_ids is not None and tool_dir.name not in allowed_tool_ids:
+                continue
+
             if is_symlink:
                 _LOGGER.warning(
-                    "Skipping external custom tool package %s because symlinked directories are not allowed.",
+                    "Skipping %s %s because symlinked directories are not allowed.",
+                    self._package_log_label,
                     tool_dir,
                 )
                 self.last_load_errors.append(
@@ -111,9 +143,9 @@ class ExternalCustomToolLoader:
             tool: MCPAssistExternalTool | None = None
             try:
                 manifest = await self._load_manifest(tool_dir)
-                if manifest.tool_id in seen_tool_ids:
+                if manifest.tool_id in reserved_ids or manifest.tool_id in seen_tool_ids:
                     raise ValueError(
-                        f"Duplicate manifest id {manifest.tool_id!r} is not allowed"
+                        f"Manifest id {manifest.tool_id!r} conflicts with an existing tool package"
                     )
                 tool = self._instantiate_tool(tool_dir, manifest)
                 settings_schema = self._normalize_settings_schema(
@@ -141,7 +173,7 @@ class ExternalCustomToolLoader:
                     tool,
                 )
                 loaded.append(
-                    LoadedExternalTool(
+                    LoadedToolPackage(
                         manifest=manifest,
                         instance=tool,
                         tool_definitions=tuple(tool_definitions),
@@ -154,7 +186,8 @@ class ExternalCustomToolLoader:
                 )
                 seen_tool_ids.add(manifest.tool_id)
                 _LOGGER.info(
-                    "Loaded external custom tool package %s with %d tool(s)",
+                    "Loaded %s %s with %d tool(s)",
+                    self._package_log_label,
                     manifest.tool_id,
                     len(tool_names),
                 )
@@ -164,12 +197,14 @@ class ExternalCustomToolLoader:
                         await tool.async_shutdown()
                     except Exception as shutdown_err:
                         _LOGGER.debug(
-                            "External custom tool %s also failed during cleanup: %s",
+                            "%s %s also failed during cleanup: %s",
+                            self._package_log_label,
                             getattr(getattr(tool, "manifest", None), "tool_id", tool_dir.name),
                             shutdown_err,
                         )
                 _LOGGER.error(
-                    "Failed to load external custom tool package from %s: %s",
+                    "Failed to load %s from %s: %s",
+                    self._package_log_label,
                     tool_dir,
                     err,
                 )
@@ -283,7 +318,7 @@ class ExternalCustomToolLoader:
         except ValueError as err:
             raise ValueError("entrypoint module must stay within the tool directory") from err
         unique_module_name = (
-            f"mcp_assist_external_tools.{manifest.tool_id}.{module_name.replace('.', '_')}"
+            f"{self._module_namespace}.{manifest.tool_id}.{module_name.replace('.', '_')}"
         )
         spec = importlib.util.spec_from_file_location(unique_module_name, module_path)
         if spec is None or spec.loader is None:
@@ -329,7 +364,7 @@ class ExternalCustomToolLoader:
         *,
         reserved_tool_names: set[str],
     ) -> list[dict[str, Any]]:
-        """Validate, normalize, and de-duplicate external tool definitions."""
+        """Validate, normalize, and de-duplicate tool definitions."""
         if not isinstance(tool_definitions, list) or not tool_definitions:
             raise ValueError("get_tool_definitions() must return a non-empty list")
 
@@ -344,7 +379,9 @@ class ExternalCustomToolLoader:
                 raise ValueError(
                     f"Tool name {tool_name!r} contains unsupported characters"
                 )
-            if not tool_name.startswith(f"{manifest.tool_id}_"):
+            if self._require_tool_name_prefix and not tool_name.startswith(
+                f"{manifest.tool_id}_"
+            ):
                 raise ValueError(
                     f"Tool name {tool_name!r} must be prefixed with '{manifest.tool_id}_'"
                 )
@@ -608,9 +645,9 @@ class ExternalCustomToolLoader:
         manifest: MCPAssistCustomToolManifest,
         tool: MCPAssistExternalTool,
     ) -> str:
-        """Build a compact prompt appendix for an external tool package."""
+        """Build a compact prompt appendix for a tool package."""
         parts: list[str] = [
-            f"Custom tool package '{manifest.name}' ({manifest.tool_id}) is enabled."
+            f"{self._prompt_package_label} '{manifest.name}' ({manifest.tool_id}) is enabled."
         ]
 
         if manifest.capabilities:

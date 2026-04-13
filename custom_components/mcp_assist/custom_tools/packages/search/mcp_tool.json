@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "search",
+  "name": "Search Tools",
+  "description": "Built-in web search tools using the configured shared provider.",
+  "version": "1.0.0",
+  "entrypoint": "tool:SearchPackageTool",
+  "capabilities": [
+    "Searches the web with the configured provider while preserving the standard MCP Assist search tool surface."
+  ]
+}
