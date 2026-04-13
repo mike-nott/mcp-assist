@@ -394,6 +394,15 @@ class ExternalCustomToolLoader:
             description = str(tool_definition.get("description") or "").strip()
             if not description:
                 raise ValueError(f"Tool {tool_name!r} is missing a description")
+            llm_description = self._compact_text(
+                str(
+                    tool_definition.get(
+                        "llmDescription", tool_definition.get("llm_description")
+                    )
+                    or ""
+                ),
+                max_len=180,
+            )
 
             input_schema = tool_definition.get("inputSchema") or {}
             if not isinstance(input_schema, dict):
@@ -415,6 +424,7 @@ class ExternalCustomToolLoader:
                     **tool_definition,
                     "name": tool_name,
                     "description": description,
+                    **({"llmDescription": llm_description} if llm_description else {}),
                     "inputSchema": normalized_schema,
                     **({"routingHints": routing_hints} if routing_hints else {}),
                 }

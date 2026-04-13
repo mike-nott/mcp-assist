@@ -1224,10 +1224,14 @@ async def test_handle_tools_list_includes_media_tools(
 
     result = await server.handle_tools_list()
     tool_names = {tool["name"] for tool in result["tools"]}
+    tool_map = {tool["name"]: tool for tool in result["tools"]}
 
     assert "analyze_image" in tool_names
     assert "get_image" in tool_names
     assert "generate_image" in tool_names
+    assert tool_map["analyze_image"]["llmDescription"] == (
+        "Analyze an image or camera snapshot with the active multimodal model."
+    )
 
 
 @pytest.mark.asyncio

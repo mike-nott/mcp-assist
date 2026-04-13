@@ -13,6 +13,21 @@ _LOGGER = logging.getLogger(__name__)
 NUM_SCHEMA = {"type": "number"}
 STRING_SCHEMA = {"type": "string"}
 
+CALCULATOR_LLM_DESCRIPTIONS = {
+    "add": "Add numbers.",
+    "subtract": "Subtract one number from another.",
+    "multiply": "Multiply numbers.",
+    "divide": "Divide one number by another.",
+    "sqrt": "Take the square root of a number.",
+    "power": "Raise a number to a power.",
+    "round_number": "Round a number to a chosen number of decimals.",
+    "average": "Calculate the average of a list of numbers.",
+    "min_value": "Return the smallest number in a list.",
+    "max_value": "Return the largest number in a list.",
+    "convert_unit": "Convert between common units.",
+    "evaluate_expression": "Evaluate a math expression safely.",
+}
+
 
 CALCULATOR_TOOLS = [
     {
@@ -624,7 +639,15 @@ class CalculatorTool:
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """Get MCP tool definitions for calculator tools."""
-        return CALCULATOR_TOOLS
+        return [
+            {
+                **tool_definition,
+                "llmDescription": CALCULATOR_LLM_DESCRIPTIONS.get(
+                    tool_definition["name"], tool_definition["description"]
+                ),
+            }
+            for tool_definition in CALCULATOR_TOOLS
+        ]
 
     async def handle_call(
         self, tool_name: str, arguments: Dict[str, Any]

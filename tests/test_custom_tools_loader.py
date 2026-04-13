@@ -110,6 +110,7 @@ class SampleTool(MCPAssistExternalTool):
         return [{{
             "name": "{resolved_tool_name}",
             "description": "Return a sample status.",
+            "llmDescription": "Return sample status.",
             "inputSchema": {{"type": "object", "properties": {{}}}},
             "keywords": ["sample", "status"],
             "example_queries": ["What's the sample status?"],
@@ -480,6 +481,7 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
     assert tool_definition["routingHints"]["preferred_when"] == (
         "Use for sample package status questions."
     )
+    assert tool_definition["llmDescription"] == "Return sample status."
 
 
 @pytest.mark.asyncio

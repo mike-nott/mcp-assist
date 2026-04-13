@@ -28,6 +28,7 @@ class ReadUrlTool:
         return [{
             "name": "read_url",
             "description": "Read and extract text content from a webpage URL",
+            "llmDescription": "Read webpage text from a URL.",
             "inputSchema": {
                 "$schema": "http://json-schema.org/draft-07/schema#",
                 "type": "object",

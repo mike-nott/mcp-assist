@@ -791,12 +791,20 @@ class MCPAssistConversationEntity(ConversationEntity):
             elif parameters.get("type") == "object" and "properties" not in parameters:
                 parameters["properties"] = {}
 
+            llm_description = self._compact_text(
+                str(tool.get("llmDescription") or tool.get("llm_description") or ""),
+                max_len=120,
+            )
             base_description = self._compact_text(
-                tool.get("description", ""),
+                llm_description or tool.get("description", ""),
                 max_len=140,
             )
             description_parts = [base_description.rstrip(" .")]
-            routing_summary = self._build_tool_routing_summary(tool.get("routingHints"))
+            routing_summary = ""
+            if not llm_description:
+                routing_summary = self._build_tool_routing_summary(
+                    tool.get("routingHints")
+                )
             if routing_summary:
                 description_parts.append(routing_summary)
 

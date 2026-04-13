@@ -45,6 +45,7 @@ class BraveSearchTool:
                 "Search the web for up-to-date information, including current events and live news, "
                 "using Brave Search."
             ),
+            "llmDescription": "Search the web or news for current information.",
             "keywords": ["news", "latest", "current", "today", "right now", "web"],
             "example_queries": [
                 "What's happening right now in Iran?",

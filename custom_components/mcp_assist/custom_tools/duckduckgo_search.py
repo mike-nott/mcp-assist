@@ -46,6 +46,7 @@ class DuckDuckGoSearchTool:
                 "Search the web for up-to-date information, including live news and current events, "
                 "using DuckDuckGo/DDGS."
             ),
+            "llmDescription": "Search the web or news for current information.",
             "keywords": ["news", "latest", "current", "today", "right now", "web"],
             "example_queries": [
                 "What's happening right now in Iran?",

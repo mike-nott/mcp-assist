@@ -705,6 +705,33 @@ def test_convert_mcp_tools_to_llm_tools_appends_routing_hints(
     assert "Example:" not in description
 
 
+def test_convert_mcp_tools_to_llm_tools_prefers_llm_description(
+    hass, profile_entry_factory
+) -> None:
+    """Explicit LLM descriptions should replace verbose UI descriptions and hints."""
+    entry = profile_entry_factory()
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    tools = [
+        {
+            "name": "sample_tool_status",
+            "description": "Very long UI-facing description that should not be passed through to the model.",
+            "llmDescription": "Get sample status.",
+            "inputSchema": {"type": "object", "properties": {}},
+            "routingHints": {
+                "preferred_when": "Use when the user asks for custom package health.",
+            },
+        }
+    ]
+
+    compact_tools = agent._convert_mcp_tools_to_llm_tools(tools)
+    description = compact_tools[0]["function"]["description"]
+
+    assert description == "Get sample status"
+    assert "Use for:" not in description
+    assert "Very long UI-facing description" not in description
+
+
 def test_format_tool_result_for_llm_preserves_structured_results_without_binary(
     hass, profile_entry_factory
 ) -> None:

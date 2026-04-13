@@ -928,6 +928,7 @@ class MCPServer:
                     "'what is in the driveway?' or 'who is at the door?' when an image "
                     "source is available."
                 ),
+                "llmDescription": "Analyze an image or camera snapshot with the active multimodal model.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -996,6 +997,7 @@ class MCPServer:
                     "Fetch an image from a camera, image-like entity, URL, or local file "
                     "and return it as an MCP image content block for clients that can display images."
                 ),
+                "llmDescription": "Fetch an image from a camera, entity, URL, or local file.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1043,6 +1045,7 @@ class MCPServer:
                     "Generate an image with the current profile's provider when it exposes "
                     "an OpenAI-compatible image generation API. Returns an MCP image content block when available."
                 ),
+                "llmDescription": "Generate an image with the active provider when supported.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1356,6 +1359,7 @@ class MCPServer:
             {
                 "name": "discover_entities",
                 "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, current state, or aliases. Prefer this for most direct control and status checks, including entities that do not belong to any device. This returns a compact summary plus paging metadata; call get_entity_details for full entity attributes.",
+                "llmDescription": "Find Home Assistant entities by area, type, state, or name.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1421,6 +1425,7 @@ class MCPServer:
             {
                 "name": "discover_devices",
                 "description": "Find and list Home Assistant devices by criteria like area, floor, label, related entity domain, manufacturer, model, name, or aliases. Use this when the user is referring to a physical device or when you want to inspect related entities on the same device. This returns compact results plus paging metadata.",
+                "llmDescription": "Find Home Assistant devices by area, domain, maker, model, or name.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1471,6 +1476,7 @@ class MCPServer:
             {
                 "name": "get_entity_details",
                 "description": "Get current state plus full serialized entity attributes, aliases, area, floor, labels, and device context for specific entities",
+                "llmDescription": "Get full details for specific entities.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1488,6 +1494,7 @@ class MCPServer:
             {
                 "name": "get_device_details",
                 "description": "Get device metadata, aliases, area/floor/labels, and attached entities for specific Home Assistant devices so you can choose the right entity target for direct control",
+                "llmDescription": "Get full details and attached entities for specific devices.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1510,6 +1517,7 @@ class MCPServer:
                     {
                         "name": "list_music_assistant_players",
                         "description": "List Music Assistant media_player entities only. Use this to inspect or disambiguate valid Music Assistant playback targets by name, area, floor, or label without mixing in unrelated media_player entities.",
+                        "llmDescription": "List Music Assistant players by area, floor, label, or name.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1543,6 +1551,7 @@ class MCPServer:
                     {
                         "name": "play_music_assistant",
                         "description": "Play music using the Home Assistant Music Assistant integration. This resolves only Music Assistant players, supports area/floor/label targeting, and is safer than generic media_player playback when Music Assistant is in use.",
+                        "llmDescription": "Play music on Music Assistant players.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1620,6 +1629,7 @@ class MCPServer:
                     {
                         "name": "list_music_assistant_instances",
                         "description": "List configured Music Assistant integration instances. Use this when multiple Music Assistant servers are configured and you need a specific instance for library discovery.",
+                        "llmDescription": "List configured Music Assistant instances.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1631,6 +1641,7 @@ class MCPServer:
                     {
                         "name": "search_music_assistant",
                         "description": "Search the Music Assistant library and providers using a resolved Music Assistant instance. Prefer this over generic service calls when you want LLM-friendly music discovery results and automatic instance resolution.",
+                        "llmDescription": "Search Music Assistant for tracks, artists, albums, playlists, or radio.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1688,6 +1699,7 @@ class MCPServer:
                     {
                         "name": "get_music_assistant_library",
                         "description": "Browse or filter the Music Assistant library using a resolved Music Assistant instance. Use this for curated discovery like favorite artists, random tracks, or filtered library views.",
+                        "llmDescription": "Browse or filter the Music Assistant library.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1743,6 +1755,7 @@ class MCPServer:
                     {
                         "name": "get_music_assistant_queue",
                         "description": "Read the current Music Assistant queue for specific Music Assistant players. This resolves only Music Assistant players and returns queue details for one or more target players.",
+                        "llmDescription": "Read the current Music Assistant queue.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1810,6 +1823,7 @@ class MCPServer:
             {
                 "name": "get_index",
                 "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, floors, labels, devices, domains, device classes, people, pets, calendars, zones, automations, scripts, and aliases for alias-capable objects. Call this ONCE at the start of a conversation to understand what exists in the system, then use discover_entities or discover_devices to query specifics. The index is much smaller than a full entity dump.",
+                "llmDescription": "Get a compact overview of areas, labels, devices, domains, and aliases.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1821,6 +1835,7 @@ class MCPServer:
             {
                 "name": "list_assist_tools",
                 "description": "List the native Home Assistant Assist tools exposed by the built-in Assist LLM API. Use this to inspect the core Assist tool surface or when deciding whether a native Assist tool is a better fit than the custom MCP Assist tools.",
+                "llmDescription": "List native Home Assistant Assist tools.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1832,6 +1847,7 @@ class MCPServer:
             {
                 "name": "call_assist_tool",
                 "description": "Call a native Home Assistant Assist tool directly, using the built-in Assist LLM API rather than the custom MCP Assist tool surface. Use this as a fallback or compatibility path when the native Assist tool behavior is a better fit.",
+                "llmDescription": "Call a native Home Assistant Assist tool directly.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1853,6 +1869,7 @@ class MCPServer:
             {
                 "name": "get_assist_prompt",
                 "description": "Get the native Home Assistant Assist prompt text from the built-in Assist LLM API. Use this sparingly for compatibility, debugging, or understanding the core Assist instructions.",
+                "llmDescription": "Get the native Home Assistant Assist prompt text.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1864,6 +1881,7 @@ class MCPServer:
             {
                 "name": "get_assist_context_snapshot",
                 "description": "Get the native Home Assistant Assist live context snapshot, matching the built-in GetLiveContext tool output when available. Use this when a concise whole-home snapshot is helpful.",
+                "llmDescription": "Get a native Assist live context snapshot.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1875,6 +1893,7 @@ class MCPServer:
             {
                 "name": "perform_action",
                 "description": "Control Home Assistant entities by calling services. Use after discovery to turn on/off lights, set temperatures, open/close covers, create calendar events, manage to-do lists, and other write/mutation actions. Prefer entity_id for most direct control; use device_id when intentionally targeting the physical device as a whole.",
+                "llmDescription": "Call Home Assistant services to control entities or run write actions.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1943,6 +1962,7 @@ class MCPServer:
             {
                 "name": "get_weather_forecast",
                 "description": "Get a Home Assistant weather forecast in one call. Prefer this for user weather questions before web search. It finds the weather entity, chooses a supported forecast type, and summarizes today or tomorrow.",
+                "llmDescription": "Get a Home Assistant weather forecast.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1984,6 +2004,7 @@ class MCPServer:
             {
                 "name": "get_calendar_events",
                 "description": "Get upcoming Home Assistant calendar events in one call. Prefer this for questions like 'When is the next Mariners game?' or 'What's on our calendar tomorrow?'. It discovers matching calendars, calls calendar.get_events, and summarizes the next matching event or agenda.",
+                "llmDescription": "Get upcoming Home Assistant calendar events.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2042,6 +2063,7 @@ class MCPServer:
             {
                 "name": "list_response_services",
                 "description": "List Home Assistant services that currently support native response data. Use this when you need to discover which read/query-style services can be called with call_service_with_response.",
+                "llmDescription": "List services that return structured response data.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2069,6 +2091,7 @@ class MCPServer:
             {
                 "name": "call_service_with_response",
                 "description": "Call a Home Assistant service that returns structured response data for read/query use cases. Use this for native service-response reads like calendar or to-do queries, media browsing/searching, or integration-specific query data. For normal weather questions, prefer get_weather_forecast.",
+                "llmDescription": "Call a Home Assistant service that returns structured data.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2212,6 +2235,7 @@ class MCPServer:
             {
                 "name": "get_entity_history",
                 "description": "Get recorder-backed history for a specific entity. By default this returns a recent timeline, and with mode='last_event' it returns only the most recent matching event or change.",
+                "llmDescription": "Get recorder-backed history for an entity.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2261,6 +2285,7 @@ class MCPServer:
             {
                 "name": "analyze_entity_history",
                 "description": "Analyze Home Assistant recorder history for aggregate questions such as 'how many times was the door opened in the last hour?', 'how long has it been locked?', or 'how often did this sensor trigger today?'. Can count all changes or matching states/events.",
+                "llmDescription": "Analyze recorder history for counts, durations, or matching transitions.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2303,6 +2328,7 @@ class MCPServer:
             {
                 "name": "get_entity_state_at_time",
                 "description": "Look up the recorder state of an entity at a specific date/time. Use this for questions like 'was the gate open at 2 PM?' or 'what was the temperature at 9 this morning?'",
+                "llmDescription": "Look up an entity's recorder state at a specific time.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
