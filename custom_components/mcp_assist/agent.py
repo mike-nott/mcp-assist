@@ -793,7 +793,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             base_description = self._compact_text(
                 tool.get("description", ""),
-                max_len=180,
+                max_len=140,
             )
             description_parts = [base_description.rstrip(" .")]
             routing_summary = self._build_tool_routing_summary(tool.get("routingHints"))
@@ -807,7 +807,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                         "name": tool["name"],
                         "description": self._compact_text(
                             " | ".join(part for part in description_parts if part),
-                            max_len=320,
+                            max_len=220,
                         ),
                         "parameters": parameters,
                     },
@@ -821,24 +821,11 @@ class MCPAssistConversationEntity(ConversationEntity):
         if not isinstance(routing_hints, dict):
             return ""
 
-        summary_parts: list[str] = []
-        keywords = routing_hints.get("keywords")
-        if isinstance(keywords, list):
-            cleaned_keywords = [
-                str(item).strip()
-                for item in keywords
-                if str(item).strip()
-            ][:6]
-            if cleaned_keywords:
-                summary_parts.append(f"Keywords: {', '.join(cleaned_keywords)}")
-
         preferred_when = str(routing_hints.get("preferred_when") or "").strip()
         if preferred_when:
-            summary_parts.append(f"Preferred when: {preferred_when}")
-
-        returns = str(routing_hints.get("returns") or "").strip()
-        if returns:
-            summary_parts.append(f"Returns: {returns}")
+            compact_preferred = self._compact_text(preferred_when, max_len=90)
+            if compact_preferred:
+                return f"Use for: {compact_preferred}"
 
         example_queries = routing_hints.get("example_queries")
         if isinstance(example_queries, list):
@@ -846,13 +833,23 @@ class MCPAssistConversationEntity(ConversationEntity):
                 str(item).strip()
                 for item in example_queries
                 if str(item).strip()
-            ][:2]
+            ][:1]
             if cleaned_examples:
-                summary_parts.append(
-                    f"Example queries: {' || '.join(cleaned_examples)}"
-                )
+                compact_example = self._compact_text(cleaned_examples[0], max_len=80)
+                if compact_example:
+                    return f"Example: {compact_example}"
 
-        return " | ".join(summary_parts).strip()
+        keywords = routing_hints.get("keywords")
+        if isinstance(keywords, list):
+            cleaned_keywords = [
+                str(item).strip()
+                for item in keywords
+                if str(item).strip()
+            ][:3]
+            if cleaned_keywords:
+                return f"Keywords: {', '.join(cleaned_keywords)}"
+
+        return ""
 
     def _build_mcp_tool_cache_key(self) -> tuple[Any, ...]:
         """Build a cache key for the current profile-visible MCP tool surface."""

@@ -26,8 +26,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _TOOL_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 _TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-_MAX_PROMPT_CHARS_PER_TOOL = 1600
-_MAX_PROMPT_CHARS_TOTAL = 5000
+_MAX_PROMPT_CHARS_PER_TOOL = 220
+_MAX_PROMPT_CHARS_TOTAL = 2200
 
 
 @dataclass
@@ -171,6 +171,7 @@ class ExternalCustomToolLoader:
                     tool_dir,
                     manifest,
                     tool,
+                    tool_names,
                 )
                 loaded.append(
                     LoadedToolPackage(
@@ -644,33 +645,26 @@ class ExternalCustomToolLoader:
         tool_dir: Path,
         manifest: MCPAssistCustomToolManifest,
         tool: MCPAssistExternalTool,
+        tool_names: tuple[str, ...] = (),
     ) -> str:
         """Build a compact prompt appendix for a tool package."""
-        parts: list[str] = [
-            f"{self._prompt_package_label} '{manifest.name}' ({manifest.tool_id}) is enabled."
-        ]
-
-        if manifest.capabilities:
-            parts.append("Capabilities:")
-            parts.extend(
-                f"- {self._compact_text(capability, max_len=180)}"
-                for capability in manifest.capabilities
-            )
-
         prompt_file_text = await self._read_prompt_append_file(tool_dir, manifest)
         runtime_instructions = str(tool.get_prompt_instructions() or "").strip()
-        if prompt_file_text:
-            parts.append(prompt_file_text)
-        if runtime_instructions:
-            parts.append(runtime_instructions)
+        instruction_parts = self._dedupe_instruction_parts(
+            [prompt_file_text, runtime_instructions]
+        )
+        if not instruction_parts:
+            fallback = self._build_prompt_fallback(manifest, tool_names)
+            if fallback:
+                instruction_parts = [fallback]
 
-        combined = "\n".join(part for part in parts if part).strip()
-        if not combined:
+        if not instruction_parts:
             return ""
-        if len(combined) > _MAX_PROMPT_CHARS_PER_TOOL:
-            combined = combined[:_MAX_PROMPT_CHARS_PER_TOOL].rstrip()
-            combined += "\n\n[Prompt appendix truncated to keep context small.]"
-        return combined
+
+        combined_body = " ".join(instruction_parts).strip()
+        label = str(manifest.name or manifest.tool_id).strip()
+        combined = f"- {label}: {combined_body}"
+        return self._compact_text(combined, max_len=_MAX_PROMPT_CHARS_PER_TOOL)
 
     async def _read_prompt_append_file(
         self,
@@ -710,6 +704,10 @@ class ExternalCustomToolLoader:
     def _compact_text(text: str, *, max_len: int) -> str:
         """Compact capability text for prompt use."""
         normalized = " ".join(str(text).split()).strip()
+        for separator in (". ", "\n", "; "):
+            if separator in normalized:
+                normalized = normalized.split(separator, 1)[0].strip()
+                break
         if len(normalized) <= max_len:
             return normalized
         trimmed = normalized[: max_len - 1].rstrip()
@@ -717,6 +715,38 @@ class ExternalCustomToolLoader:
         if last_space > 40:
             trimmed = trimmed[:last_space]
         return trimmed.rstrip(" ,;:.") + "."
+
+    def _dedupe_instruction_parts(self, raw_parts: list[str]) -> list[str]:
+        """Normalize and deduplicate prompt-instruction fragments."""
+        normalized_parts: list[str] = []
+        seen: set[str] = set()
+        for part in raw_parts:
+            compact = self._compact_text(part, max_len=180)
+            if not compact:
+                continue
+            key = compact.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized_parts.append(compact)
+        return normalized_parts
+
+    def _build_prompt_fallback(
+        self,
+        manifest: MCPAssistCustomToolManifest,
+        tool_names: tuple[str, ...],
+    ) -> str:
+        """Build a minimal fallback prompt line when no prompt text is supplied."""
+        if tool_names:
+            preview = ", ".join(tool_names[:2])
+            if len(tool_names) > 2:
+                preview += ", ..."
+            return f"Use {preview} for {manifest.tool_id.replace('_', ' ')} questions."
+
+        if manifest.capabilities:
+            return self._compact_text(manifest.capabilities[0], max_len=140)
+
+        return ""
 
 
 def combine_prompt_instructions(
@@ -734,9 +764,23 @@ def combine_prompt_instructions(
     if not prompt_sections:
         return ""
 
-    combined = heading.strip() + "\n" + "\n\n".join(prompt_sections)
+    combined_lines = [heading.strip(), *prompt_sections]
+    combined = "\n".join(combined_lines)
     if len(combined) <= _MAX_PROMPT_CHARS_TOTAL:
         return combined
 
-    truncated = combined[:_MAX_PROMPT_CHARS_TOTAL].rstrip()
-    return truncated + f"\n\n{truncated_notice}"
+    kept_lines = [heading.strip()]
+    current_len = len(heading.strip())
+    for section in prompt_sections:
+        candidate_len = current_len + 1 + len(section)
+        if candidate_len > _MAX_PROMPT_CHARS_TOTAL:
+            break
+        kept_lines.append(section)
+        current_len = candidate_len
+
+    if len(kept_lines) == 1:
+        truncated = heading.strip()[:_MAX_PROMPT_CHARS_TOTAL].rstrip()
+        return truncated + f"\n{truncated_notice}"
+
+    kept_lines.append(truncated_notice)
+    return "\n".join(kept_lines)

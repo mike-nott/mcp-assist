@@ -222,7 +222,9 @@ async def test_package_diagnostics_include_loaded_builtin_packages(
     )
     assert diagnostics["external_custom_tools_enabled"] is False
     assert loader.get_loaded_builtin_tool_info()[0]["tool_names"]
-    assert "Calculator" in loader.get_builtin_prompt_instructions()
+    builtin_prompt = loader.get_builtin_prompt_instructions()
+    assert "Calculator" in builtin_prompt
+    assert "Capabilities:" not in builtin_prompt
 
 
 @pytest.mark.asyncio
@@ -449,8 +451,11 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
         tool_definition["name"] for tool_definition in loader.get_tool_definitions()
     }
     assert "sample_tool_status" in tool_names
-    assert "External Custom Tools" in loader.get_external_prompt_instructions()
-    assert "Prefer sample_tool_status" in loader.get_external_prompt_instructions()
+    external_prompt = loader.get_external_prompt_instructions()
+    assert "External Custom Tools" in external_prompt
+    assert "sample_tool_status" in external_prompt
+    assert "Capabilities:" not in external_prompt
+    assert "Custom tool package" not in external_prompt
     assert loader.get_loaded_external_tool_info() == [
         {
             "id": "sample_tool",
@@ -510,6 +515,7 @@ async def test_cache_signature_includes_tool_surface_and_prompt_instructions(
     assert "Calculator" in builtin_prompt
     assert "External Custom Tools" in external_prompt
     assert "sample_tool_status" in external_prompt
+    assert len(external_prompt) <= 2200
 
 
 @pytest.mark.asyncio

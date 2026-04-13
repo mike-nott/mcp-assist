@@ -700,8 +700,9 @@ def test_convert_mcp_tools_to_llm_tools_appends_routing_hints(
     description = compact_tools[0]["function"]["description"]
 
     assert "Return custom status" in description
-    assert "Keywords: status, custom" in description
-    assert "Preferred when: Use when the user asks for custom package health" in description
+    assert "Use for: Use when the user asks for custom package health" in description
+    assert "Keywords:" not in description
+    assert "Example:" not in description
 
 
 def test_format_tool_result_for_llm_preserves_structured_results_without_binary(

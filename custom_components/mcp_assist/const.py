@@ -397,18 +397,15 @@ Current date: {date}"""
 
 DEVICE_TECHNICAL_INSTRUCTIONS = """
 Device tools are enabled.
-- Use discover_devices / get_device_details when the user means a physical device or when you need related entities on the same device.
-- Still prefer discover_entities for most direct control because some entities have no device.
+- Use discover_devices / get_device_details when the user means a physical device or you need related entities on the same device.
+- Prefer discover_entities for most direct control.
 """
 
 RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS = """
 Response-service tools are enabled.
-- Use list_response_services / call_service_with_response for structured Home Assistant reads such as forecasts, calendar events, todo items, or integration-specific query data.
-- Prefer get_calendar_events for natural language questions about upcoming events like "When is the next Mariners game?" or "What's on our calendar tomorrow?"
-- Prefer native service responses over web search when the answer already exists in Home Assistant.
-- Prefer get_weather_forecast for user weather questions. It discovers the weather entity, chooses a supported forecast type, and summarizes the result in one call.
-- For weather forecasts, discover the weather entity first. If forecast_types are available, use a supported type and never assume daily is supported.
-- For a general "tomorrow" forecast, prefer daily if supported, otherwise twice_daily, otherwise hourly, and summarize the supported result instead of asking again.
+- Use call_service_with_response for structured Home Assistant reads.
+- Prefer get_calendar_events for calendar questions and get_weather_forecast for weather.
+- Prefer native Home Assistant service responses over web search when Home Assistant already has the answer.
 """
 
 RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS = """
@@ -416,15 +413,13 @@ Recorder tools are enabled.
 - Use get_entity_history(mode="last_event") for the latest matching event.
 - Use analyze_entity_history for counts, durations, streaks, and numeric summaries.
 - Use get_entity_state_at_time for point-in-time questions.
-- Choose the entity domain that matches the question, such as lock for locked or contact/opening for open.
 """
 
 MEMORY_TECHNICAL_INSTRUCTIONS = """
 Memory tools are enabled.
-- Use remember_memory only when the user explicitly asks you to remember something or confirms a preference should be stored.
-- Use recall_memories for questions about previously stored facts or preferences.
-- Use forget_memory when the user asks you to remove or update stored memory.
-- Prefer a specific ttl_days only when the user gives a duration; otherwise let the server default apply.
+- Use remember_memory only when the user explicitly asks you to remember something.
+- Use recall_memories for stored facts or preferences.
+- Use forget_memory when the user asks to remove or update stored memory.
 """
 
 ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS = """
@@ -445,7 +440,7 @@ Unit conversion tools are enabled.
 
 MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS = """
 Music Assistant support is enabled.
-- Prefer play_music_assistant for playback, list_music_assistant_players for target discovery, search_music_assistant for finding music, get_music_assistant_library for library browsing, and get_music_assistant_queue for queue questions.
+- Prefer Music Assistant tools for playback, target discovery, search, library, and queue questions.
 - Only target Music Assistant players, not arbitrary media_player entities.
 - If no target is given and the current area is known, use area="{current_area}".
 """
