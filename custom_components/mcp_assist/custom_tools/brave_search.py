@@ -1,4 +1,4 @@
-"""Brave Search custom tool for ha-lmstudio-mcp."""
+"""Brave Search custom tool for MCP Assist."""
 import aiohttp
 import asyncio
 import logging

@@ -1,4 +1,4 @@
-"""Read URL custom tool for ha-lmstudio-mcp."""
+"""Read URL custom tool for MCP Assist."""
 import asyncio
 import aiohttp
 import logging
@@ -76,7 +76,7 @@ class ReadUrlTool:
 
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (compatible; ha-lmstudio-mcp/1.0)"
+                "User-Agent": "Mozilla/5.0 (compatible; mcp-assist/1.0)"
             }
 
             async with aiohttp.ClientSession() as session:
