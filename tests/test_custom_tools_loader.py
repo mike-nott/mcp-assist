@@ -226,6 +226,38 @@ async def test_package_diagnostics_include_loaded_builtin_packages(
 
 
 @pytest.mark.asyncio
+async def test_builtin_tool_registry_exposes_package_classification_and_toggle_metadata(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Built-in packaged tools should register as built-in tools with toggle metadata."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: True,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    calculator_spec = loader.get_builtin_toggle_spec("add")
+    unit_conversion_spec = loader.get_builtin_toggle_spec("convert_unit")
+
+    assert loader.is_custom_tool("add") is True
+    assert loader.is_builtin_custom_tool("add") is True
+    assert loader.is_external_custom_tool("add") is False
+    assert calculator_spec is not None
+    assert calculator_spec.package_id == "calculator"
+    assert unit_conversion_spec is not None
+    assert unit_conversion_spec.package_id == "unit_conversion"
+    assert loader.get_builtin_toggle_specs()
+    assert loader.get_builtin_toggle_spec("missing_tool") is None
+
+
+@pytest.mark.asyncio
 async def test_initialize_loads_search_and_read_url_for_brave(
     hass, profile_entry_factory, system_entry_factory, monkeypatch
 ) -> None:
@@ -246,6 +278,43 @@ async def test_initialize_loads_search_and_read_url_for_brave(
         sys.modules,
         "custom_components.mcp_assist.custom_tools.brave_search",
         brave_module,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "custom_components.mcp_assist.custom_tools.read_url",
+        read_url_module,
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    assert set(loader.tools) == {"search", "read_url"}
+
+
+@pytest.mark.asyncio
+async def test_initialize_loads_search_and_read_url_for_duckduckgo(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """DuckDuckGo should load through the same built-in package pathway."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            "enable_search_tool": True,
+            "enable_read_url_tool": True,
+            CONF_SEARCH_PROVIDER: "duckduckgo",
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    duckduckgo_module = types.SimpleNamespace(
+        DuckDuckGoSearchTool=type("DuckDuckGoSearchTool", (_StubTool,), {})
+    )
+    read_url_module = types.SimpleNamespace(ReadUrlTool=type("ReadUrlTool", (_StubTool,), {}))
+    monkeypatch.setitem(
+        sys.modules,
+        "custom_components.mcp_assist.custom_tools.duckduckgo_search",
+        duckduckgo_module,
     )
     monkeypatch.setitem(
         sys.modules,
@@ -406,6 +475,41 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
     assert tool_definition["routingHints"]["preferred_when"] == (
         "Use for sample package status questions."
     )
+
+
+@pytest.mark.asyncio
+async def test_cache_signature_includes_tool_surface_and_prompt_instructions(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Cache signatures should change with the loaded tool definitions and prompts."""
+    _write_external_tool_package(tmp_path)
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    tool_definitions, builtin_prompt, external_prompt = loader.get_cache_signature()
+
+    assert any('"name":"add"' in definition for definition in tool_definitions)
+    assert any(
+        '"name":"sample_tool_status"' in definition for definition in tool_definitions
+    )
+    assert "Optional Built-In Tool Packages" in builtin_prompt
+    assert "Calculator" in builtin_prompt
+    assert "External Custom Tools" in external_prompt
+    assert "sample_tool_status" in external_prompt
 
 
 @pytest.mark.asyncio
@@ -741,6 +845,66 @@ class TypedTool(MCPAssistExternalTool):
 
     assert result["isError"] is True
     assert "typed_tool_echo arguments.count must be an integer" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_external_custom_tool_runtime_errors_return_mcp_error_payload(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Manifest-based tool failures should return MCP errors instead of bubbling."""
+    package_dir = tmp_path / CUSTOM_TOOLS_DIRECTORY / "broken_tool"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / CUSTOM_TOOL_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "broken_tool",
+                "name": "Broken Tool",
+                "description": "External tool that raises while handling a call.",
+                "version": "1.0.0",
+                "entrypoint": "tool:BrokenTool",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (package_dir / "tool.py").write_text(
+        """from custom_components.mcp_assist.custom_tool_api import MCPAssistExternalTool
+
+
+class BrokenTool(MCPAssistExternalTool):
+    def get_tool_definitions(self):
+        return [{
+            "name": "broken_tool_status",
+            "description": "Raise an error.",
+            "inputSchema": {"type": "object", "properties": {}},
+        }]
+
+    async def handle_call(self, tool_name, arguments):
+        raise RuntimeError("tool execution failed")
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    result = await loader.handle_tool_call("broken_tool_status", {})
+
+    assert result["isError"] is True
+    assert result["content"][0]["text"] == "tool execution failed"
 
 
 @pytest.mark.asyncio

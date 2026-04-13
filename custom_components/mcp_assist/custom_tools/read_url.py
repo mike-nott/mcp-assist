@@ -1,4 +1,5 @@
 """Read URL custom tool for ha-lmstudio-mcp."""
+import asyncio
 import aiohttp
 import logging
 from typing import Dict, Any, List
@@ -139,7 +140,7 @@ class ReadUrlTool:
                         }]
                     }
 
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:
             return {
                 "content": [{
                     "type": "text",

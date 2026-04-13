@@ -35,6 +35,7 @@ from custom_components.mcp_assist.config_flow import (
     _apply_profile_tool_disables,
     _infer_prompt_mode,
     _needs_prompt_followup,
+    _normalize_shared_tool_inputs,
     _normalize_prompt_inputs,
     validate_allowed_ips,
 )
@@ -44,6 +45,7 @@ from custom_components.mcp_assist.custom_tools.builtin_catalog import (
 from custom_components.mcp_assist.const import (
     CONF_BRAVE_API_KEY,
     CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_DEVICE_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
@@ -69,6 +71,8 @@ from custom_components.mcp_assist.const import (
     CONF_SYSTEM_PROMPT_MODE,
     CONF_TECHNICAL_PROMPT,
     CONF_TECHNICAL_PROMPT_MODE,
+    DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_TTL_DAYS,
     DEFAULT_TECHNICAL_PROMPT,
     PROMPT_MODE_CUSTOM,
     PROMPT_MODE_DEFAULT,
@@ -299,6 +303,62 @@ def test_apply_profile_tool_disables_leaves_unchecked_tools_inherited() -> None:
     assert CONF_PROFILE_ENABLE_ASSIST_BRIDGE not in normalized
     assert CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS not in normalized
     assert "profile_enable_calculator_tools" not in normalized
+
+
+def test_normalize_shared_tool_inputs_maps_built_in_labels_to_setting_keys() -> None:
+    """Human-readable built-in toggle labels should store real setting keys."""
+    normalized = _normalize_shared_tool_inputs(
+        {
+            _builtin_shared_key("search"): True,
+            _builtin_shared_key("read_url"): True,
+            CONF_SEARCH_PROVIDER: "",
+        },
+        BUILTIN_SPECS,
+    )
+
+    assert normalized["enable_search_tool"] is True
+    assert normalized["enable_read_url_tool"] is True
+    assert _builtin_shared_key("search") not in normalized
+    assert _builtin_shared_key("read_url") not in normalized
+    assert normalized[CONF_SEARCH_PROVIDER] == "duckduckgo"
+
+
+def test_normalize_shared_tool_inputs_infers_provider_from_legacy_web_search() -> None:
+    """Legacy web-search enablement should still infer a real provider."""
+    normalized = _normalize_shared_tool_inputs(
+        {
+            CONF_ENABLE_WEB_SEARCH: True,
+            CONF_SEARCH_PROVIDER: "",
+        },
+        BUILTIN_SPECS,
+    )
+
+    assert normalized[CONF_SEARCH_PROVIDER] == "duckduckgo"
+
+
+def test_normalize_shared_tool_inputs_clamps_memory_ttls() -> None:
+    """Shared memory TTL settings should be coerced into a safe valid range."""
+    normalized = _normalize_shared_tool_inputs(
+        {
+            CONF_MEMORY_MAX_TTL_DAYS: 3,
+            CONF_MEMORY_DEFAULT_TTL_DAYS: 99,
+        },
+        BUILTIN_SPECS,
+    )
+
+    assert normalized[CONF_MEMORY_MAX_TTL_DAYS] == 3
+    assert normalized[CONF_MEMORY_DEFAULT_TTL_DAYS] == 3
+
+    fallback = _normalize_shared_tool_inputs(
+        {
+            CONF_MEMORY_MAX_TTL_DAYS: "oops",
+            CONF_MEMORY_DEFAULT_TTL_DAYS: "nope",
+        },
+        BUILTIN_SPECS,
+    )
+
+    assert fallback[CONF_MEMORY_MAX_TTL_DAYS] == DEFAULT_MEMORY_MAX_TTL_DAYS
+    assert fallback[CONF_MEMORY_DEFAULT_TTL_DAYS] == DEFAULT_MEMORY_DEFAULT_TTL_DAYS
 
 
 async def test_advanced_step_groups_profile_tools_into_checkbox_section(hass) -> None:
