@@ -1229,8 +1229,12 @@ async def test_handle_tools_list_includes_media_tools(
     assert "analyze_image" in tool_names
     assert "get_image" in tool_names
     assert "generate_image" in tool_names
+    assert "get_calendar_events" in tool_names
     assert tool_map["analyze_image"]["llmDescription"] == (
         "Analyze an image or camera snapshot with the active multimodal model."
+    )
+    assert tool_map["get_calendar_events"]["llmDescription"] == (
+        "Get upcoming Home Assistant calendar events, schedules, or subscribed team games."
     )
 
 

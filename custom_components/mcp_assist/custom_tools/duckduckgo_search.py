@@ -144,10 +144,7 @@ class DuckDuckGoSearchTool:
             client = DDGS()
             if normalized_mode == "news":
                 try:
-                    raw_results = client.news(
-                        keywords=query,
-                        max_results=count,
-                    )
+                    raw_results = client.news(query, max_results=count)
                 except Exception as err:
                     _LOGGER.warning(
                         "DDGS news search failed for %r, falling back to web search: %s",
@@ -155,7 +152,7 @@ class DuckDuckGoSearchTool:
                         err,
                     )
                     raw_results = client.text(
-                        keywords=query,
+                        query,
                         max_results=count,
                         region="us-en",
                         safesearch="moderate",
@@ -163,7 +160,7 @@ class DuckDuckGoSearchTool:
                     )
             else:
                 raw_results = client.text(
-                    keywords=query,
+                    query,
                     max_results=count,
                     region="us-en",
                     safesearch="moderate",

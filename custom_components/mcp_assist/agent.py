@@ -800,11 +800,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                 max_len=140,
             )
             description_parts = [base_description.rstrip(" .")]
-            routing_summary = ""
-            if not llm_description:
-                routing_summary = self._build_tool_routing_summary(
-                    tool.get("routingHints")
-                )
+            routing_summary = self._build_tool_routing_summary(tool.get("routingHints"))
             if routing_summary:
                 description_parts.append(routing_summary)
 

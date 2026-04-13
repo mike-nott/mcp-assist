@@ -165,8 +165,8 @@ def test_duckduckgo_search_sync_normalizes_ddgs_results(monkeypatch, hass) -> No
     """The synchronous DDG wrapper should normalize provider field names."""
 
     class _FakeDDGS:
-        def text(self, **kwargs):
-            assert kwargs["keywords"] == "bus"
+        def text(self, query, **kwargs):
+            assert query == "bus"
             assert kwargs["max_results"] == 3
             return [
                 {"title": "Route 372", "href": "https://example.com/372", "body": "ETA"}
@@ -192,8 +192,8 @@ def test_duckduckgo_search_sync_uses_news_mode_for_news_queries(monkeypatch, has
     """News-mode DDGS searches should use the provider news endpoint."""
 
     class _FakeDDGS:
-        def news(self, **kwargs):
-            assert kwargs["keywords"] == "Iran latest"
+        def news(self, query, **kwargs):
+            assert query == "Iran latest"
             assert kwargs["max_results"] == 2
             return [
                 {
@@ -205,7 +205,8 @@ def test_duckduckgo_search_sync_uses_news_mode_for_news_queries(monkeypatch, has
                 }
             ]
 
-        def text(self, **kwargs):
+        def text(self, query, **kwargs):
+            del query, kwargs
             raise AssertionError("news mode should not call text()")
 
     monkeypatch.setattr(ddg_module, "DDGS", _FakeDDGS)

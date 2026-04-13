@@ -2004,7 +2004,13 @@ class MCPServer:
             {
                 "name": "get_calendar_events",
                 "description": "Get upcoming Home Assistant calendar events in one call. Prefer this for questions like 'When is the next Mariners game?' or 'What's on our calendar tomorrow?'. It discovers matching calendars, calls calendar.get_events, and summarizes the next matching event or agenda.",
-                "llmDescription": "Get upcoming Home Assistant calendar events.",
+                "llmDescription": "Get upcoming Home Assistant calendar events, schedules, or subscribed team games.",
+                "routingHints": {
+                    "preferred_when": "Use for calendar, schedule, or next-game questions when Home Assistant may already have the answer.",
+                    "example_queries": [
+                        "When is the next Mariners game?",
+                    ],
+                },
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",

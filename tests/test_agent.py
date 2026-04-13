@@ -705,10 +705,10 @@ def test_convert_mcp_tools_to_llm_tools_appends_routing_hints(
     assert "Example:" not in description
 
 
-def test_convert_mcp_tools_to_llm_tools_prefers_llm_description(
+def test_convert_mcp_tools_to_llm_tools_keeps_compact_routing_with_llm_description(
     hass, profile_entry_factory
 ) -> None:
-    """Explicit LLM descriptions should replace verbose UI descriptions and hints."""
+    """Explicit LLM descriptions should stay compact while preserving one routing hint."""
     entry = profile_entry_factory()
     agent = MCPAssistConversationEntity(hass, entry)
 
@@ -727,8 +727,8 @@ def test_convert_mcp_tools_to_llm_tools_prefers_llm_description(
     compact_tools = agent._convert_mcp_tools_to_llm_tools(tools)
     description = compact_tools[0]["function"]["description"]
 
-    assert description == "Get sample status"
-    assert "Use for:" not in description
+    assert description.startswith("Get sample status")
+    assert "Use for: Use when the user asks for custom package health" in description
     assert "Very long UI-facing description" not in description
 
 
