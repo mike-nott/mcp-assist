@@ -11,6 +11,22 @@ This is intended for advanced users who want to:
 
 It also keeps user extensions out of the HACS-managed integration directory, which is the recommended upgrade-safe pattern for Home Assistant customizations.
 
+## What Belongs Where
+
+Use the built-in/core MCP Assist repo for capabilities that are broadly reusable across many Home Assistant installations, such as:
+
+- generic web, math, calendar, weather, media, or image-analysis helpers
+- tools that operate on standard Home Assistant entities or services without assuming one specific house layout
+- features that should be trusted and available as part of MCP Assist itself
+
+Use external custom tool packages for capabilities that are installation-specific, such as:
+
+- local custom components, MariaDB audit tables, or house-specific scripts
+- family relationships, vehicle nicknames, room aliases, or local naming conventions
+- city-specific schedules, site-specific camera zones, or custom dashboards
+
+If a capability only works because it knows details about one household or one set of custom entities, it should stay in `<home-assistant-config>/mcp-assist-tools` instead of being added to the core integration.
+
 ## Safety Model
 
 External custom tools are intentionally **safe by default**:
