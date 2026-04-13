@@ -183,6 +183,7 @@ OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
     ),
     TOOL_FAMILY_RESPONSE_SERVICE: frozenset(
         {
+            "get_calendar_events",
             "list_response_services",
             "call_service_with_response",
         }
@@ -403,6 +404,7 @@ Device tools are enabled.
 RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS = """
 Response-service tools are enabled.
 - Use list_response_services / call_service_with_response for structured Home Assistant reads such as forecasts, calendar events, todo items, or integration-specific query data.
+- Prefer get_calendar_events for natural language questions about upcoming events like "When is the next Mariners game?" or "What's on our calendar tomorrow?"
 - Prefer native service responses over web search when the answer already exists in Home Assistant.
 - Prefer get_weather_forecast for user weather questions. It discovers the weather entity, chooses a supported forecast type, and summarizes the result in one call.
 - For weather forecasts, discover the weather entity first. If forecast_types are available, use a supported type and never assume daily is supported.

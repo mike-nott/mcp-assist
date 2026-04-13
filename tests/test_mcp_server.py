@@ -98,6 +98,7 @@ def test_tool_enablement_follows_shared_settings(
     assert server._is_tool_enabled("discover_entities") is True
     assert server._is_tool_enabled("discover_devices") is False
     assert server._is_tool_enabled("list_assist_tools") is False
+    assert server._is_tool_enabled("get_calendar_events") is False
     assert server._is_tool_enabled("call_service_with_response") is False
     assert server._is_tool_enabled("get_weather_forecast") is False
     assert server._is_tool_enabled("analyze_entity_history") is False
@@ -174,6 +175,7 @@ async def test_handle_tools_list_filters_disabled_tool_families(
     assert "discover_entities" in tool_names
     assert "discover_devices" not in tool_names
     assert "list_assist_tools" not in tool_names
+    assert "get_calendar_events" not in tool_names
     assert "call_service_with_response" not in tool_names
     assert "get_weather_forecast" not in tool_names
     assert "get_entity_history" not in tool_names
@@ -195,6 +197,7 @@ async def test_default_tool_list_stays_streamlined(
     tool_names = {tool["name"] for tool in result["tools"]}
 
     assert "get_entity_history" in tool_names
+    assert "get_calendar_events" in tool_names
     assert "remember_memory" not in tool_names
     assert "get_last_entity_event" not in tool_names
     assert "list_assist_tools" not in tool_names
@@ -671,6 +674,120 @@ async def test_get_weather_forecast_discovers_entity_and_summarizes_tomorrow(
     assert request_args["target"] == {"entity_id": ["weather.home"]}
     assert request_args["data"]["type"] == "twice_daily"
     assert "Tomorrow for Weather:" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_discovers_calendar_and_summarizes_next_event(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Calendar helper should discover a relevant calendar and summarize the next event."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "calendar.mariners_baseball",
+        "off",
+        {"friendly_name": "Mariners Baseball"},
+    )
+    server.discovery.discover_entities = AsyncMock(
+        return_value=[
+            {
+                "entity_id": "calendar.mariners_baseball",
+                "name": "Mariners Baseball",
+            }
+        ]
+    )
+    server.tool_call_service_with_response = AsyncMock(
+        return_value={
+            "content": [{"type": "text", "text": "ok"}],
+            "response": {
+                "calendar.mariners_baseball": {
+                    "events": [
+                        {
+                            "summary": "Rangers at Mariners",
+                            "start": "2026-04-14T18:40:00-07:00",
+                            "end": "2026-04-14T21:40:00-07:00",
+                            "location": "T-Mobile Park",
+                        }
+                    ]
+                }
+            },
+        }
+    )
+
+    result = await server.tool_get_calendar_events({"query": "Mariners", "limit": 1})
+
+    server.tool_call_service_with_response.assert_awaited_once()
+    request_args = server.tool_call_service_with_response.await_args.args[0]
+    assert request_args["domain"] == "calendar"
+    assert request_args["service"] == "get_events"
+    assert request_args["target"] == {"entity_id": ["calendar.mariners_baseball"]}
+    assert "start_date_time" in request_args["data"]
+    assert "end_date_time" in request_args["data"]
+    assert "Next matching calendar event:" in result["content"][0]["text"]
+    assert "Rangers at Mariners" in result["content"][0]["text"]
+    assert result["structuredContent"]["selected_calendars"] == [
+        {
+            "entity_id": "calendar.mariners_baseball",
+            "name": "Mariners Baseball",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_falls_back_to_event_text_search(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """General query text should fall back to event-text matching across calendars."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "calendar.ash_jason",
+        "off",
+        {"friendly_name": "Ash & Jason"},
+    )
+    server.discovery.discover_entities = AsyncMock(
+        side_effect=[
+            [],
+            [
+                {
+                    "entity_id": "calendar.ash_jason",
+                    "name": "Ash & Jason",
+                }
+            ],
+        ]
+    )
+    server.tool_call_service_with_response = AsyncMock(
+        return_value={
+            "content": [{"type": "text", "text": "ok"}],
+            "response": {
+                "calendar.ash_jason": {
+                    "events": [
+                        {
+                            "summary": "Dentist cleaning",
+                            "description": "Downtown appointment",
+                            "start": "2026-04-18T09:00:00-07:00",
+                            "end": "2026-04-18T10:00:00-07:00",
+                        },
+                        {
+                            "summary": "Birthday party",
+                            "start": "2026-04-19T14:00:00-07:00",
+                            "end": "2026-04-19T16:00:00-07:00",
+                        },
+                    ]
+                }
+            },
+        }
+    )
+
+    result = await server.tool_get_calendar_events({"query": "dentist", "limit": 1})
+
+    assert server.discovery.discover_entities.await_count == 2
+    first_call = server.discovery.discover_entities.await_args_list[0]
+    second_call = server.discovery.discover_entities.await_args_list[1]
+    assert first_call.kwargs["name_contains"] == "dentist"
+    assert "name_contains" not in second_call.kwargs or second_call.kwargs["name_contains"] is None
+    assert "Dentist cleaning" in result["content"][0]["text"]
+    assert result["structuredContent"]["event_text"] == "dentist"
 
 
 @pytest.mark.asyncio

@@ -515,7 +515,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         if not self.native_response_service_tools_enabled:
             lines.append(
-                "- Native response-service tools are disabled. Do not call list_response_services or call_service_with_response. Use entity details or other MCP tools instead."
+                "- Native response-service tools are disabled. Do not call get_calendar_events, list_response_services, or call_service_with_response. Use entity details or other MCP tools instead."
             )
         elif not self.weather_forecast_tools_enabled:
             lines.append(
