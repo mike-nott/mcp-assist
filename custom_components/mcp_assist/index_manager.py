@@ -6,6 +6,8 @@ requiring full context dumps.
 
 The index includes:
 - Areas with entity counts
+- Floors with area/entity counts
+- Labels with entity coverage
 - Domains with counts
 - Device classes (grouped by domain) with counts
 - Inferred entity types (via LLM gap-filling)
@@ -28,6 +30,16 @@ from homeassistant.helpers import (
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 from homeassistant.components.homeassistant import async_should_expose
 
+try:
+    from homeassistant.helpers import floor_registry as fr
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    fr = None
+
+try:
+    from homeassistant.helpers import label_registry as lr
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    lr = None
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -48,17 +60,24 @@ class IndexManager:
         """Start index manager and set up event listeners."""
         _LOGGER.info("Starting Smart Index Manager")
 
-        # Listen for entity registry changes
         @callback
-        def entity_registry_changed(event: Event) -> None:
-            """Schedule index refresh on entity changes."""
-            _LOGGER.debug("Entity registry changed, scheduling index refresh")
+        def registry_changed(event: Event) -> None:
+            """Schedule index refresh on registry changes."""
+            _LOGGER.debug("%s changed, scheduling index refresh", event.event_type)
             self._schedule_refresh()
 
-        self.hass.bus.async_listen(
+        registry_events = [
             EVENT_ENTITY_REGISTRY_UPDATED,
-            entity_registry_changed
-        )
+            ar.EVENT_AREA_REGISTRY_UPDATED,
+            dr.EVENT_DEVICE_REGISTRY_UPDATED,
+        ]
+        if fr is not None:
+            registry_events.append(fr.EVENT_FLOOR_REGISTRY_UPDATED)
+        if lr is not None:
+            registry_events.append(lr.EVENT_LABEL_REGISTRY_UPDATED)
+
+        for event_type in registry_events:
+            self.hass.bus.async_listen(event_type, registry_changed)
 
         _LOGGER.info("✅ Smart Index Manager started successfully")
         _LOGGER.debug("Index will be generated lazily on first request")
@@ -116,11 +135,14 @@ class IndexManager:
         """Generate the system structure index.
 
         Returns a comprehensive index including areas, domains, device_classes,
-        people, pets, calendars, zones, automations, scripts, and input helpers.
+        floors, labels, people, pets, calendars, zones, automations, scripts,
+        and input helpers.
         """
         # Query all index components in parallel for speed
         results = await asyncio.gather(
             self._get_areas(),
+            self._get_floors(),
+            self._get_labels(),
             self._get_domains(),
             self._get_device_classes(),
             self._get_entities_without_device_class(),
@@ -136,6 +158,8 @@ class IndexManager:
         # Extract results and handle any errors
         (
             areas,
+            floors,
+            labels,
             domains,
             device_classes,
             entities_without_device_class,
@@ -176,6 +200,8 @@ class IndexManager:
         # Build index dict
         index = {
             "areas": areas if not isinstance(areas, Exception) else [],
+            "floors": floors if not isinstance(floors, Exception) else [],
+            "labels": labels if not isinstance(labels, Exception) else [],
             "domains": domains if not isinstance(domains, Exception) else {},
             "device_classes": device_classes if not isinstance(device_classes, Exception) else {},
             "inferred_types": inferred_types,
@@ -193,10 +219,29 @@ class IndexManager:
 
         return index
 
+    def _get_label_names(self, label_ids: Set[str], label_registry: Any) -> List[str]:
+        """Resolve label IDs to label names."""
+        if not label_ids:
+            return []
+
+        label_names = set()
+        for label_id in label_ids:
+            label_name = label_id
+            if label_registry is not None:
+                label_entry = label_registry.async_get_label(label_id)
+                if label_entry:
+                    label_name = label_entry.name
+            label_names.add(label_name)
+
+        return sorted(label_names, key=str.casefold)
+
     async def _get_areas(self) -> List[Dict[str, Any]]:
         """Get all areas with entity counts."""
         area_reg = ar.async_get(self.hass)
         entity_reg = er.async_get(self.hass)
+        device_reg = dr.async_get(self.hass)
+        floor_reg = fr.async_get(self.hass) if fr else None
+        label_reg = lr.async_get(self.hass) if lr else None
 
         # Count entities per area
         area_counts = defaultdict(int)
@@ -206,7 +251,6 @@ class IndexManager:
                     area_counts[entity.area_id] += 1
                 # Also check device area
                 elif entity.device_id:
-                    device_reg = dr.async_get(self.hass)
                     device = device_reg.async_get(entity.device_id)
                     if device and device.area_id:
                         area_counts[device.area_id] += 1
@@ -216,9 +260,22 @@ class IndexManager:
         for area in area_reg.async_list_areas():
             count = area_counts.get(area.id, 0)
             if count > 0:  # Only include areas with entities
+                floor_id = getattr(area, "floor_id", None)
+                floor_name = None
+                if floor_id and floor_reg is not None:
+                    floor_entry = floor_reg.async_get_floor(floor_id)
+                    if floor_entry:
+                        floor_name = floor_entry.name
+
+                label_ids = set(getattr(area, "labels", set()) or set())
                 areas.append({
                     "name": area.name,
-                    "entity_count": count
+                    "aliases": sorted(getattr(area, "aliases", set()) or set(), key=str.casefold),
+                    "entity_count": count,
+                    "floor": floor_name,
+                    "floor_id": floor_id,
+                    "labels": self._get_label_names(label_ids, label_reg),
+                    "label_ids": sorted(label_ids),
                 })
 
         # Sort by name
@@ -226,6 +283,110 @@ class IndexManager:
 
         _LOGGER.debug("Found %d areas with entities", len(areas))
         return areas
+
+    async def _get_floors(self) -> List[Dict[str, Any]]:
+        """Get all floors with area/entity coverage."""
+        if fr is None:
+            return []
+
+        floor_reg = fr.async_get(self.hass)
+        area_reg = ar.async_get(self.hass)
+        entity_reg = er.async_get(self.hass)
+        device_reg = dr.async_get(self.hass)
+
+        floor_area_names = defaultdict(list)
+        for area_entry in area_reg.async_list_areas():
+            if getattr(area_entry, "floor_id", None):
+                floor_area_names[area_entry.floor_id].append(area_entry.name)
+
+        floor_entities = defaultdict(set)
+        for entity in entity_reg.entities.values():
+            if not async_should_expose(self.hass, "conversation", entity.entity_id):
+                continue
+
+            area_id = entity.area_id
+            if not area_id and entity.device_id:
+                device_entry = device_reg.async_get(entity.device_id)
+                if device_entry:
+                    area_id = device_entry.area_id
+
+            if not area_id:
+                continue
+
+            area_entry = area_reg.async_get_area(area_id)
+            floor_id = getattr(area_entry, "floor_id", None) if area_entry else None
+            if floor_id:
+                floor_entities[floor_id].add(entity.entity_id)
+
+        floors = []
+        for floor_entry in floor_reg.async_list_floors():
+            areas = sorted(floor_area_names.get(floor_entry.floor_id, []), key=str.casefold)
+            floors.append({
+                "name": floor_entry.name,
+                "aliases": sorted(getattr(floor_entry, "aliases", set()) or set(), key=str.casefold),
+                "area_count": len(areas),
+                "entity_count": len(floor_entities.get(floor_entry.floor_id, set())),
+                "areas": areas,
+            })
+
+        floors.sort(key=lambda x: x["name"])
+        return floors
+
+    async def _get_labels(self) -> List[Dict[str, Any]]:
+        """Get all labels with area/device/entity coverage."""
+        if lr is None:
+            return []
+
+        label_reg = lr.async_get(self.hass)
+        area_reg = ar.async_get(self.hass)
+        entity_reg = er.async_get(self.hass)
+        device_reg = dr.async_get(self.hass)
+
+        label_areas = defaultdict(set)
+        for area_entry in area_reg.async_list_areas():
+            for label_id in getattr(area_entry, "labels", set()) or set():
+                label_areas[label_id].add(area_entry.id)
+
+        label_devices = defaultdict(set)
+        for device_entry in device_reg.devices.values():
+            for label_id in getattr(device_entry, "labels", set()) or set():
+                label_devices[label_id].add(device_entry.id)
+
+        label_entities = defaultdict(set)
+        for entity_entry in entity_reg.entities.values():
+            if not async_should_expose(self.hass, "conversation", entity_entry.entity_id):
+                continue
+
+            device_entry = (
+                device_reg.async_get(entity_entry.device_id)
+                if entity_entry.device_id
+                else None
+            )
+            area_id = entity_entry.area_id
+            if not area_id and device_entry:
+                area_id = device_entry.area_id
+            area_entry = area_reg.async_get_area(area_id) if area_id else None
+
+            combined_labels = set(getattr(entity_entry, "labels", set()) or set())
+            if device_entry:
+                combined_labels.update(getattr(device_entry, "labels", set()) or set())
+            if area_entry:
+                combined_labels.update(getattr(area_entry, "labels", set()) or set())
+
+            for label_id in combined_labels:
+                label_entities[label_id].add(entity_entry.entity_id)
+
+        labels = []
+        for label_entry in label_reg.async_list_labels():
+            labels.append({
+                "name": label_entry.name,
+                "entity_count": len(label_entities.get(label_entry.label_id, set())),
+                "area_count": len(label_areas.get(label_entry.label_id, set())),
+                "device_count": len(label_devices.get(label_entry.label_id, set())),
+            })
+
+        labels.sort(key=lambda x: x["name"])
+        return labels
 
     async def _get_domains(self) -> Dict[str, int]:
         """Get all domains with entity counts."""

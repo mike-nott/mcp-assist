@@ -686,7 +686,7 @@ class MCPServer:
         tools = [
             {
                 "name": "discover_entities",
-                "description": "Find and list Home Assistant entities by various criteria like area, type, domain, device_class, or current state. Use this to discover what devices are available before trying to control them.",
+                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, or current state. Use this to discover what devices are available before trying to control them.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -697,7 +697,15 @@ class MCPServer:
                         },
                         "area": {
                             "type": "string",
-                            "description": "Area/room name to search in - use exact names from the areas list provided in your system context (e.g., 'Kitchen', 'Back Garden', 'Living Room')",
+                            "description": "Area/room name or alias to search in - use names from the areas list provided in your system context (e.g., 'Kitchen', 'Back Garden', 'Living Room'). If the value matches a floor name or alias instead, it will search that floor.",
+                        },
+                        "floor": {
+                            "type": "string",
+                            "description": "Floor name or alias to search in (e.g., 'Upstairs', 'Basement', 'Ground Floor'). Check get_index() to see available floors.",
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Label name to filter by (matches labels assigned directly to entities, their devices, or their areas). Check get_index() to see available labels.",
                         },
                         "domain": {
                             "type": "string",
@@ -738,7 +746,7 @@ class MCPServer:
             },
             {
                 "name": "get_entity_details",
-                "description": "Get current state and attributes of specific entities",
+                "description": "Get current state, attributes, area, floor, and labels of specific entities",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -755,7 +763,7 @@ class MCPServer:
             },
             {
                 "name": "list_areas",
-                "description": "List all areas in the home with their entities count",
+                "description": "List all areas in the home with their entity counts, floors, and area labels",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -777,7 +785,7 @@ class MCPServer:
             },
             {
                 "name": "get_index",
-                "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, domains, device classes, people, pets, calendars, zones, automations, and scripts. Call this ONCE at the start of a conversation to understand what exists in the system, then use discover_entities to query specific entities. The index is ~400-800 tokens vs ~15k tokens for a full entity dump.",
+                "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, floors, labels, domains, device classes, people, pets, calendars, zones, automations, and scripts. Call this ONCE at the start of a conversation to understand what exists in the system, then use discover_entities to query specific entities. The index is ~400-800 tokens vs ~15k tokens for a full entity dump.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -998,6 +1006,8 @@ class MCPServer:
         entities = await self.discovery.discover_entities(
             entity_type=args.get("entity_type"),
             area=args.get("area"),
+            floor=args.get("floor"),
+            label=args.get("label"),
             domain=args.get("domain"),
             state=args.get("state"),
             name_contains=args.get("name_contains"),
@@ -1071,8 +1081,19 @@ class MCPServer:
                     type_desc = (
                         f" ({entity.get('type', '')})" if entity.get("type") else ""
                     )
+                    location = []
+                    if entity.get("area"):
+                        location.append(entity["area"])
+                    if entity.get("floor"):
+                        location.append(entity["floor"])
+                    location_text = f" @ {' / '.join(location)}" if location else ""
+                    labels = (
+                        f" [Labels: {', '.join(entity['labels'])}]"
+                        if entity.get("labels")
+                        else ""
+                    )
                     text_parts.append(
-                        f"  • {entity['entity_id']}: {entity['name']} - {entity['state']}{type_desc}"
+                        f"  • {entity['entity_id']}: {entity['name']} - {entity['state']}{type_desc}{location_text}{labels}"
                     )
 
             # Group related entities by category
@@ -1088,9 +1109,19 @@ class MCPServer:
                     cat_name = category.replace("_", " ").title()
                     text_parts.append(f"\n  {cat_name}:")
                     for entity in cat_entities:
-                        area = f" @ {entity.get('area')}" if entity.get("area") else ""
+                        location = []
+                        if entity.get("area"):
+                            location.append(entity["area"])
+                        if entity.get("floor"):
+                            location.append(entity["floor"])
+                        location_text = f" @ {' / '.join(location)}" if location else ""
+                        labels = (
+                            f" [Labels: {', '.join(entity['labels'])}]"
+                            if entity.get("labels")
+                            else ""
+                        )
                         text_parts.append(
-                            f"    • {entity['entity_id']}: {entity['state']}{area}"
+                            f"    • {entity['entity_id']}: {entity['state']}{location_text}{labels}"
                         )
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
@@ -1099,9 +1130,14 @@ class MCPServer:
             text_parts = [f"Found {len(entities)} entities:"]
 
             for entity in entities:
-                area = entity.get("area", "None")
+                detail_parts = [f"State: {entity['state']}"]
+                detail_parts.append(f"Area: {entity.get('area', 'None')}")
+                if entity.get("floor"):
+                    detail_parts.append(f"Floor: {entity['floor']}")
+                if entity.get("labels"):
+                    detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
                 text_parts.append(
-                    f"- {entity['entity_id']}: {entity['name']} (State: {entity['state']}, Area: {area})"
+                    f"- {entity['entity_id']}: {entity['name']} ({', '.join(detail_parts)})"
                 )
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
@@ -1124,7 +1160,25 @@ class MCPServer:
                     "text": f"Available areas ({len(areas)}):\n"
                     + "\n".join(
                         [
-                            f"- {area['name']}: {area['entity_count']} entities"
+                            (
+                                f"- {area['name']}"
+                                + (
+                                    f" (Aliases: {', '.join(area['aliases'])})"
+                                    if area.get("aliases")
+                                    else ""
+                                )
+                                + (
+                                    f" (Floor: {area['floor']})"
+                                    if area.get("floor")
+                                    else ""
+                                )
+                                + (
+                                    f" [Labels: {', '.join(area['labels'])}]"
+                                    if area.get("labels")
+                                    else ""
+                                )
+                                + f": {area['entity_count']} entities"
+                            )
                             for area in areas
                         ]
                     ),

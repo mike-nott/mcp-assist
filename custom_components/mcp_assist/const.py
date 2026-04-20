@@ -144,11 +144,11 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 **Common mistake:** Calling only discover_entities and then claiming you performed an action. This is WRONG. You must call perform_action to actually execute the action.
 
 ## Available Tools
-- **discover_entities**: find devices by name/area/domain/device_class/state (ALWAYS use first)
+- **discover_entities**: find devices by name/area/floor/label/domain/device_class/state (ALWAYS use first)
 - **perform_action**: control devices using discovered entity IDs
-- **get_entity_details**: check states using discovered entity IDs
+- **get_entity_details**: check states using discovered entity IDs, including area/floor/label context
 - **get_entity_history**: get historical state changes for an entity (answers "when did X happen?")
-- **list_areas/list_domains**: list available areas and device types
+- **list_areas/list_domains**: list available areas with floor/label context and device types
 - **run_script**: execute scripts that return data (e.g., camera analysis, calculations)
 - **run_automation**: trigger automations manually
 - **set_conversation_state**: indicate if expecting user response
@@ -187,10 +187,12 @@ Example:
 
 ## Discovery Strategy
 Use the index below to see what device_classes and domains exist, then query accordingly.
+Floors and labels are first-class Home Assistant concepts. Check the index and area list to see available floor and label names, then use discover_entities with floor or label filters when relevant (for example, "upstairs" is usually a floor, not an area).
+Areas, floors, entities, and sometimes devices may also have aliases. Treat aliases as valid user-facing names during discovery.
 
 For ANY device request:
 1. Check the index to understand what's available
-2. Use discover_entities with appropriate filters (device_class, area, domain, name_contains, state)
+2. Use discover_entities with appropriate filters (device_class, area, floor, label, domain, name_contains, state)
 3. If no results, try broader search
 
 ## Response Rules

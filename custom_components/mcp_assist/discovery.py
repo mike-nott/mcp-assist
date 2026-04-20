@@ -16,6 +16,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar, entity_registry as er, device_registry as dr
 from homeassistant.components.homeassistant import async_should_expose
 
+try:
+    from homeassistant.helpers import floor_registry as fr
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    fr = None
+
+try:
+    from homeassistant.helpers import label_registry as lr
+except ImportError:  # pragma: no cover - older Home Assistant versions
+    lr = None
+
 from .const import MAX_ENTITIES_PER_DISCOVERY
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,6 +83,8 @@ class SmartDiscovery:
         self,
         entity_type: Optional[str] = None,
         area: Optional[str] = None,
+        floor: Optional[str] = None,
+        label: Optional[str] = None,
         domain: Optional[str] = None,
         state: Optional[str] = None,
         name_contains: Optional[str] = None,
@@ -88,6 +100,8 @@ class SmartDiscovery:
         Args:
             entity_type: Entity type (deprecated, use domain)
             area: Area name to filter by
+            floor: Floor name to filter by
+            label: Label name to filter by
             domain: Domain to filter by (e.g., 'sensor', 'light')
             state: State to filter by (e.g., 'on', 'off')
             name_contains: Substring to search for in entity names
@@ -100,7 +114,7 @@ class SmartDiscovery:
         """
         # Detect query type and intent
         query_type = self._detect_query_type(
-            entity_type, area, domain, state, name_contains
+            entity_type, area or floor, domain, state, name_contains
         )
 
         # Log the detected query type
@@ -111,14 +125,24 @@ class SmartDiscovery:
             return await self._discover_person_entities(name_contains, limit)
         elif query_type == QueryType.PET and name_contains and not device_class and not name_pattern and not inferred_type:
             return await self._discover_pet_entities(name_contains, limit)
-        elif query_type == QueryType.AGGREGATE and not device_class and not name_pattern and not inferred_type:
+        elif query_type == QueryType.AGGREGATE and not device_class and not name_pattern and not inferred_type and not floor and not label:
             return await self._discover_aggregate_entities(domain, state, limit)
-        elif area and not device_class and not name_pattern and not inferred_type:
+        elif area and not floor and not label and not device_class and not name_pattern and not inferred_type:
             return await self._discover_area_entities(area, domain, state, limit)
         else:
             # Fall back to general discovery (handles device_class, name_pattern, and inferred_type)
             return await self._discover_general_entities(
-                entity_type, area, domain, state, name_contains, limit, device_class, name_pattern, inferred_type
+                entity_type,
+                area,
+                floor,
+                label,
+                domain,
+                state,
+                name_contains,
+                limit,
+                device_class,
+                name_pattern,
+                inferred_type,
             )
 
     def _detect_query_type(
@@ -215,6 +239,218 @@ class SmartDiscovery:
         # - Has no person entity
         return has_pet_entities and not has_person_entity and not has_device_tracker
 
+    def _resolve_area_entry(self, area_name: str, area_registry: Any) -> Any:
+        """Resolve an area by name or alias."""
+        if not area_name:
+            return None
+
+        get_by_name = getattr(area_registry, "async_get_area_by_name", None)
+        if get_by_name:
+            area_entry = get_by_name(area_name)
+            if area_entry:
+                return area_entry
+
+        get_by_alias = getattr(area_registry, "async_get_areas_by_alias", None)
+        if get_by_alias:
+            area_matches = get_by_alias(area_name)
+            if area_matches:
+                return area_matches[0]
+
+        area_name_lower = area_name.casefold()
+        for area_entry in area_registry.async_list_areas():
+            if area_entry.name.casefold() == area_name_lower:
+                return area_entry
+            aliases = getattr(area_entry, "aliases", set()) or set()
+            if any(alias.casefold() == area_name_lower for alias in aliases):
+                return area_entry
+
+        return None
+
+    def _resolve_floor_entry(self, floor_name: str, floor_registry: Any) -> Any:
+        """Resolve a floor by name or alias."""
+        if not floor_name or floor_registry is None:
+            return None
+
+        get_by_name = getattr(floor_registry, "async_get_floor_by_name", None)
+        if get_by_name:
+            floor_entry = get_by_name(floor_name)
+            if floor_entry:
+                return floor_entry
+
+        get_by_alias = getattr(floor_registry, "async_get_floors_by_alias", None)
+        if get_by_alias:
+            floor_matches = get_by_alias(floor_name)
+            if floor_matches:
+                return floor_matches[0]
+
+        floor_name_lower = floor_name.casefold()
+        for floor_entry in floor_registry.async_list_floors():
+            if floor_entry.name.casefold() == floor_name_lower:
+                return floor_entry
+            aliases = getattr(floor_entry, "aliases", set()) or set()
+            if any(alias.casefold() == floor_name_lower for alias in aliases):
+                return floor_entry
+
+        return None
+
+    def _resolve_label_entry(self, label_name: str, label_registry: Any) -> Any:
+        """Resolve a label by name."""
+        if not label_name or label_registry is None:
+            return None
+
+        get_by_name = getattr(label_registry, "async_get_label_by_name", None)
+        if get_by_name:
+            label_entry = get_by_name(label_name)
+            if label_entry:
+                return label_entry
+
+        label_name_lower = label_name.casefold()
+        for label_entry in label_registry.async_list_labels():
+            if label_entry.name.casefold() == label_name_lower:
+                return label_entry
+
+        return None
+
+    def _get_label_names(self, label_ids: Set[str], label_registry: Any) -> List[str]:
+        """Resolve label IDs to friendly label names."""
+        if not label_ids:
+            return []
+
+        label_names = set()
+        for label_id in label_ids:
+            label_name = label_id
+            if label_registry is not None:
+                label_entry = label_registry.async_get_label(label_id)
+                if label_entry:
+                    label_name = label_entry.name
+            label_names.add(label_name)
+
+        return sorted(label_names, key=str.casefold)
+
+    def _get_entry_aliases(self, entry: Any) -> List[str]:
+        """Get aliases from a registry entry if supported."""
+        aliases = getattr(entry, "aliases", set()) if entry is not None else set()
+        return sorted(set(aliases or set()), key=str.casefold)
+
+    def _get_entity_aliases(self, entity_entry: Any) -> List[str]:
+        """Get resolved entity aliases."""
+        if entity_entry is None:
+            return []
+
+        get_entity_aliases = getattr(er, "async_get_entity_aliases", None)
+        if get_entity_aliases is not None:
+            try:
+                return get_entity_aliases(self.hass, entity_entry)
+            except Exception:  # pragma: no cover - defensive fallback
+                _LOGGER.debug("Falling back to raw entity aliases", exc_info=True)
+
+        aliases = getattr(entity_entry, "aliases", []) or []
+        return sorted(
+            {alias for alias in aliases if isinstance(alias, str)},
+            key=str.casefold,
+        )
+
+    def _get_entity_context(
+        self,
+        entity_entry: Any,
+        device_registry: Any,
+        area_registry: Any,
+        floor_registry: Any = None,
+        label_registry: Any = None,
+        include_label_sources: bool = False,
+    ) -> Dict[str, Any]:
+        """Resolve area, floor, and label context for an entity."""
+        device_entry = None
+        if entity_entry and entity_entry.device_id:
+            device_entry = device_registry.async_get(entity_entry.device_id)
+
+        area_id = None
+        if entity_entry and entity_entry.area_id:
+            area_id = entity_entry.area_id
+        elif device_entry and device_entry.area_id:
+            area_id = device_entry.area_id
+
+        area_entry = area_registry.async_get_area(area_id) if area_id else None
+
+        floor_id = getattr(area_entry, "floor_id", None) if area_entry else None
+        floor_name = None
+        floor_entry = None
+        if floor_id and floor_registry is not None:
+            floor_entry = floor_registry.async_get_floor(floor_id)
+            if floor_entry:
+                floor_name = floor_entry.name
+
+        label_sources = {
+            "entity": set(getattr(entity_entry, "labels", set()) or set()),
+            "device": set(getattr(device_entry, "labels", set()) or set()),
+            "area": set(getattr(area_entry, "labels", set()) or set()),
+        }
+        label_ids = set().union(*label_sources.values())
+        area_aliases = self._get_entry_aliases(area_entry)
+        floor_aliases = self._get_entry_aliases(floor_entry)
+        device_aliases = self._get_entry_aliases(device_entry)
+
+        context = {
+            "area": area_entry.name if area_entry else None,
+            "area_id": area_id,
+            "area_aliases": area_aliases,
+            "floor": floor_name,
+            "floor_id": floor_id,
+            "floor_aliases": floor_aliases,
+            "labels": self._get_label_names(label_ids, label_registry),
+            "label_ids": sorted(label_ids),
+            "device": (
+                (device_entry.name_by_user or device_entry.name)
+                if device_entry
+                else None
+            ),
+            "device_name": device_entry.name if device_entry else None,
+            "device_name_by_user": device_entry.name_by_user if device_entry else None,
+            "device_aliases": device_aliases,
+        }
+
+        if include_label_sources:
+            context["label_sources"] = {
+                source: self._get_label_names(source_ids, label_registry)
+                for source, source_ids in label_sources.items()
+                if source_ids
+            }
+
+        return context
+
+    def _entity_matches_search_term(
+        self,
+        search_term: str,
+        state_obj: Any,
+        entity_entry: Any,
+        entity_context: Dict[str, Any],
+    ) -> bool:
+        """Check whether a search term matches an entity or its related context."""
+        search_values = {
+            state_obj.entity_id,
+            state_obj.name,
+            state_obj.attributes.get("friendly_name", ""),
+            entity_context.get("area"),
+            entity_context.get("floor"),
+            entity_context.get("device"),
+            entity_context.get("device_name"),
+            entity_context.get("device_name_by_user"),
+        }
+
+        entity_aliases = self._get_entity_aliases(entity_entry)
+        if entity_aliases:
+            search_values.update(entity_aliases)
+
+        search_values.update(entity_context.get("area_aliases", []))
+        search_values.update(entity_context.get("floor_aliases", []))
+        search_values.update(entity_context.get("device_aliases", []))
+        search_values.update(entity_context.get("labels", []))
+
+        return any(
+            value and search_term in value.casefold()
+            for value in search_values
+        )
+
     async def _discover_person_entities(
         self, name: str, limit: int
     ) -> List[Dict[str, Any]]:
@@ -266,8 +502,9 @@ class SmartDiscovery:
                     # Check entity aliases
                     entity_registry = er.async_get(self.hass)
                     entity_entry = entity_registry.async_get(entity_id)
-                    if entity_entry and entity_entry.aliases:
-                        for alias in entity_entry.aliases:
+                    entity_aliases = self._get_entity_aliases(entity_entry)
+                    if entity_aliases:
+                        for alias in entity_aliases:
                             if name_lower in alias.lower():
                                 entity_info = self._create_entity_info(state_obj)
                                 entity_info["matched_alias"] = alias
@@ -327,8 +564,9 @@ class SmartDiscovery:
                     # Check entity aliases
                     entity_registry = er.async_get(self.hass)
                     entity_entry = entity_registry.async_get(entity_id)
-                    if entity_entry and entity_entry.aliases:
-                        for alias in entity_entry.aliases:
+                    entity_aliases = self._get_entity_aliases(entity_entry)
+                    if entity_aliases:
+                        for alias in entity_aliases:
                             if name_lower in alias.lower():
                                 entity_info = self._create_entity_info(state_obj)
                                 entity_info["matched_alias"] = alias
@@ -388,6 +626,8 @@ class SmartDiscovery:
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
 
         # Handle if area is passed as list (defensive)
         if isinstance(area, list):
@@ -396,15 +636,22 @@ class SmartDiscovery:
             area = area[0]  # Use first area
 
         # Find area by name
-        area_id = None
-        area_entry = None
-        for a in area_registry.areas.values():
-            if a.name.lower() == area.lower():
-                area_entry = a
-                area_id = a.id
-                break
+        area_entry = self._resolve_area_entry(area, area_registry)
+        area_id = area_entry.id if area_entry else None
 
         if not area_id:
+            floor_entry = self._resolve_floor_entry(area, floor_registry)
+            if floor_entry:
+                return await self._discover_general_entities(
+                    entity_type=None,
+                    area=None,
+                    floor=floor_entry.name,
+                    label=None,
+                    domain=domain,
+                    state=state,
+                    name_contains=None,
+                    limit=limit,
+                )
             return []
 
         results = {
@@ -449,7 +696,17 @@ class SmartDiscovery:
                 continue
 
             # Add to results grouped by domain
-            entity_info = self._create_entity_info(state_obj)
+            entity_info = self._create_entity_info(
+                state_obj,
+                entity_entry=entity_entry,
+                entity_context=self._get_entity_context(
+                    entity_entry,
+                    device_registry,
+                    area_registry,
+                    floor_registry,
+                    label_registry,
+                ),
+            )
             domain_key = entity_domain.replace("_", " ").title()
             results["related_entities"].setdefault(domain_key, []).append(entity_info)
 
@@ -459,6 +716,8 @@ class SmartDiscovery:
         self,
         entity_type: Optional[str],
         area: Optional[str],
+        floor: Optional[str],
+        label: Optional[str],
         domain: Optional[str],
         state: Optional[str],
         name_contains: Optional[str],
@@ -489,14 +748,37 @@ class SmartDiscovery:
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
 
         # Get area ID if area name provided
         area_id = None
+        floor_id = None
+        label_id = None
         if area:
-            for a in area_registry.areas.values():
-                if a.name.lower() == area.lower():
-                    area_id = a.id
-                    break
+            area_entry = self._resolve_area_entry(area, area_registry)
+            if area_entry:
+                area_id = area_entry.id
+            elif not floor:
+                floor_entry = self._resolve_floor_entry(area, floor_registry)
+                if floor_entry:
+                    floor_id = floor_entry.floor_id
+                else:
+                    return []
+            else:
+                return []
+
+        if floor:
+            floor_entry = self._resolve_floor_entry(floor, floor_registry)
+            if not floor_entry:
+                return []
+            floor_id = floor_entry.floor_id
+
+        if label:
+            label_entry = self._resolve_label_entry(label, label_registry)
+            if not label_entry:
+                return []
+            label_id = label_entry.label_id
 
         # Limit to prevent excessive results
         # Read max limit from system entry config, fallback to constant
@@ -541,26 +823,23 @@ class SmartDiscovery:
 
             # Get entity registry entry for aliases and area info
             entity_entry = entity_registry.async_get(entity_id)
+            entity_context = self._get_entity_context(
+                entity_entry,
+                device_registry,
+                area_registry,
+                floor_registry,
+                label_registry,
+            )
 
             # Enhanced name search - search entity_id, friendly name, AND aliases
             if name_contains:
                 search_term = name_contains.lower()
-
-                # Check entity_id and friendly names
-                found_match = (
-                    search_term in entity_id.lower() or
-                    search_term in state_obj.name.lower() or
-                    search_term in state_obj.attributes.get("friendly_name", "").lower()
-                )
-
-                # Also check entity aliases if available
-                if not found_match and entity_entry and entity_entry.aliases:
-                    for alias in entity_entry.aliases:
-                        if search_term in alias.lower():
-                            found_match = True
-                            break
-
-                if not found_match:
+                if not self._entity_matches_search_term(
+                    search_term,
+                    state_obj,
+                    entity_entry,
+                    entity_context,
+                ):
                     continue
 
             # Device class filter
@@ -583,31 +862,24 @@ class SmartDiscovery:
                 if not fnmatch.fnmatch(entity_id, pattern):
                     continue
 
-            # Get area information
-            entity_area_id = None
-            entity_area_name = None
-
-            if entity_entry:
-                if entity_entry.area_id:
-                    entity_area_id = entity_entry.area_id
-                elif entity_entry.device_id:
-                    device_entry = device_registry.async_get(entity_entry.device_id)
-                    if device_entry and device_entry.area_id:
-                        entity_area_id = device_entry.area_id
-
-                if entity_area_id:
-                    area_entry = area_registry.async_get_area(entity_area_id)
-                    if area_entry:
-                        entity_area_name = area_entry.name
-
             # Apply area filter
-            if area_id and entity_area_id != area_id:
+            if area_id and entity_context["area_id"] != area_id:
+                continue
+
+            # Apply floor filter
+            if floor_id and entity_context["floor_id"] != floor_id:
+                continue
+
+            # Apply label filter
+            if label_id and label_id not in entity_context["label_ids"]:
                 continue
 
             # Create entity info
-            entity_info = self._create_entity_info(state_obj)
-            entity_info["area"] = entity_area_name
-            entity_info["area_id"] = entity_area_id
+            entity_info = self._create_entity_info(
+                state_obj,
+                entity_entry=entity_entry,
+                entity_context=entity_context,
+            )
 
             entities.append(entity_info)
 
@@ -617,14 +889,18 @@ class SmartDiscovery:
 
         _LOGGER.debug(
             f"General discovery found {len(entities)} entities with filters: "
-            f"type={entity_type}, area={area}, domain={domain}, "
-            f"state={state}, name_contains={name_contains}"
+            f"type={entity_type}, area={area}, floor={floor}, label={label}, "
+            f"domain={domain}, state={state}, name_contains={name_contains}"
         )
 
         return entities
 
     def _create_entity_info(
-        self, state_obj: Any, description: Optional[str] = None
+        self,
+        state_obj: Any,
+        description: Optional[str] = None,
+        entity_entry: Any = None,
+        entity_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create entity information dictionary."""
         entity_info = {
@@ -637,28 +913,45 @@ class SmartDiscovery:
         if description:
             entity_info["type"] = description
 
-        # Add area information if available
         entity_registry = er.async_get(self.hass)
-        area_registry = ar.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
 
-        entity_entry = entity_registry.async_get(state_obj.entity_id)
-        if entity_entry:
-            # Add area information
-            area_id = entity_entry.area_id
-            if not area_id and entity_entry.device_id:
-                device_entry = device_registry.async_get(entity_entry.device_id)
-                if device_entry:
-                    area_id = device_entry.area_id
+        entity_entry = entity_entry or entity_registry.async_get(state_obj.entity_id)
+        if entity_context is None:
+            entity_context = self._get_entity_context(
+                entity_entry,
+                device_registry,
+                area_registry,
+                floor_registry,
+                label_registry,
+            )
 
-            if area_id:
-                area_entry = area_registry.async_get_area(area_id)
-                if area_entry:
-                    entity_info["area"] = area_entry.name
+        for key in (
+            "area",
+            "area_id",
+            "area_aliases",
+            "floor",
+            "floor_id",
+            "floor_aliases",
+            "device",
+            "device_name",
+            "device_name_by_user",
+            "device_aliases",
+        ):
+            if entity_context.get(key):
+                entity_info[key] = entity_context[key]
 
-            # Add aliases if present
-            if entity_entry.aliases:
-                entity_info["aliases"] = list(entity_entry.aliases)
+        if entity_context.get("labels"):
+            entity_info["labels"] = entity_context["labels"]
+            entity_info["label_ids"] = entity_context["label_ids"]
+
+        # Add aliases if present
+        entity_aliases = self._get_entity_aliases(entity_entry)
+        if entity_aliases:
+            entity_info["aliases"] = entity_aliases
 
         # Add useful attributes
         if state_obj.attributes:
@@ -737,6 +1030,8 @@ class SmartDiscovery:
         entity_registry = er.async_get(self.hass)
         area_registry = ar.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
 
         for entity_id in entity_ids:
             # Check if entity is exposed
@@ -750,22 +1045,14 @@ class SmartDiscovery:
                 continue
 
             entity_entry = entity_registry.async_get(entity_id)
-            area_name = None
-            device_name = None
-
-            if entity_entry:
-                # Get area info
-                area_id = entity_entry.area_id
-                if not area_id and entity_entry.device_id:
-                    device_entry = device_registry.async_get(entity_entry.device_id)
-                    if device_entry:
-                        area_id = device_entry.area_id
-                        device_name = device_entry.name
-
-                if area_id:
-                    area_entry = area_registry.async_get_area(area_id)
-                    if area_entry:
-                        area_name = area_entry.name
+            entity_context = self._get_entity_context(
+                entity_entry,
+                device_registry,
+                area_registry,
+                floor_registry,
+                label_registry,
+                include_label_sources=True,
+            )
 
             entity_details = {
                 "entity_id": entity_id,
@@ -773,8 +1060,19 @@ class SmartDiscovery:
                 "domain": state_obj.domain,
                 "state": state_obj.state,
                 "attributes": self._serialize_attributes(dict(state_obj.attributes)),
-                "area": area_name,
-                "device": device_name,
+                "area": entity_context["area"],
+                "area_id": entity_context["area_id"],
+                "area_aliases": entity_context["area_aliases"],
+                "floor": entity_context["floor"],
+                "floor_id": entity_context["floor_id"],
+                "floor_aliases": entity_context["floor_aliases"],
+                "labels": entity_context["labels"],
+                "label_ids": entity_context["label_ids"],
+                "label_sources": entity_context.get("label_sources", {}),
+                "device": entity_context["device"],
+                "device_name": entity_context["device_name"],
+                "device_name_by_user": entity_context["device_name_by_user"],
+                "device_aliases": entity_context["device_aliases"],
                 "last_changed": state_obj.last_changed.isoformat(),
                 "last_updated": state_obj.last_updated.isoformat(),
             }
@@ -795,6 +1093,8 @@ class SmartDiscovery:
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        floor_registry = fr.async_get(self.hass) if fr else None
+        label_registry = lr.async_get(self.hass) if lr else None
 
         areas = []
         for area_entry in area_registry.areas.values():
@@ -816,10 +1116,24 @@ class SmartDiscovery:
                             and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
                             entity_count += 1
 
+            floor_id = getattr(area_entry, "floor_id", None)
+            floor_name = None
+            if floor_id and floor_registry is not None:
+                floor_entry = floor_registry.async_get_floor(floor_id)
+                if floor_entry:
+                    floor_name = floor_entry.name
+
+            label_ids = set(getattr(area_entry, "labels", set()) or set())
+
             areas.append({
                 "id": area_entry.id,
                 "name": area_entry.name,
-                "entity_count": entity_count
+                "aliases": self._get_entry_aliases(area_entry),
+                "entity_count": entity_count,
+                "floor": floor_name,
+                "floor_id": floor_id,
+                "labels": self._get_label_names(label_ids, label_registry),
+                "label_ids": sorted(label_ids),
             })
 
         # Sort by name
