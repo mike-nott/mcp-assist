@@ -185,17 +185,25 @@ class OpenClawClient:
         """Connect to the OpenClaw Gateway and complete handshake."""
         from websockets.asyncio.client import connect
 
+        # Sanitize host — strip protocol prefixes and trailing slashes
+        host = self._host.strip().rstrip("/")
+        for prefix in ("https://", "http://", "wss://", "ws://"):
+            if host.lower().startswith(prefix):
+                host = host[len(prefix):]
+                break
+
         scheme = "wss" if self._use_ssl else "ws"
-        url = f"{scheme}://{self._host}:{self._port}/?token={self._token}"
+        url = f"{scheme}://{host}:{self._port}/?token={self._token}"
         headers = {
             "Authorization": f"Bearer {self._token}",
             "X-OpenClaw-Token": self._token,
         }
 
         # SSL context for self-signed certs (tailscale, etc.)
+        # Avoid ssl.create_default_context() as it blocks the event loop loading certs
         ssl_ctx = None
         if self._use_ssl:
-            ssl_ctx = ssl.create_default_context()
+            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
 
@@ -361,13 +369,20 @@ class OpenClawClient:
         request_id = str(uuid.uuid4())
         idempotency_key = str(uuid.uuid4())
 
+        # Prefix with voice instruction so OpenClaw formats for speech
+        voice_message = (
+            "[This is a voice assistant request. Respond in natural spoken language. "
+            "Keep it brief (1-3 sentences). No markdown, bullet points, lists, or emojis.]\n\n"
+            + text
+        )
+
         # Send agent request
         await self._ws.send(json.dumps({
             "type": "req",
             "id": request_id,
             "method": "agent",
             "params": {
-                "message": text,
+                "message": voice_message,
                 "sessionKey": session_key,
                 "idempotencyKey": idempotency_key,
             },
@@ -405,6 +420,11 @@ class OpenClawClient:
             )
         finally:
             self._agent_runs.pop(run_id, None)
+
+        _LOGGER.debug(
+            "Run complete: status=%s summary_len=%s full_text_len=%s",
+            run.status, len(run.summary or ""), len(run.full_text),
+        )
 
         if run.status == "error":
             raise OpenClawError(f"Agent error: {run.summary or 'unknown error'}")
@@ -459,7 +479,18 @@ class OpenClawClient:
 
         run = self._agent_runs.get(run_id)
         if not run:
+            _LOGGER.debug("Agent event for unknown run %s, keys: %s", run_id[:8], list(payload.keys()))
             return
+
+        # Log all agent events for debugging
+        _LOGGER.debug(
+            "Agent event: run=%s keys=%s output_len=%s status=%s phase=%s",
+            run_id[:8],
+            list(payload.keys()),
+            len(payload.get("output", "")) if payload.get("output") else 0,
+            payload.get("status"),
+            payload.get("data", {}).get("phase"),
+        )
 
         # Accumulate output (gateway sends cumulative text)
         output = payload.get("output")

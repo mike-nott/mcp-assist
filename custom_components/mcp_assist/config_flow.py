@@ -541,11 +541,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_model()
             except DevicePairingRequiredError:
                 errors["base"] = "openclaw_not_paired"
-            except OpenClawAuthError:
+            except OpenClawAuthError as err:
+                _LOGGER.error("OpenClaw auth error: %s", err)
                 errors["base"] = "openclaw_connection_failed"
-            except OpenClawConnectionError:
+            except OpenClawConnectionError as err:
+                _LOGGER.error("OpenClaw connection error: %s", err)
                 errors["base"] = "openclaw_connection_failed"
-            except Exception:
+            except Exception as err:
+                _LOGGER.error("OpenClaw unexpected error: %s: %s", type(err).__name__, err)
                 errors["base"] = "openclaw_connection_failed"
 
         return self.async_show_form(
@@ -572,32 +575,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
         models = []
 
-        # OpenClaw doesn't have /v1/models endpoint - skip model selection
+        # OpenClaw doesn't need model/prompt selection — skip straight to advanced
         if server_type == SERVER_TYPE_OPENCLAW:
-            # Hardcode model to "main" and use empty system prompt (OpenClaw has its own)
-            model_schema = vol.Schema(
-                {
-                    vol.Required(
-                        CONF_TECHNICAL_PROMPT, default=DEFAULT_TECHNICAL_PROMPT
-                    ): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-                    ),
-                }
-            )
-            # Store hardcoded values
             self.step3_data = {
-                CONF_MODEL_NAME: "main",
-                CONF_SYSTEM_PROMPT: "",  # OpenClaw manages its own system prompt
+                CONF_MODEL_NAME: "",
+                CONF_SYSTEM_PROMPT: "",
+                CONF_TECHNICAL_PROMPT: "",
             }
-
-            return self.async_show_form(
-                step_id="model",
-                data_schema=model_schema,
-                errors=errors,
-                description_placeholders={
-                    "server_info": "OpenClaw's model and system prompt are configured on the OpenClaw server. Use the technical instructions below to configure how it uses MCP tools to control Home Assistant."
-                },
-            )
+            return await self.async_step_advanced()
         elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
@@ -1049,16 +1034,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get options flow for this handler."""
-        return MCPAssistOptionsFlow(config_entry)
+        return MCPAssistOptionsFlow()
 
 
 class MCPAssistOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for MCP Assist integration."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
         super().__init__()
-        self.config_entry = config_entry
         self.profile_options: dict[str, Any] = {}
 
     def _get_search_provider_default(self, options: dict, data: dict) -> str:
@@ -1281,16 +1265,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
             )
 
-        # 5. Technical Instructions
-        schema_dict[
-            vol.Required(
-                CONF_TECHNICAL_PROMPT,
-                default=options.get(
+        # 5. Technical Instructions (skip for OpenClaw - it manages its own)
+        if server_type != SERVER_TYPE_OPENCLAW:
+            schema_dict[
+                vol.Required(
                     CONF_TECHNICAL_PROMPT,
-                    data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
-                ),
-            )
-        ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
+                    default=options.get(
+                        CONF_TECHNICAL_PROMPT,
+                        data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
+                    ),
+                )
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
 
         # For OpenClaw, only show Control HA, Session Key, Timeout, Clean Responses, and Debug Mode
         if server_type == SERVER_TYPE_OPENCLAW:
