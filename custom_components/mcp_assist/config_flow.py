@@ -696,16 +696,12 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
-            # For OpenClaw, set defaults for hidden fields
+            # For OpenClaw, set defaults for LLM-specific fields (not shown in UI)
             if server_type == SERVER_TYPE_OPENCLAW:
                 user_input[CONF_TEMPERATURE] = DEFAULT_TEMPERATURE
                 user_input[CONF_MAX_TOKENS] = DEFAULT_MAX_TOKENS
                 user_input[CONF_MAX_HISTORY] = DEFAULT_MAX_HISTORY
                 user_input[CONF_MAX_ITERATIONS] = DEFAULT_MAX_ITERATIONS
-                user_input[CONF_RESPONSE_MODE] = "none"  # OpenClaw manages this
-                user_input[CONF_FOLLOW_UP_PHRASES] = DEFAULT_FOLLOW_UP_PHRASES
-                user_input[CONF_END_WORDS] = DEFAULT_END_WORDS
-                # Timeout is shown for OpenClaw, so use provided value or default to 60
                 if CONF_TIMEOUT not in user_input:
                     user_input[CONF_TIMEOUT] = 60
 
@@ -806,12 +802,31 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Build schema based on server type
         if server_type == SERVER_TYPE_OPENCLAW:
-            # OpenClaw - only show Control HA, Session Key, Timeout, Clean Responses, Debug
+            # OpenClaw - show conversation settings but hide LLM-specific fields
             advanced_schema_dict = {
                 vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
                 vol.Optional(
                     CONF_OPENCLAW_SESSION_KEY, default=DEFAULT_OPENCLAW_SESSION_KEY
                 ): str,
+                vol.Required(
+                    CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": "none", "label": "None"},
+                            {"value": "default", "label": "Smart"},
+                            {"value": "always", "label": "Always"},
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_FOLLOW_UP_PHRASES,
+                    default=get_follow_up_phrases(self.hass.config.language),
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Optional(
+                    CONF_END_WORDS, default=get_end_words(self.hass.config.language)
+                ): TextSelector(TextSelectorConfig(multiline=True)),
                 vol.Optional(
                     CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
                 ): bool,
@@ -1277,8 +1292,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 )
             ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
 
-        # For OpenClaw, only show Control HA, Session Key, Timeout, Clean Responses, and Debug Mode
+        # For OpenClaw, show conversation settings but hide LLM-specific fields
         if server_type == SERVER_TYPE_OPENCLAW:
+            response_mode_value = options.get(
+                CONF_RESPONSE_MODE, options.get(CONF_FOLLOW_UP_MODE, DEFAULT_RESPONSE_MODE)
+            )
             schema_dict.update(
                 {
                     vol.Required(
@@ -1295,6 +1313,31 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             data.get(CONF_OPENCLAW_SESSION_KEY, DEFAULT_OPENCLAW_SESSION_KEY),
                         ),
                     ): str,
+                    vol.Required(
+                        CONF_RESPONSE_MODE, default=response_mode_value
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": "none", "label": "None"},
+                                {"value": "default", "label": "Smart"},
+                                {"value": "always", "label": "Always"},
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_FOLLOW_UP_PHRASES,
+                        default=options.get(
+                            CONF_FOLLOW_UP_PHRASES,
+                            data.get(CONF_FOLLOW_UP_PHRASES, DEFAULT_FOLLOW_UP_PHRASES),
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_END_WORDS,
+                        default=options.get(
+                            CONF_END_WORDS, data.get(CONF_END_WORDS, DEFAULT_END_WORDS)
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
                     vol.Optional(
                         CONF_CLEAN_RESPONSES,
                         default=options.get(
