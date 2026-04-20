@@ -551,7 +551,9 @@ class MCPAssistConversationEntity(ConversationEntity):
                 tool_input = llm.ToolInput(
                     id=tc.get("id", str(uuid.uuid4())),
                     tool_name=tc.get("function", {}).get("name", "unknown"),
-                    tool_args=json.loads(tc.get("function", {}).get("arguments", "{}")),
+                    tool_args=self._parse_tool_arguments(
+                        tc.get("function", {}).get("arguments")
+                    ),
                     external=True,  # MCP tools are executed externally, not by ChatLog
                 )
                 llm_tool_calls.append(tool_input)
@@ -568,6 +570,62 @@ class MCPAssistConversationEntity(ConversationEntity):
                 _LOGGER.debug(f"📊 Recorded {len(tool_calls)} tool calls to ChatLog")
         except Exception as e:
             _LOGGER.error(f"Error recording tool calls to ChatLog: {e}")
+
+    def _stringify_tool_arguments(self, arguments: Any) -> str:
+        """Normalize tool arguments to a JSON string."""
+        if arguments is None:
+            return "{}"
+        if isinstance(arguments, str):
+            return arguments
+        return json.dumps(arguments, ensure_ascii=False)
+
+    def _parse_tool_arguments(self, arguments: Any) -> Dict[str, Any]:
+        """Parse tool arguments whether they arrive as a dict or JSON string."""
+        if arguments is None:
+            return {}
+        if isinstance(arguments, dict):
+            return arguments
+        if isinstance(arguments, str):
+            if not arguments.strip():
+                return {}
+            try:
+                parsed = json.loads(arguments)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def _normalize_tool_call_arguments(
+        self, tool_calls: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Normalize tool_call function.arguments for internal and provider use."""
+        normalized = []
+        for tool_call in tool_calls:
+            normalized_call = dict(tool_call)
+            function = dict(normalized_call.get("function", {}))
+            if function:
+                function["arguments"] = self._stringify_tool_arguments(
+                    function.get("arguments")
+                )
+                normalized_call["function"] = function
+            normalized.append(normalized_call)
+        return normalized
+
+    def _format_tool_calls_for_ollama(
+        self, tool_calls: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert tool calls to Ollama's native argument shape."""
+        formatted = []
+        for tool_call in tool_calls:
+            formatted_call = dict(tool_call)
+            function = dict(formatted_call.get("function", {}))
+            if function:
+                function["arguments"] = self._parse_tool_arguments(
+                    function.get("arguments")
+                )
+                formatted_call["function"] = function
+            formatted.append(formatted_call)
+        return formatted
 
     def _record_tool_result_to_chatlog(
         self, tool_call_id: str, tool_name: str, tool_result: Dict[str, Any]
@@ -1338,24 +1396,12 @@ class MCPAssistConversationEntity(ConversationEntity):
             tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
             function = tool_call.get("function", {})
             tool_name = function.get("name")
-            arguments_str = function.get("arguments", "{}")
+            arguments_str = function.get("arguments")
 
             _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
 
             try:
-                # Parse arguments based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama: Arguments are already parsed objects
-                    arguments = (
-                        arguments_str
-                        if isinstance(arguments_str, dict)
-                        else json.loads(arguments_str)
-                        if arguments_str
-                        else {}
-                    )
-                else:
-                    # OpenAI: Arguments are JSON strings
-                    arguments = json.loads(arguments_str) if arguments_str else {}
+                arguments = self._parse_tool_arguments(arguments_str)
 
                 # Execute the tool
                 result = await self._call_mcp_tool(tool_name, arguments)
@@ -1392,6 +1438,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                     results.append(
                         {
                             "role": "tool",
+                            "tool_name": tool_name,
                             "content": content if content is not None else "",
                         }
                     )
@@ -1413,7 +1460,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                 if self.server_type == SERVER_TYPE_OLLAMA:
                     # Ollama doesn't use tool_call_id
                     results.append(
-                        {"role": "tool", "content": json.dumps({"error": str(e)})}
+                        {
+                            "role": "tool",
+                            "tool_name": tool_name,
+                            "content": json.dumps({"error": str(e)}),
+                        }
                     )
                 else:
                     # OpenAI format with tool_call_id
@@ -1543,9 +1594,16 @@ class MCPAssistConversationEntity(ConversationEntity):
         ollama_messages = []
         for msg in messages:
             if msg.get("role") == "tool":
-                ollama_messages.append(
-                    {"role": "tool", "content": msg.get("content", "")}
+                tool_msg = {"role": "tool", "content": msg.get("content", "")}
+                if msg.get("tool_name"):
+                    tool_msg["tool_name"] = msg["tool_name"]
+                ollama_messages.append(tool_msg)
+            elif msg.get("role") == "assistant" and msg.get("tool_calls"):
+                assistant_msg = dict(msg)
+                assistant_msg["tool_calls"] = self._format_tool_calls_for_ollama(
+                    msg["tool_calls"]
                 )
+                ollama_messages.append(assistant_msg)
             else:
                 ollama_messages.append(msg)
 
@@ -1863,15 +1921,55 @@ class MCPAssistConversationEntity(ConversationEntity):
                                                 )
 
                                             if "arguments" in func:
+                                                if (
+                                                    "function"
+                                                    not in current_tool_calls[idx]
+                                                ):
+                                                    current_tool_calls[idx][
+                                                        "function"
+                                                    ] = {}
+
+                                                raw_arguments = func["arguments"]
+                                                if isinstance(raw_arguments, dict):
+                                                    current_tool_calls[idx]["function"][
+                                                        "arguments"
+                                                    ] = self._stringify_tool_arguments(
+                                                        raw_arguments
+                                                    )
+
+                                                    tool_name = tool_names.get(idx)
+                                                    if (
+                                                        tool_name
+                                                        and idx not in completed_tools
+                                                    ):
+                                                        completed_tools.add(idx)
+                                                        if (
+                                                            tool_name
+                                                            == "discover_entities"
+                                                        ):
+                                                            await self._trigger_tts(
+                                                                "Looking for devices..."
+                                                            )
+                                                        elif (
+                                                            tool_name
+                                                            == "perform_action"
+                                                        ):
+                                                            await self._trigger_tts(
+                                                                "Controlling the device..."
+                                                            )
+                                                    continue
+
                                                 if idx not in tool_arg_buffers:
                                                     tool_arg_buffers[idx] = ""
-                                                tool_arg_buffers[idx] += func[
-                                                    "arguments"
-                                                ]
+                                                tool_arg_buffers[idx] += (
+                                                    self._stringify_tool_arguments(
+                                                        raw_arguments
+                                                    )
+                                                )
 
                                                 # Try to parse arguments
                                                 try:
-                                                    args_json = json.loads(
+                                                    json.loads(
                                                         tool_arg_buffers[idx]
                                                     )
                                                     # Valid JSON - save it
@@ -1966,6 +2064,12 @@ class MCPAssistConversationEntity(ConversationEntity):
                     "tool_calls": current_tool_calls
                     # NO content field - must be completely absent
                 }
+                if self.server_type == SERVER_TYPE_OLLAMA:
+                    assistant_msg["tool_calls"] = self._format_tool_calls_for_ollama(
+                        current_tool_calls
+                    )
+                    if response_text:
+                        assistant_msg["content"] = response_text
 
                 conversation_messages.append(assistant_msg)
 
@@ -2119,7 +2223,13 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                     # Check if there are tool calls to execute
                     if "tool_calls" in message and message["tool_calls"]:
-                        tool_calls = message["tool_calls"]
+                        tool_calls = (
+                            self._format_tool_calls_for_ollama(message["tool_calls"])
+                            if self.server_type == SERVER_TYPE_OLLAMA
+                            else self._normalize_tool_call_arguments(
+                                message["tool_calls"]
+                            )
+                        )
                         _LOGGER.info(
                             f"🛠️ {self.server_type} requested {len(tool_calls)} tool calls"
                         )
@@ -2152,6 +2262,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                             "tool_calls": tool_calls
                             # NO content field - must be completely absent
                         }
+                        if (
+                            self.server_type == SERVER_TYPE_OLLAMA
+                            and message.get("content")
+                        ):
+                            assistant_msg["content"] = message.get("content")
 
                         conversation_messages.append(assistant_msg)
 
