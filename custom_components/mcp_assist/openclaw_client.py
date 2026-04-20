@@ -364,7 +364,13 @@ class OpenClawClient:
             OpenClawTimeoutError: Response timed out
         """
         if not self.is_connected:
-            raise OpenClawConnectionError("Not connected to OpenClaw Gateway")
+            _LOGGER.info("OpenClaw not connected, attempting reconnect...")
+            try:
+                await self.connect()
+            except Exception as err:
+                raise OpenClawConnectionError(
+                    f"Not connected and reconnect failed: {err}"
+                ) from err
 
         request_id = str(uuid.uuid4())
         idempotency_key = str(uuid.uuid4())
