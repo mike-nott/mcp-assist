@@ -15,8 +15,16 @@
         "data": {
           "lmstudio_url": "Server URL",
           "api_key": "API Key",
-          "mcp_port": "MCP Server Port"
+          "mcp_port": "MCP Server Port",
+          "openclaw_host": "Gateway Host",
+          "openclaw_port": "Gateway Port",
+          "openclaw_token": "Gateway Token",
+          "openclaw_use_ssl": "Use SSL/TLS"
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw Device Pairing",
+        "description": "Your device needs to be approved on the OpenClaw server.\n\nApprove it by running `openclaw devices approve` or using the OpenClaw Control UI, then click Submit.\n\nDevice ID: {device_id}"
       },
       "model": {
         "title": "Model & Prompts",
@@ -43,7 +51,8 @@
           "timeout": "Response Time Out",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
-          "ollama_num_ctx": "Ollama Context Window"
+          "ollama_num_ctx": "Ollama Context Window",
+          "openclaw_session_key": "Session Key"
         }
       },
       "mcp_server": {
@@ -68,7 +77,9 @@
       "invalid_json": "Invalid JSON format. Please check your MCP servers configuration.",
       "invalid_api_key": "Invalid API key. Please check and try again.",
       "auth_failed": "Authentication failed. Please verify your API key.",
-      "unknown": "An unknown error occurred."
+      "unknown": "An unknown error occurred.",
+      "openclaw_not_paired": "Device not yet approved on the OpenClaw server. Please approve it and try again.",
+      "openclaw_connection_failed": "Could not connect to the OpenClaw gateway. Check the host, port, and token."
     },
     "abort": {
       "already_configured": "A profile with this name already exists. Please choose a different name."
@@ -98,7 +109,12 @@
           "timeout": "Response Time Out",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
-          "ollama_num_ctx": "Ollama Context Window"
+          "ollama_num_ctx": "Ollama Context Window",
+          "openclaw_host": "Gateway Host",
+          "openclaw_port": "Gateway Port",
+          "openclaw_token": "Gateway Token",
+          "openclaw_use_ssl": "Use SSL/TLS",
+          "openclaw_session_key": "Session Key"
         }
       },
       "mcp_server": {
