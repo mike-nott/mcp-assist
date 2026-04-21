@@ -33,6 +33,9 @@ CONF_MAX_HISTORY = "max_history"
 CONF_MAX_ITERATIONS = "max_iterations"
 CONF_DEBUG_MODE = "debug_mode"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
+CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS = "enable_external_custom_tools"
+CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
+CONF_ENABLE_UNIT_CONVERSION_TOOLS = "enable_unit_conversion_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
 CONF_SEARCH_PROVIDER = "search_provider"
@@ -81,6 +84,9 @@ DEFAULT_MAX_HISTORY = 10
 DEFAULT_MAX_ITERATIONS = 10
 DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
+DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS = False
+DEFAULT_ENABLE_CALCULATOR_TOOLS = False
+DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_ALLOWED_IPS = ""
 DEFAULT_SEARCH_PROVIDER = "none"
@@ -91,6 +97,14 @@ DEFAULT_FOLLOW_UP_PHRASES = "anything else, what else, would you, do you, should
 DEFAULT_END_WORDS = "stop, cancel, no, nope, thanks, thank you, bye, goodbye, done, never mind, nevermind, forget it, that's all, that's it"
 DEFAULT_CLEAN_RESPONSES = False
 DEFAULT_TIMEOUT = 30
+
+# Manifest-based custom tool package support
+CUSTOM_TOOLS_DIRECTORY = "mcp-assist-tools"
+CUSTOM_TOOL_SHARED_DIRECTORY = "__shared__"
+CUSTOM_TOOL_SETTINGS_DIRECTORY = "mcp-assist-tool-settings"
+CUSTOM_TOOL_SCHEMA_VERSION = 1
+CUSTOM_TOOL_MANIFEST_FILENAME = "mcp_tool.json"
+SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS = "reload_external_custom_tools"
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"

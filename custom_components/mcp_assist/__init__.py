@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.components import conversation
 from homeassistant.exceptions import ConfigEntryNotReady
 
@@ -17,6 +17,9 @@ from .const import (
     CONF_TECHNICAL_PROMPT,
     CONF_PROFILE_NAME,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
@@ -24,6 +27,9 @@ from .const import (
     CONF_SERVER_TYPE,
     CONF_TIMEOUT,
     DEFAULT_ENABLE_CUSTOM_TOOLS,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SEARCH_PROVIDER,
@@ -34,6 +40,7 @@ from .const import (
     CONF_OPENCLAW_PORT,
     CONF_OPENCLAW_TOKEN,
     CONF_OPENCLAW_USE_SSL,
+    SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
 )
 from .mcp_server import MCPServer
 from .index_manager import IndexManager
@@ -59,6 +66,26 @@ async def _migrate_brave_search_tool_name(hass: HomeAssistant, entry: ConfigEntr
             "Profile '%s': Migrated Technical Instructions from 'brave_search' to 'search'",
             entry.data.get(CONF_PROFILE_NAME, "Default")
         )
+
+
+async def _async_handle_reload_external_custom_tools(call) -> dict:
+    """Reload manifest-based custom tool packages on the shared MCP server."""
+    hass = call.hass
+    server = hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+    if server is None:
+        _LOGGER.warning("Cannot reload custom tools: shared MCP server is not running")
+        return {"success": False, "error": "Shared MCP server is not running"}
+
+    reload_external_custom_tools = getattr(
+        server,
+        "reload_external_custom_tools",
+        None,
+    )
+    if not callable(reload_external_custom_tools):
+        _LOGGER.warning("Cannot reload custom tools: server does not support reload")
+        return {"success": False, "error": "Custom tool reload is not available"}
+
+    return await reload_external_custom_tools()
 
 
 def get_system_entry(hass: HomeAssistant) -> ConfigEntry | None:
@@ -119,6 +146,27 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     CONF_ENABLE_GAP_FILLING,
                     first_profile.data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING)
                 ),
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_CALCULATOR_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_CALCULATOR_TOOLS,
+                        DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                        DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                    ),
+                ),
             }
         else:
             # No profiles exist yet (shouldn't happen in normal flow), use defaults
@@ -129,6 +177,9 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_BRAVE_API_KEY: DEFAULT_BRAVE_API_KEY,
                 CONF_ALLOWED_IPS: DEFAULT_ALLOWED_IPS,
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                CONF_ENABLE_CALCULATOR_TOOLS: DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS: DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
             }
 
         # Create system entry with extracted/default settings
@@ -165,6 +216,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _migrate_brave_search_tool_name(hass, entry)
 
     hass.data.setdefault(DOMAIN, {})
+
+    if not hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
+            _async_handle_reload_external_custom_tools,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
 
     # Ensure system entry exists (creates with defaults if not)
     await ensure_system_entry(hass)
@@ -329,6 +388,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             mcp_server = hass.data[DOMAIN].pop("shared_mcp_server", None)
             if mcp_server:
                 await mcp_server.stop()
+            if hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS):
+                hass.services.async_remove(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS)
             hass.data[DOMAIN].pop("index_manager", None)
             hass.data[DOMAIN].pop("mcp_port", None)
             hass.data[DOMAIN].pop("mcp_refcount", None)

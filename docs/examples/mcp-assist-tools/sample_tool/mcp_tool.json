@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "sample_tool",
+  "name": "Sample Tool",
+  "description": "Example external tool package for MCP Assist documentation.",
+  "version": "1.0.0",
+  "entrypoint": "tool:SampleTool",
+  "capabilities": [
+    "Provides a tiny example MCP tool and prompt guidance."
+  ],
+  "prompt_append_file": "prompt.md"
+}

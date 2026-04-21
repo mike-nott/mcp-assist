@@ -63,7 +63,10 @@
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Additional Allowed IPs/Ranges",
-          "enable_gap_filling": "Enable Smart Entity Index"
+          "enable_gap_filling": "Enable Smart Entity Index",
+          "enable_external_custom_tools": "Enable External Custom Tools",
+          "enable_calculator_tools": "Enable Calculator Tools",
+          "enable_unit_conversion_tools": "Enable Unit Conversion Tools"
         }
       }
     },
@@ -126,6 +129,9 @@
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Additional Allowed IPs/Ranges",
           "enable_gap_filling": "Enable Smart Entity Index",
+          "enable_external_custom_tools": "Enable External Custom Tools",
+          "enable_calculator_tools": "Enable Calculator Tools",
+          "enable_unit_conversion_tools": "Enable Unit Conversion Tools",
           "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
         }
       }

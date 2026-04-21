@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "unit_conversion",
+  "name": "Unit Conversion",
+  "description": "Built-in exact unit-conversion tools.",
+  "version": "1.0.0",
+  "entrypoint": "tool:UnitConversionPackageTool",
+  "prompt_append_file": "prompt.md",
+  "capabilities": [
+    "Converts between common temperature, length, weight, energy, storage, and data-rate units."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "convert_unit"
+    ],
+    "shared_setting_key": "enable_unit_conversion_tools",
+    "profile_setting_key": "profile_enable_unit_conversion_tools",
+    "shared_default": false,
+    "profile_default": true,
+    "shared_label": "Unit Conversion",
+    "profile_disable_label": "Disable Unit Conversion",
+    "shared_description": "Expose exact unit-conversion helpers.",
+    "profile_disable_description": "Prevents this profile from using exact unit-conversion helpers.",
+    "legacy_shared_setting_keys": [
+      "enable_calculator_tools"
+    ],
+    "legacy_profile_setting_keys": [
+      "profile_enable_calculator_tools"
+    ]
+  }
+}
