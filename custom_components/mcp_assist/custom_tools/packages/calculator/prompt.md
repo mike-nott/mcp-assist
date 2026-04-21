@@ -1,0 +1,1 @@
+Use these tools for arithmetic or expression questions instead of doing math mentally. Call them for addition, subtraction, multiplication, division, roots, powers, rounding, averages, min/max, and expression evaluation.

@@ -25,8 +25,10 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
 )
 from .discovery import EntityDiscovery
 from .domain_registry import (
@@ -138,6 +140,15 @@ class MCPServer:
 
         return "none"
 
+    def _external_custom_tools_enabled(self) -> bool:
+        """Return whether user-defined external custom tool packages are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+            )
+        )
+
     async def start(self) -> None:
         """Start the MCP server."""
         try:
@@ -154,6 +165,10 @@ class MCPServer:
             self.app.router.add_get("/ws", self.handle_websocket)
             self.app.router.add_get("/health", self.handle_health)
             self.app.router.add_get(
+                "/external-tools/diagnostics",
+                self.handle_external_tool_diagnostics,
+            )
+            self.app.router.add_get(
                 "/progress", self.handle_progress_stream
             )  # Progress streaming
 
@@ -164,21 +179,20 @@ class MCPServer:
             self.site = web.TCPSite(self.runner, "0.0.0.0", self.port)
             await self.site.start()
 
-            # Create and initialize custom tools if search provider is enabled
+            # Create and initialize built-in package wrappers and optional external tools
             # Done here (not in __init__) so system entry exists for reading settings
-            search_provider = self._get_search_provider()
-            if search_provider in ["brave", "duckduckgo"]:
-                try:
-                    from .custom_tools import CustomToolsLoader
+            try:
+                from .custom_tools import CustomToolsLoader
 
-                    self.custom_tools = CustomToolsLoader(self.hass, self.entry)
-                    await self.custom_tools.initialize()
-                    _LOGGER.info(
-                        "✅ Custom tools initialized for search provider: %s",
-                        search_provider,
-                    )
-                except Exception as e:
-                    _LOGGER.error(f"Failed to initialize custom tools: {e}")
+                self.custom_tools = CustomToolsLoader(self.hass, self.entry)
+                await self.custom_tools.initialize()
+                _LOGGER.info(
+                    "✅ Custom tools initialized (search provider: %s, external enabled: %s)",
+                    self._get_search_provider(),
+                    self._external_custom_tools_enabled(),
+                )
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize custom tools: {e}")
 
             _LOGGER.info(
                 "✅ MCP server started successfully on http://0.0.0.0:%d", self.port
@@ -215,6 +229,10 @@ class MCPServer:
     async def stop(self) -> None:
         """Stop the MCP server."""
         _LOGGER.info("Stopping MCP server")
+
+        if self.custom_tools:
+            await self.custom_tools.shutdown()
+            self.custom_tools = None
 
         if self.site:
             await self.site.stop()
@@ -296,9 +314,77 @@ class MCPServer:
                 "health": f"http://<host>:{self.port}/health",
             },
             "tools_available": len(await self._get_tools_list()),
+            "external_custom_tools_enabled": self._external_custom_tools_enabled(),
             "timestamp": dt_util.now().isoformat(),
         }
+        if self.custom_tools:
+            get_loaded_builtin_tool_info = getattr(
+                self.custom_tools,
+                "get_loaded_builtin_tool_info",
+                None,
+            )
+            if callable(get_loaded_builtin_tool_info):
+                health_info["built_in_tool_packages"] = get_loaded_builtin_tool_info()
+            health_info["external_custom_tools_loaded"] = (
+                self.custom_tools.get_loaded_external_tool_info()
+            )
         return web.json_response(health_info)
+
+    async def handle_external_tool_diagnostics(
+        self,
+        request: web.Request,
+    ) -> web.Response:
+        """Return diagnostics for manifest-based custom tool packages."""
+        client_ip = request.remote
+        _LOGGER.info("🧰 External tool diagnostics request from %s", client_ip)
+
+        if not self._is_ip_allowed(client_ip):
+            _LOGGER.warning(
+                "🚫 Blocked external tool diagnostics request from unauthorized IP: %s",
+                client_ip,
+            )
+            return web.Response(status=403, text="Forbidden: IP not authorized")
+
+        diagnostics: dict[str, Any] = {
+            "external_custom_tools_enabled": self._external_custom_tools_enabled(),
+            "external_packages": [],
+            "external_load_errors": [],
+        }
+        if self.custom_tools:
+            get_package_diagnostics = getattr(
+                self.custom_tools,
+                "get_package_diagnostics",
+                None,
+            )
+            if callable(get_package_diagnostics):
+                diagnostics = get_package_diagnostics()
+
+        return web.json_response(diagnostics)
+
+    async def reload_external_custom_tools(self) -> dict[str, Any]:
+        """Reload manifest-based custom tool packages and notify MCP clients."""
+        if not self.custom_tools:
+            return {
+                "external_custom_tools_enabled": self._external_custom_tools_enabled(),
+                "external_packages": [],
+                "external_load_errors": ["Custom tool loader is not initialized"],
+            }
+
+        reload_tool_packages = getattr(self.custom_tools, "reload_tool_packages", None)
+        if callable(reload_tool_packages):
+            diagnostics = await reload_tool_packages()
+        else:
+            reload_external_tools = getattr(self.custom_tools, "reload_external_tools", None)
+            if not callable(reload_external_tools):
+                return {
+                    "external_custom_tools_enabled": self._external_custom_tools_enabled(),
+                    "external_packages": [],
+                    "external_load_errors": ["Custom tool reload is not available"],
+                }
+            diagnostics = await reload_external_tools()
+
+        await self.broadcast_notification("notifications/tools/list_changed")
+        return diagnostics
 
     async def handle_progress_stream(self, request: web.Request) -> web.StreamResponse:
         """SSE endpoint for progress updates during tool execution."""
@@ -963,6 +1049,7 @@ class MCPServer:
         """Handle tools/call request."""
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
+        context = params.get("context")
 
         _LOGGER.debug("Calling tool: %s with args: %s", tool_name, arguments)
 
@@ -989,7 +1076,11 @@ class MCPServer:
         else:
             # Check if it's a custom tool
             if self.custom_tools and self.custom_tools.is_custom_tool(tool_name):
-                return await self.custom_tools.handle_tool_call(tool_name, arguments)
+                return await self.custom_tools.handle_tool_call(
+                    tool_name,
+                    arguments,
+                    context=context if isinstance(context, dict) else None,
+                )
             else:
                 raise ValueError(f"Unknown tool: {tool_name}")
 
