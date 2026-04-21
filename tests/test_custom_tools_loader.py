@@ -15,6 +15,7 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEB_SEARCH,
     CONF_SEARCH_PROVIDER,
@@ -166,6 +167,32 @@ async def test_initialize_loads_calculator_bundle_when_only_unit_conversion_enab
 
     assert "calculator" not in loader.tools
     assert "unit_conversion" in loader.tools
+
+
+@pytest.mark.asyncio
+async def test_initialize_loads_music_assistant_bundle_when_enabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Music Assistant should load as a built-in packaged tool when enabled."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: True,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+    loader = CustomToolsLoader(hass, profile_entry)
+
+    await loader.initialize()
+
+    assert "music_assistant" in loader.tools
+    tool_names = {tool["name"] for tool in loader.get_tool_definitions()}
+    assert "play_music_assistant" in tool_names
+    assert "get_music_assistant_queue" in tool_names
+    music_assistant_spec = loader.get_builtin_toggle_spec("play_music_assistant")
+    assert music_assistant_spec is not None
+    assert music_assistant_spec.package_id == "music_assistant"
 
 
 @pytest.mark.asyncio

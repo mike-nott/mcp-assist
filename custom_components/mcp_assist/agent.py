@@ -33,6 +33,10 @@ from .custom_tools.builtin_catalog import (
     get_builtin_toggle_spec_by_package_id,
     is_builtin_package_enabled_for_profile,
 )
+from .provider_runtime import (
+    build_provider_auth_headers,
+    resolve_provider_runtime_config,
+)
 from .localization import get_language_instruction
 from .const import (
     DOMAIN,
@@ -361,18 +365,7 @@ class MCPAssistConversationEntity(ConversationEntity):
     @property
     def base_url_dynamic(self) -> str:
         """Get base URL (dynamic for local servers)."""
-        if self.server_type in [
-            SERVER_TYPE_OPENAI,
-            SERVER_TYPE_GEMINI,
-            SERVER_TYPE_ANTHROPIC,
-            SERVER_TYPE_OPENROUTER,
-        ]:
-            return self.base_url  # Static cloud URLs
-        else:
-            # LM Studio, Ollama, llamacpp, OpenClaw, vLLM - read dynamically
-            return self.entry.options.get(
-                CONF_LMSTUDIO_URL, self.entry.data.get(CONF_LMSTUDIO_URL, "")
-            ).rstrip("/")
+        return resolve_provider_runtime_config(self.entry).base_url
 
     @property
     def api_key(self) -> str:
@@ -2471,29 +2464,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     def _get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers based on server type."""
-        if self.server_type == SERVER_TYPE_OPENAI:
-            # OpenAI uses Bearer token
-            # For custom OpenAI-compatible URLs, only send auth if key looks valid
-            if self.api_key and len(self.api_key) > 5 and self.api_key.lower() not in ["none", "null", "fake", "na", "n/a"]:
-                return {"Authorization": f"Bearer {self.api_key}"}
-            else:
-                return {}  # No auth for custom services that don't require it
-        elif self.server_type == SERVER_TYPE_GEMINI:
-            # Gemini OpenAI-compatible endpoint uses Bearer token like OpenAI
-            return {"Authorization": f"Bearer {self.api_key}"}
-        elif self.server_type == SERVER_TYPE_ANTHROPIC:
-            # Anthropic OpenAI-compatible endpoint uses Bearer token
-            return {"Authorization": f"Bearer {self.api_key}"}
-        elif self.server_type == SERVER_TYPE_OPENROUTER:
-            # OpenRouter uses Bearer token with optional HTTP-Referer header
-            return {
-                "Authorization": f"Bearer {self.api_key}",
-                "HTTP-Referer": "https://github.com/mike-nott/mcp-assist",
-                "X-Title": "MCP Assist for Home Assistant",
-            }
-        else:
-            # Local servers (LM Studio, Ollama, llamacpp, vLLM) don't need auth
-            return {}
+        return build_provider_auth_headers(self.server_type, self.api_key)
 
     def _build_openai_payload(
         self,

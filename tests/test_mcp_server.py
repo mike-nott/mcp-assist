@@ -232,6 +232,73 @@ async def test_handle_tools_list_filters_disabled_tool_families(
 
 
 @pytest.mark.asyncio
+async def test_handle_tools_list_includes_music_assistant_package_tools(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Built-in packaged Music Assistant tools should surface through the custom tool loader."""
+    system_entry_factory(data={CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: True})
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.custom_tools = SimpleNamespace(
+        get_tool_definitions=lambda: [
+            {
+                "name": "play_music_assistant",
+                "description": "play",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "get_music_assistant_queue",
+                "description": "queue",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+        ],
+        is_custom_tool=lambda tool_name: tool_name
+        in {"play_music_assistant", "get_music_assistant_queue"},
+    )
+
+    result = await server.handle_tools_list()
+    tool_names = {tool["name"] for tool in result["tools"]}
+
+    assert "play_music_assistant" in tool_names
+    assert "get_music_assistant_queue" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_call_routes_music_assistant_to_custom_tool_loader(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Music Assistant calls should be dispatched through the packaged custom tool loader."""
+    system_entry_factory(data={CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: True})
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    calls = []
+
+    async def handle_tool_call(tool_name, arguments, *, context=None):
+        calls.append((tool_name, arguments, context))
+        return {"content": [{"type": "text", "text": "called package"}]}
+
+    server.custom_tools = SimpleNamespace(
+        is_custom_tool=lambda tool_name: tool_name == "play_music_assistant",
+        handle_tool_call=handle_tool_call,
+    )
+
+    result = await server.handle_tool_call(
+        {
+            "name": "play_music_assistant",
+            "arguments": {"media_type": "track", "media_id": "song"},
+            "context": {"profile_entry_id": "profile-1"},
+        }
+    )
+
+    assert result["content"][0]["text"] == "called package"
+    assert calls == [
+        (
+            "play_music_assistant",
+            {"media_type": "track", "media_id": "song"},
+            {"profile_entry_id": "profile-1"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handle_tools_list_can_keep_unit_conversion_when_calculator_math_is_disabled(
     hass, profile_entry_factory, system_entry_factory
 ) -> None:
