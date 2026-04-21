@@ -11,7 +11,7 @@ SERVER_TYPE_OPENAI = "openai"
 SERVER_TYPE_GEMINI = "gemini"
 SERVER_TYPE_ANTHROPIC = "anthropic"
 SERVER_TYPE_OPENROUTER = "openrouter"
-SERVER_TYPE_MOLTBOT = "moltbot"
+SERVER_TYPE_OPENCLAW = "openclaw"
 SERVER_TYPE_VLLM = "vllm"
 
 # Configuration keys
@@ -78,7 +78,16 @@ DEFAULT_SERVER_TYPE = "lmstudio"
 DEFAULT_LMSTUDIO_URL = "http://localhost:1234"
 DEFAULT_LLAMACPP_URL = "http://localhost:8080"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MOLTBOT_URL = "http://localhost:18789"
+# OpenClaw Gateway defaults
+CONF_OPENCLAW_HOST = "openclaw_host"
+CONF_OPENCLAW_PORT = "openclaw_port"
+CONF_OPENCLAW_TOKEN = "openclaw_token"
+CONF_OPENCLAW_USE_SSL = "openclaw_use_ssl"
+CONF_OPENCLAW_SESSION_KEY = "openclaw_session_key"
+DEFAULT_OPENCLAW_HOST = "localhost"
+DEFAULT_OPENCLAW_PORT = 18789
+DEFAULT_OPENCLAW_USE_SSL = True
+DEFAULT_OPENCLAW_SESSION_KEY = "main"
 DEFAULT_VLLM_URL = "http://localhost:8000"
 DEFAULT_MCP_PORT = 8090
 DEFAULT_API_KEY = ""

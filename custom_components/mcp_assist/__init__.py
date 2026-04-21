@@ -41,6 +41,9 @@ from .const import (
     CONF_MEMORY_MAX_TTL_DAYS,
     CONF_MEMORY_MAX_ITEMS,
     SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
+    CONF_SERVER_TYPE,
+    CONF_TIMEOUT,
+    DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_INCLUDE_CURRENT_USER,
@@ -61,6 +64,12 @@ from .const import (
     DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
     DEFAULT_MEMORY_MAX_TTL_DAYS,
     DEFAULT_MEMORY_MAX_ITEMS,
+    DEFAULT_TIMEOUT,
+    SERVER_TYPE_OPENCLAW,
+    CONF_OPENCLAW_HOST,
+    CONF_OPENCLAW_PORT,
+    CONF_OPENCLAW_TOKEN,
+    CONF_OPENCLAW_USE_SSL,
 )
 from .mcp_server import MCPServer
 from .index_manager import IndexManager
@@ -446,6 +455,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "mcp_port": mcp_port
         }
 
+        # Set up OpenClaw WebSocket client if this is an OpenClaw profile
+        server_type = entry.data.get(CONF_SERVER_TYPE)
+        if server_type == SERVER_TYPE_OPENCLAW:
+            from .openclaw_client import (
+                OpenClawClient, OpenClawDeviceAuth, DevicePairingRequiredError,
+                OpenClawConnectionError, OpenClawAuthError,
+            )
+
+            # Get or create shared device auth (one keypair per HA instance)
+            if "openclaw_device_auth" not in hass.data[DOMAIN]:
+                device_auth = OpenClawDeviceAuth(hass)
+                await device_auth.async_load()
+                hass.data[DOMAIN]["openclaw_device_auth"] = device_auth
+
+            device_auth = hass.data[DOMAIN]["openclaw_device_auth"]
+
+            client = OpenClawClient(
+                host=entry.data.get(CONF_OPENCLAW_HOST, "localhost"),
+                port=entry.data.get(CONF_OPENCLAW_PORT, 18789),
+                token=entry.data.get(CONF_OPENCLAW_TOKEN, ""),
+                use_ssl=entry.data.get(CONF_OPENCLAW_USE_SSL, True),
+                device_auth=device_auth,
+                timeout=entry.options.get(
+                    CONF_TIMEOUT, entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+                ),
+            )
+
+            try:
+                await client.connect()
+            except DevicePairingRequiredError as err:
+                raise ConfigEntryNotReady(
+                    f"OpenClaw device not paired. Approve device '{err.device_id}' "
+                    "on your OpenClaw server, then reload the integration."
+                ) from err
+            except OpenClawAuthError as err:
+                raise ConfigEntryNotReady(
+                    f"OpenClaw authentication failed: {err}"
+                ) from err
+            except OpenClawConnectionError as err:
+                raise ConfigEntryNotReady(
+                    f"Could not connect to OpenClaw Gateway: {err}"
+                ) from err
+
+            hass.data[DOMAIN][entry.entry_id]["openclaw_client"] = client
+            _LOGGER.info("✅ OpenClaw client connected")
+
         # Forward to platform to create conversation entity
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -483,6 +538,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not unload_ok:
         return False
+
+    # Disconnect OpenClaw client if present
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    openclaw_client = entry_data.get("openclaw_client")
+    if openclaw_client:
+        await openclaw_client.disconnect()
+        _LOGGER.info("OpenClaw client disconnected")
 
     # Remove entry data
     hass.data[DOMAIN].pop(entry.entry_id, None)

@@ -80,7 +80,6 @@ from .const import (
     DEFAULT_MODEL_NAME,
     DEFAULT_OLLAMA_URL,
     DEFAULT_LLAMACPP_URL,
-    DEFAULT_MOLTBOT_URL,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SERVER_TYPE,
     DEFAULT_SEARCH_PROVIDER,
@@ -107,7 +106,6 @@ from .const import (
     SERVER_TYPE_GEMINI,
     SERVER_TYPE_ANTHROPIC,
     SERVER_TYPE_OPENROUTER,
-    SERVER_TYPE_MOLTBOT,
     SERVER_TYPE_VLLM,
     TOOL_FAMILY_SHARED_SETTINGS,
     get_optional_tool_family,
@@ -2623,8 +2621,6 @@ class MCPServer:
             base_url = ANTHROPIC_BASE_URL.rstrip("/")
         elif server_type == SERVER_TYPE_OPENROUTER:
             base_url = OPENROUTER_BASE_URL.rstrip("/")
-        elif server_type == SERVER_TYPE_MOLTBOT:
-            base_url = configured_url or DEFAULT_MOLTBOT_URL
         elif server_type == SERVER_TYPE_VLLM:
             base_url = configured_url or DEFAULT_VLLM_URL
         elif server_type == SERVER_TYPE_OLLAMA:
@@ -2658,7 +2654,6 @@ class MCPServer:
         if server_type in {
             SERVER_TYPE_GEMINI,
             SERVER_TYPE_ANTHROPIC,
-            SERVER_TYPE_MOLTBOT,
         }:
             return {"Authorization": f"Bearer {api_key}"}
         if server_type == SERVER_TYPE_OPENROUTER:

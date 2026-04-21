@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -89,13 +90,21 @@ from .const import (
     SERVER_TYPE_GEMINI,
     SERVER_TYPE_ANTHROPIC,
     SERVER_TYPE_OPENROUTER,
-    SERVER_TYPE_MOLTBOT,
+    SERVER_TYPE_OPENCLAW,
     SERVER_TYPE_VLLM,
     DEFAULT_SERVER_TYPE,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_LLAMACPP_URL,
     DEFAULT_OLLAMA_URL,
-    DEFAULT_MOLTBOT_URL,
+    CONF_OPENCLAW_HOST,
+    CONF_OPENCLAW_PORT,
+    CONF_OPENCLAW_TOKEN,
+    CONF_OPENCLAW_USE_SSL,
+    CONF_OPENCLAW_SESSION_KEY,
+    DEFAULT_OPENCLAW_HOST,
+    DEFAULT_OPENCLAW_PORT,
+    DEFAULT_OPENCLAW_USE_SSL,
+    DEFAULT_OPENCLAW_SESSION_KEY,
     DEFAULT_VLLM_URL,
     DEFAULT_MCP_PORT,
     DEFAULT_MODEL_NAME,
@@ -233,7 +242,7 @@ def _normalize_prompt_inputs(
             normalized[prompt_key] = text
             normalized[mode_key] = PROMPT_MODE_CUSTOM
 
-    if server_type == SERVER_TYPE_MOLTBOT:
+    if server_type == SERVER_TYPE_OPENCLAW:
         normalized[CONF_SYSTEM_PROMPT_MODE] = PROMPT_MODE_DEFAULT
         normalized.pop(CONF_SYSTEM_PROMPT, None)
     else:
@@ -988,7 +997,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
                     {"value": "gemini", "label": "Google Gemini"},
                     {"value": "anthropic", "label": "Anthropic (Claude)"},
                     {"value": "openrouter", "label": "OpenRouter"},
-                    {"value": "moltbot", "label": "Moltbot"},
+                    {"value": "openclaw", "label": "OpenClaw"},
                     {"value": "vllm", "label": "vLLM"},
                 ],
                 mode=SelectSelectorMode.LIST,
@@ -1099,19 +1108,33 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Store data and move to step 3
+            # Store data and move to next step
             self.step2_data = user_input
+            server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+            if server_type == SERVER_TYPE_OPENCLAW:
+                return await self.async_step_openclaw_pairing()
             return await self.async_step_model()
 
         # Get server type from step 1 to build dynamic schema
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         # Build schema based on server type
-        if server_type in [
+        if server_type == SERVER_TYPE_OPENCLAW:
+            # OpenClaw Gateway - host, port, token, SSL
+            server_schema = vol.Schema(
+                {
+                    vol.Required(CONF_OPENCLAW_HOST, default=DEFAULT_OPENCLAW_HOST): str,
+                    vol.Required(CONF_OPENCLAW_PORT, default=DEFAULT_OPENCLAW_PORT): vol.Coerce(int),
+                    vol.Required(CONF_OPENCLAW_TOKEN): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
+                    vol.Required(CONF_OPENCLAW_USE_SSL, default=DEFAULT_OPENCLAW_USE_SSL): BooleanSelector(),
+                }
+            )
+        elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
             SERVER_TYPE_OLLAMA,
-            SERVER_TYPE_MOLTBOT,
             SERVER_TYPE_VLLM,
         ]:
             # Local servers - show URL field
@@ -1119,32 +1142,18 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 default_url = DEFAULT_OLLAMA_URL
             elif server_type == SERVER_TYPE_LLAMACPP:
                 default_url = DEFAULT_LLAMACPP_URL
-            elif server_type == SERVER_TYPE_MOLTBOT:
-                default_url = DEFAULT_MOLTBOT_URL
             elif server_type == SERVER_TYPE_VLLM:
                 default_url = DEFAULT_VLLM_URL
             else:
                 default_url = DEFAULT_LMSTUDIO_URL
 
-            # Moltbot needs both URL and API key (bearer token)
-            if server_type == SERVER_TYPE_MOLTBOT:
-                server_schema = vol.Schema(
-                    {
-                        vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
-                        vol.Required(CONF_API_KEY): TextSelector(
-                            TextSelectorConfig(type=TextSelectorType.PASSWORD)
-                        ),
-                    }
-                )
-            else:
-                # Other local servers (LM Studio, Ollama, llamacpp, vLLM) - just URL
-                server_schema = vol.Schema(
-                    {
-                        vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
-                    }
-                )
+            server_schema = vol.Schema(
+                {
+                    vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
+                }
+            )
         elif server_type == SERVER_TYPE_OPENAI:
-            # OpenAI - hybrid like Moltbot (URL + API key)
+            # OpenAI - hybrid like OpenClaw (URL + API key)
             # Pre-fill with official OpenAI URL but allow users to edit for custom endpoints
             server_schema = vol.Schema(
                 {
@@ -1170,6 +1179,65 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_openclaw_pairing(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle OpenClaw device pairing step."""
+        errors: dict[str, str] = {}
+
+        from .openclaw_client import (
+            OpenClawClient, OpenClawDeviceAuth, DevicePairingRequiredError,
+            OpenClawConnectionError, OpenClawAuthError,
+        )
+
+        # Get or create device auth
+        if "openclaw_device_auth" not in self.hass.data.get(DOMAIN, {}):
+            self.hass.data.setdefault(DOMAIN, {})
+            device_auth = OpenClawDeviceAuth(self.hass)
+            await device_auth.async_load()
+            self.hass.data[DOMAIN]["openclaw_device_auth"] = device_auth
+
+        device_auth = self.hass.data[DOMAIN]["openclaw_device_auth"]
+        device_id = device_auth.device_id
+
+        if user_input is not None or not hasattr(self, "_pairing_attempted"):
+            # Attempt connection to test pairing
+            self._pairing_attempted = True
+            client = OpenClawClient(
+                host=self.step2_data.get(CONF_OPENCLAW_HOST, DEFAULT_OPENCLAW_HOST),
+                port=self.step2_data.get(CONF_OPENCLAW_PORT, DEFAULT_OPENCLAW_PORT),
+                token=self.step2_data.get(CONF_OPENCLAW_TOKEN, ""),
+                use_ssl=self.step2_data.get(CONF_OPENCLAW_USE_SSL, DEFAULT_OPENCLAW_USE_SSL),
+                device_auth=device_auth,
+                timeout=30,
+            )
+
+            try:
+                await client.connect()
+                await client.disconnect()
+                # Device is approved — proceed to model step
+                return await self.async_step_model()
+            except DevicePairingRequiredError:
+                errors["base"] = "openclaw_not_paired"
+            except OpenClawAuthError as err:
+                _LOGGER.error("OpenClaw auth error: %s", err)
+                errors["base"] = "openclaw_connection_failed"
+            except OpenClawConnectionError as err:
+                _LOGGER.error("OpenClaw connection error: %s", err)
+                errors["base"] = "openclaw_connection_failed"
+            except Exception as err:
+                _LOGGER.error("OpenClaw unexpected error: %s: %s", type(err).__name__, err)
+                errors["base"] = "openclaw_connection_failed"
+
+        return self.async_show_form(
+            step_id="openclaw_pairing",
+            data_schema=vol.Schema({}),
+            errors=errors,
+            description_placeholders={
+                "device_id": device_id,
+            },
+        )
+
     async def async_step_model(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -1187,9 +1255,6 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input = _normalize_prompt_inputs(
                 user_input, server_type, default_system_prompt
             )
-            if server_type == SERVER_TYPE_MOLTBOT:
-                user_input[CONF_MODEL_NAME] = "main"
-
             # Store data and move to step 4 (advanced)
             self.step3_data = user_input
             return await self.async_step_advanced()
@@ -1197,31 +1262,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         models = []
         current_values = getattr(self, "step3_data", {})
 
-        # Moltbot doesn't have /v1/models endpoint - skip model selection
-        if server_type == SERVER_TYPE_MOLTBOT:
-            technical_prompt_suggestion = _get_prompt_text_default(
-                current_values,
-                prompt_key=CONF_TECHNICAL_PROMPT,
-                stored_prompt=None,
-                default_prompt=DEFAULT_TECHNICAL_PROMPT,
-            )
-            model_schema = vol.Schema(
-                {
-                    PROMPTS_SECTION_KEY: _build_prompt_section(
-                        include_system_prompt=False,
-                        technical_prompt_value=technical_prompt_suggestion,
-                    ),
-                }
-            )
-
-            return self.async_show_form(
-                step_id="model",
-                data_schema=model_schema,
-                errors=errors,
-                description_placeholders={
-                    "server_info": "Moltbot's model and system prompt are configured on the Moltbot server. Leave Technical Instructions blank to use the built-in default from the integration."
-                },
-            )
+        if server_type == SERVER_TYPE_OPENCLAW:
+            self.step3_data = {
+                CONF_MODEL_NAME: "main",
+                CONF_SYSTEM_PROMPT: "",
+                CONF_TECHNICAL_PROMPT: "",
+                CONF_SYSTEM_PROMPT_MODE: PROMPT_MODE_DEFAULT,
+                CONF_TECHNICAL_PROMPT_MODE: PROMPT_MODE_DEFAULT,
+            }
+            return await self.async_step_advanced()
         elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
@@ -1337,16 +1386,12 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             user_input = _apply_profile_tool_disables(user_input, built_in_specs)
 
-            # For Moltbot, set defaults for hidden fields
-            if server_type == SERVER_TYPE_MOLTBOT:
+            # For OpenClaw, set defaults for LLM-specific fields (not shown in UI)
+            if server_type == SERVER_TYPE_OPENCLAW:
                 user_input[CONF_TEMPERATURE] = DEFAULT_TEMPERATURE
                 user_input[CONF_MAX_TOKENS] = DEFAULT_MAX_TOKENS
                 user_input[CONF_MAX_HISTORY] = DEFAULT_MAX_HISTORY
                 user_input[CONF_MAX_ITERATIONS] = DEFAULT_MAX_ITERATIONS
-                user_input[CONF_RESPONSE_MODE] = "none"  # Moltbot manages this
-                user_input[CONF_FOLLOW_UP_PHRASES] = DEFAULT_FOLLOW_UP_PHRASES
-                user_input[CONF_END_WORDS] = DEFAULT_END_WORDS
-                # Timeout is shown for Moltbot, so use provided value or default to 60
                 if CONF_TIMEOUT not in user_input:
                     user_input[CONF_TIMEOUT] = 60
 
@@ -1483,7 +1528,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         SERVER_TYPE_GEMINI: "Gemini",
                         SERVER_TYPE_ANTHROPIC: "Claude",
                         SERVER_TYPE_OPENROUTER: "OpenRouter",
-                        SERVER_TYPE_MOLTBOT: "Moltbot",
+                        SERVER_TYPE_OPENCLAW: "OpenClaw",
                         SERVER_TYPE_VLLM: "vLLM",
                     }
                     server_display = server_display_map.get(server_type, "LM Studio")
@@ -1501,11 +1546,31 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         default_temp = 1.0 if server_type == SERVER_TYPE_GEMINI else DEFAULT_TEMPERATURE
 
         # Build schema based on server type
-        if server_type == SERVER_TYPE_MOLTBOT:
+        if server_type == SERVER_TYPE_OPENCLAW:
             advanced_schema_dict = {
                 CONVERSATION_SECTION_KEY: _build_conversation_section(
                     {
                         vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
+                        vol.Required(
+                            CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
+                        ): SelectSelector(
+                            SelectSelectorConfig(
+                                options=[
+                                    {"value": "none", "label": "None"},
+                                    {"value": "default", "label": "Smart"},
+                                    {"value": "always", "label": "Always"},
+                                ],
+                                mode=SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_FOLLOW_UP_PHRASES,
+                            default=get_follow_up_phrases(self.hass.config.language),
+                        ): TextSelector(TextSelectorConfig(multiline=True)),
+                        vol.Optional(
+                            CONF_END_WORDS,
+                            default=get_end_words(self.hass.config.language),
+                        ): TextSelector(TextSelectorConfig(multiline=True)),
                         vol.Optional(
                             CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
                         ): bool,
@@ -1519,6 +1584,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         vol.Required(
                             CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE
                         ): bool,
+                    }
+                ),
+                PROVIDER_SECTION_KEY: _build_provider_section(
+                    {
+                        vol.Optional(
+                            CONF_OPENCLAW_SESSION_KEY,
+                            default=DEFAULT_OPENCLAW_SESSION_KEY,
+                        ): str,
                     }
                 ),
             }
@@ -1595,11 +1668,12 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         advanced_schema = vol.Schema(advanced_schema_dict)
 
         # Set description based on server type
-        if server_type == SERVER_TYPE_MOLTBOT:
+        if server_type == SERVER_TYPE_OPENCLAW:
             description_placeholders = {
                 "advanced_info": (
-                    "Moltbot manages temperature, token limits, history, and tool "
-                    "iterations internally. Only essential settings are shown. The "
+                    "OpenClaw manages model selection, token limits, history, and "
+                    "tool execution on the gateway. Only conversation, timeout, "
+                    "session, and profile-level tool settings are shown here. The "
                     "Tools section still lets this profile disable specific shared "
                     "MCP tool families."
                 )
@@ -1693,7 +1767,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     SERVER_TYPE_GEMINI: "Gemini",
                     SERVER_TYPE_ANTHROPIC: "Claude",
                     SERVER_TYPE_OPENROUTER: "OpenRouter",
-                    SERVER_TYPE_MOLTBOT: "Moltbot",
+                    SERVER_TYPE_OPENCLAW: "OpenClaw",
                     SERVER_TYPE_VLLM: "vLLM",
                 }
                 server_display = server_display_map.get(server_type, "LM Studio")
@@ -1930,12 +2004,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     user_input[CONF_RESPONSE_MODE] = user_input[CONF_FOLLOW_UP_MODE]
                     del user_input[CONF_FOLLOW_UP_MODE]
 
-                # For Moltbot, ensure model name and empty system prompt are set
-                if server_type == SERVER_TYPE_MOLTBOT:
+                # For OpenClaw, ensure model name and empty system prompt are set
+                server_type = self.config_entry.data.get(
+                    CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE
+                )
+                if server_type == SERVER_TYPE_OPENCLAW:
                     if CONF_MODEL_NAME not in user_input:
                         user_input[CONF_MODEL_NAME] = "main"
-                    user_input[CONF_SYSTEM_PROMPT] = ""  # Moltbot manages its own
+                    user_input[CONF_SYSTEM_PROMPT] = ""
+                    user_input[CONF_TECHNICAL_PROMPT] = ""
                     user_input[CONF_SYSTEM_PROMPT_MODE] = PROMPT_MODE_DEFAULT
+                    user_input[CONF_TECHNICAL_PROMPT_MODE] = PROMPT_MODE_DEFAULT
 
                 # Store profile settings and proceed to MCP server settings
                 self.profile_options = user_input
@@ -1958,8 +2037,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             options.get(CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)),
         )
 
-        # Moltbot doesn't have /v1/models - skip model fetching
-        if server_type == SERVER_TYPE_MOLTBOT:
+        # OpenClaw doesn't have /v1/models - skip model fetching
+        if server_type == SERVER_TYPE_OPENCLAW:
             # Don't fetch models, don't show model field
             pass
         elif server_type in [
@@ -2085,11 +2164,66 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         )
 
         connection_schema_items: dict[Any, Any] = {}
-        if server_type in [
+        if server_type == SERVER_TYPE_OPENCLAW:
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_HOST,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_HOST,
+                        options.get(
+                            CONF_OPENCLAW_HOST,
+                            data.get(CONF_OPENCLAW_HOST, DEFAULT_OPENCLAW_HOST),
+                        ),
+                    ),
+                )
+            ] = str
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_PORT,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_PORT,
+                        options.get(
+                            CONF_OPENCLAW_PORT,
+                            data.get(CONF_OPENCLAW_PORT, DEFAULT_OPENCLAW_PORT),
+                        ),
+                    ),
+                )
+            ] = vol.Coerce(int)
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_TOKEN,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_TOKEN,
+                        options.get(
+                            CONF_OPENCLAW_TOKEN,
+                            data.get(CONF_OPENCLAW_TOKEN, ""),
+                        ),
+                    ),
+                )
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_USE_SSL,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_USE_SSL,
+                        options.get(
+                            CONF_OPENCLAW_USE_SSL,
+                            data.get(
+                                CONF_OPENCLAW_USE_SSL,
+                                DEFAULT_OPENCLAW_USE_SSL,
+                            ),
+                        ),
+                    ),
+                )
+            ] = BooleanSelector()
+        elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
             SERVER_TYPE_OLLAMA,
-            SERVER_TYPE_MOLTBOT,
             SERVER_TYPE_VLLM,
         ]:
             server_url = options.get(
@@ -2103,20 +2237,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ),
                 )
             ] = str
-
-            # Moltbot also needs bearer token (required)
-            if server_type == SERVER_TYPE_MOLTBOT:
-                api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-                connection_schema_items[
-                    vol.Required(
-                        CONF_API_KEY,
-                        default=_get_form_value(
-                            current_values, CONF_API_KEY, api_key
-                        ),
-                    )
-                ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
         elif server_type == SERVER_TYPE_OPENAI:
-            # OpenAI - hybrid like Moltbot (URL + API key)
+            # OpenAI - hybrid (URL + API key)
             server_url = options.get(
                 CONF_LMSTUDIO_URL,
                 data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
@@ -2151,18 +2273,19 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             connection_schema_items
         )
 
-        if server_type != SERVER_TYPE_MOLTBOT:
+        if server_type != SERVER_TYPE_OPENCLAW:
             schema_dict[MODEL_SECTION_KEY] = _build_model_section(
                 current_model, model_selector
             )
 
-        schema_dict[PROMPTS_SECTION_KEY] = _build_prompt_section(
-            include_system_prompt=server_type != SERVER_TYPE_MOLTBOT,
-            system_prompt_value=system_prompt_suggestion,
-            technical_prompt_value=technical_prompt_suggestion,
-        )
+        if server_type != SERVER_TYPE_OPENCLAW:
+            schema_dict[PROMPTS_SECTION_KEY] = _build_prompt_section(
+                include_system_prompt=True,
+                system_prompt_value=system_prompt_suggestion,
+                technical_prompt_value=technical_prompt_suggestion,
+            )
 
-        if server_type == SERVER_TYPE_MOLTBOT:
+        if server_type == SERVER_TYPE_OPENCLAW:
             schema_dict[CONVERSATION_SECTION_KEY] = _build_conversation_section(
                 {
                     vol.Required(
@@ -2176,6 +2299,31 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                             ),
                         ),
                     ): bool,
+                    vol.Required(
+                        CONF_RESPONSE_MODE, default=response_mode_value
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": "none", "label": "None"},
+                                {"value": "default", "label": "Smart"},
+                                {"value": "always", "label": "Always"},
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_FOLLOW_UP_PHRASES,
+                        default=options.get(
+                            CONF_FOLLOW_UP_PHRASES,
+                            data.get(CONF_FOLLOW_UP_PHRASES, DEFAULT_FOLLOW_UP_PHRASES),
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_END_WORDS,
+                        default=options.get(
+                            CONF_END_WORDS, data.get(CONF_END_WORDS, DEFAULT_END_WORDS)
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
                     vol.Optional(
                         CONF_CLEAN_RESPONSES,
                         default=_get_form_value(
@@ -2193,6 +2341,20 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 }
             )
             advanced_schema_items: dict[Any, Any] = {
+                vol.Optional(
+                    CONF_OPENCLAW_SESSION_KEY,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_SESSION_KEY,
+                        options.get(
+                            CONF_OPENCLAW_SESSION_KEY,
+                            data.get(
+                                CONF_OPENCLAW_SESSION_KEY,
+                                DEFAULT_OPENCLAW_SESSION_KEY,
+                            ),
+                        ),
+                    ),
+                ): str,
                 vol.Required(
                     CONF_TIMEOUT,
                     default=_get_form_value(
@@ -2403,15 +2565,14 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         options_schema = vol.Schema(schema_dict)
 
         # Set description based on server type
-        if server_type == SERVER_TYPE_MOLTBOT:
+        if server_type == SERVER_TYPE_OPENCLAW:
             description_placeholders = {
                 "server_info": (
-                    "Moltbot's model and system prompt are configured on the Moltbot "
-                    "server. The technical instructions field is prefilled with the "
-                    "current effective prompt so you can review, copy, or edit it. "
-                    "If you leave it unchanged, the integration keeps using the built-in "
-                    "version from code. The Tools section can still disable specific "
-                    "shared MCP tool families for this profile."
+                    "OpenClaw manages the model and system prompt on the gateway. "
+                    "Use the connection, conversation, and advanced sections here "
+                    "to control how this Home Assistant profile connects and follows "
+                    "up. The Tools section can still disable specific shared MCP "
+                    "tool families for this profile."
                 )
             }
         else:
@@ -2490,7 +2651,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         SERVER_TYPE_GEMINI: "Gemini",
                         SERVER_TYPE_ANTHROPIC: "Claude",
                         SERVER_TYPE_OPENROUTER: "OpenRouter",
-                        SERVER_TYPE_MOLTBOT: "Moltbot",
+                        SERVER_TYPE_OPENCLAW: "OpenClaw",
                         SERVER_TYPE_VLLM: "vLLM",
                     }
                     server_display = server_display_map.get(server_type, "LM Studio")

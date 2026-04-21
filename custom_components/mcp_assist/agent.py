@@ -25,7 +25,6 @@ from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
     llm,
-    chat_session,
 )
 from homeassistant.util import dt as dt_util
 
@@ -107,7 +106,7 @@ from .const import (
     SERVER_TYPE_GEMINI,
     SERVER_TYPE_ANTHROPIC,
     SERVER_TYPE_OPENROUTER,
-    SERVER_TYPE_MOLTBOT,
+    SERVER_TYPE_OPENCLAW,
     SERVER_TYPE_VLLM,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
@@ -117,6 +116,8 @@ from .const import (
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_SHARED_SETTINGS,
     get_optional_tool_family,
+    CONF_OPENCLAW_SESSION_KEY,
+    DEFAULT_OPENCLAW_SESSION_KEY,
 )
 from .conversation_history import ConversationHistory
 
@@ -158,7 +159,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             SERVER_TYPE_GEMINI: "Gemini",
             SERVER_TYPE_ANTHROPIC: "Claude",
             SERVER_TYPE_OPENROUTER: "OpenRouter",
-            SERVER_TYPE_MOLTBOT: "Moltbot",
+            SERVER_TYPE_OPENCLAW: "OpenClaw",
             SERVER_TYPE_VLLM: "vLLM",
         }
         server_display_name = server_display_names.get(
@@ -368,7 +369,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         ]:
             return self.base_url  # Static cloud URLs
         else:
-            # LM Studio, Ollama, llamacpp, Moltbot, vLLM - read dynamically
+            # LM Studio, Ollama, llamacpp, OpenClaw, vLLM - read dynamically
             return self.entry.options.get(
                 CONF_LMSTUDIO_URL, self.entry.data.get(CONF_LMSTUDIO_URL, "")
             ).rstrip("/")
@@ -383,14 +384,9 @@ class MCPAssistConversationEntity(ConversationEntity):
     @property
     def model_name(self) -> str:
         """Get model name (dynamic)."""
-        base_model = self.entry.options.get(
+        return self.entry.options.get(
             CONF_MODEL_NAME, self.entry.data.get(CONF_MODEL_NAME, "")
         )
-        # Format for provider-specific requirements
-        if self.server_type == SERVER_TYPE_MOLTBOT:
-            if not base_model.startswith("moltbot:"):
-                return f"moltbot:{base_model}"
-        return base_model
 
     @property
     def mcp_port(self) -> int:
@@ -983,7 +979,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             SERVER_TYPE_GEMINI: "Gemini",
             SERVER_TYPE_ANTHROPIC: "Claude",
             SERVER_TYPE_OPENROUTER: "OpenRouter",
-            SERVER_TYPE_MOLTBOT: "Moltbot",
+            SERVER_TYPE_OPENCLAW: "OpenClaw",
             SERVER_TYPE_VLLM: "vLLM",
         }.get(self.server_type, "LLM")
         return f"Powered by {server_name} with MCP entity discovery"
@@ -1035,6 +1031,14 @@ class MCPAssistConversationEntity(ConversationEntity):
             CONF_TIMEOUT, self.entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
         )
 
+    @property
+    def session_key(self) -> str:
+        """Get OpenClaw session key (dynamic)."""
+        return self.entry.options.get(
+            CONF_OPENCLAW_SESSION_KEY,
+            self.entry.data.get(CONF_OPENCLAW_SESSION_KEY, DEFAULT_OPENCLAW_SESSION_KEY),
+        )
+
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant."""
         await super().async_added_to_hass()
@@ -1067,7 +1071,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             SERVER_TYPE_GEMINI: "Gemini",
             SERVER_TYPE_ANTHROPIC: "Claude",
             SERVER_TYPE_OPENROUTER: "OpenRouter",
-            SERVER_TYPE_MOLTBOT: "Moltbot",
+            SERVER_TYPE_OPENCLAW: "OpenClaw",
             SERVER_TYPE_VLLM: "vLLM",
         }.get(self.server_type, "the LLM server")
 
@@ -1146,7 +1150,17 @@ class MCPAssistConversationEntity(ConversationEntity):
         ):
             return f"The model '{self.model_name}' isn't loaded in Ollama. Run 'ollama pull {self.model_name}' to download it first."
 
-        # Category E: MCP Errors
+        # Category E: OpenClaw Gateway Errors
+        if "not_paired" in error_str or "device pairing" in error_str or "not paired" in error_str:
+            return "This device needs to be approved on your OpenClaw server. Run 'openclaw devices approve' or use the OpenClaw Control UI."
+
+        if "openclaw" in error_str and "timeout" in error_str:
+            return "The OpenClaw gateway took too long to respond. The agent may be busy processing a complex request. Try again or increase the timeout in settings."
+
+        if "websocket" in error_str or "connection closed" in error_str:
+            return "Lost connection to the OpenClaw gateway. Check that the gateway is running and accessible."
+
+        # Category F: MCP Errors
         if (
             f"localhost:{self.mcp_port}" in error_str
             or f"127.0.0.1:{self.mcp_port}" in error_str
@@ -1226,7 +1240,7 @@ class MCPAssistConversationEntity(ConversationEntity):
     def _normalize_tool_call_arguments(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Normalize tool_call function.arguments for internal/provider use."""
+        """Normalize tool_call function.arguments for internal and provider use."""
         normalized = []
         for tool_call in tool_calls:
             normalized_call = dict(tool_call)
@@ -1279,34 +1293,38 @@ class MCPAssistConversationEntity(ConversationEntity):
         except Exception as e:
             _LOGGER.error(f"Error recording tool result to ChatLog: {e}")
 
-    async def async_process(self, user_input: ConversationInput) -> ConversationResult:
-        """Process user input and return response."""
+    async def _async_handle_message(
+        self, user_input: ConversationInput, chat_log_instance: chat_log.ChatLog
+    ) -> ConversationResult:
+        """Process user input and return response.
+
+        Called by the base ConversationEntity.async_process which manages
+        ChatSession and ChatLog lifecycle automatically.
+        """
         _LOGGER.info("🎤 Voice request started - Processing: %s", user_input.text)
 
-        # Create ChatLog for debug view
-        with chat_session.async_get_chat_session(
-            self.hass, user_input.conversation_id
-        ) as session:
-            with chat_log.async_get_chat_log(
-                self.hass, session, user_input  # Automatically adds user content
-            ) as log:
-                # Store ChatLog for tool execution methods to access
-                self._current_chat_log = log
+        # Store ChatLog for tool execution methods to access
+        self._current_chat_log = chat_log_instance
+        conversation_id = chat_log_instance.conversation_id
 
-                try:
-                    return await self._async_process_with_chatlog(
-                        user_input, session.conversation_id
-                    )
-                finally:
-                    # Clean up
-                    self._current_chat_log = None
+        try:
+            return await self._async_handle_message_inner(
+                user_input, conversation_id
+            )
+        finally:
+            # Clean up
+            self._current_chat_log = None
 
-    async def _async_process_with_chatlog(
+    async def _async_handle_message_inner(
         self, user_input: ConversationInput, conversation_id: str
     ) -> ConversationResult:
         """Process user input with ChatLog tracking."""
         try:
             _LOGGER.debug("Conversation ID: %s", conversation_id)
+
+            # OpenClaw: bypass entire LLM/MCP pipeline — server handles everything
+            if self.server_type == SERVER_TYPE_OPENCLAW:
+                return await self._handle_openclaw_message(user_input, conversation_id)
 
             # Get conversation history
             history = self.history.get_history(conversation_id)
@@ -1323,7 +1341,6 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Build conversation messages
             messages = self._build_messages(system_prompt, user_input.text, history)
 
-            # Store conversation_id for Moltbot session management
             self._current_conversation_id = conversation_id
 
             if self.debug_mode:
@@ -1345,94 +1362,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                 len(response_text),
             )
 
-            # Strip thinking tags from reasoning models (e.g., Qwen3, DeepSeek R1, GPT-OSS)
-            response_text, thinking_content = self._strip_thinking_tags(response_text)
-            if thinking_content and self.debug_mode:
-                _LOGGER.info(
-                    f"🧠 Thinking content (stripped): {thinking_content[:500]}..."
-                )
-
-            if self.debug_mode:
-                # Use repr() to show newlines and hidden characters
-                _LOGGER.info(f"💬 Full response (repr): {repr(response_text)}")
-            else:
-                # For non-debug, just show first 500 chars
-                preview = (
-                    response_text[:500] if len(response_text) > 500 else response_text
-                )
-                _LOGGER.info(f"💬 Full response preview: {preview}")
-
-            # Parse response and execute any Home Assistant actions
-            actions_taken = await self._execute_actions(response_text, user_input)
-
-            # Add final assistant response to ChatLog
-            if self._current_chat_log:
-                final_content = chat_log.AssistantContent(
-                    agent_id=self.entity_id, content=response_text
-                )
-                self._current_chat_log.async_add_assistant_content_without_tools(
-                    final_content
-                )
-
-            # Store in conversation history
-            self.history.add_turn(
-                conversation_id, user_input.text, response_text, actions=actions_taken
-            )
-
-            # Create intent response
-            intent_response = intent.IntentResponse(language=user_input.language)
-            # Clean response for TTS (character normalization always, aggressive cleaning if enabled)
-            cleaned_text = self._clean_text_for_tts(response_text)
-            intent_response.async_set_speech(cleaned_text)
-
-            # Note: Card data removed as it was causing JSON serialization errors
-            # Actions are already executed via MCP tools, so card isn't needed
-
-            # Check if user wants to end (stopwords+1 algorithm)
-            user_wants_to_end = False
-            if self.follow_up_mode in ["default", "always"]:
-                user_wants_to_end = self._detect_user_ending_intent(user_input.text)
-                if user_wants_to_end and self.debug_mode:
-                    _LOGGER.info("🎯 User ending intent detected (stopwords+1)")
-
-            # Determine follow-up mode
-            if user_wants_to_end:
-                # User explicitly wants to end
-                continue_conversation = False
-            elif self.follow_up_mode == "always":
-                # Always continue regardless of tool
-                continue_conversation = True
-            elif self.follow_up_mode == "none":
-                # Never continue regardless of tool
-                continue_conversation = False
-            else:  # "default" - smart mode
-                # Use the LLM's indication if it called the tool
-                if hasattr(self, "_expecting_response"):
-                    continue_conversation = self._expecting_response
-                    # Clear for next conversation
-                    delattr(self, "_expecting_response")
-                    if self.debug_mode:
-                        _LOGGER.info("🎯 Using LLM's set_conversation_state indication")
-                else:
-                    # LLM didn't indicate, use pattern detection as fallback
-                    continue_conversation = self._detect_follow_up_patterns(
-                        response_text
-                    )
-                    if self.debug_mode:
-                        if continue_conversation:
-                            _LOGGER.info("🎯 Pattern detection triggered continuation")
-                        else:
-                            _LOGGER.info("🎯 No patterns detected, closing conversation")
-
-            if self.debug_mode:
-                _LOGGER.info(
-                    f"🎯 Follow-up mode: {self.follow_up_mode}, Continue: {continue_conversation}"
-                )
-
-            return ConversationResult(
-                response=intent_response,
-                conversation_id=conversation_id,
-                continue_conversation=continue_conversation,
+            return await self._build_response_result(
+                response_text, user_input, conversation_id
             )
 
         except Exception as err:
@@ -1447,8 +1378,114 @@ class MCPAssistConversationEntity(ConversationEntity):
             return ConversationResult(
                 response=intent_response,
                 conversation_id=user_input.conversation_id,
-                continue_conversation=False,  # Don't continue on errors
+                continue_conversation=False,
             )
+
+    async def _handle_openclaw_message(
+        self, user_input: ConversationInput, conversation_id: str
+    ) -> ConversationResult:
+        """Handle a message via the OpenClaw Gateway WebSocket."""
+        client = self.hass.data.get(DOMAIN, {}).get(
+            self.entry.entry_id, {}
+        ).get("openclaw_client")
+
+        if not client:
+            raise RuntimeError("OpenClaw client not available — check integration setup")
+
+        _LOGGER.info(f"📡 Sending to OpenClaw (session: {self.session_key})...")
+        response_text = await client.send_message(user_input.text, self.session_key)
+        _LOGGER.info(
+            f"✅ OpenClaw response received, length: %d", len(response_text)
+        )
+
+        return await self._build_response_result(
+            response_text, user_input, conversation_id
+        )
+
+    async def _build_response_result(
+        self,
+        response_text: str,
+        user_input: ConversationInput,
+        conversation_id: str,
+    ) -> ConversationResult:
+        """Shared post-response pipeline: clean, log, detect follow-up, build result."""
+        # Strip thinking tags from reasoning models
+        response_text, thinking_content = self._strip_thinking_tags(response_text)
+        if thinking_content and self.debug_mode:
+            _LOGGER.info(
+                f"🧠 Thinking content (stripped): {thinking_content[:500]}..."
+            )
+
+        if self.debug_mode:
+            _LOGGER.info(f"💬 Full response (repr): {repr(response_text)}")
+        else:
+            preview = (
+                response_text[:500] if len(response_text) > 500 else response_text
+            )
+            _LOGGER.info(f"💬 Full response preview: {preview}")
+
+        # Parse response and execute any Home Assistant actions
+        actions_taken = await self._execute_actions(response_text, user_input)
+
+        # Add final assistant response to ChatLog
+        if self._current_chat_log:
+            final_content = chat_log.AssistantContent(
+                agent_id=self.entity_id, content=response_text
+            )
+            self._current_chat_log.async_add_assistant_content_without_tools(
+                final_content
+            )
+
+        # Store in conversation history
+        self.history.add_turn(
+            conversation_id, user_input.text, response_text, actions=actions_taken
+        )
+
+        # Create intent response
+        intent_response = intent.IntentResponse(language=user_input.language)
+        cleaned_text = self._clean_text_for_tts(response_text)
+        intent_response.async_set_speech(cleaned_text)
+
+        # Check if user wants to end (stopwords+1 algorithm)
+        user_wants_to_end = False
+        if self.follow_up_mode in ["default", "always"]:
+            user_wants_to_end = self._detect_user_ending_intent(user_input.text)
+            if user_wants_to_end and self.debug_mode:
+                _LOGGER.info("🎯 User ending intent detected (stopwords+1)")
+
+        # Determine follow-up mode
+        if user_wants_to_end:
+            continue_conversation = False
+        elif self.follow_up_mode == "always":
+            continue_conversation = True
+        elif self.follow_up_mode == "none":
+            continue_conversation = False
+        else:  # "default" - smart mode
+            if hasattr(self, "_expecting_response"):
+                continue_conversation = self._expecting_response
+                delattr(self, "_expecting_response")
+                if self.debug_mode:
+                    _LOGGER.info("🎯 Using LLM's set_conversation_state indication")
+            else:
+                continue_conversation = self._detect_follow_up_patterns(
+                    response_text
+                )
+                if self.debug_mode:
+                    if continue_conversation:
+                        _LOGGER.info("🎯 Pattern detection triggered continuation")
+                    else:
+                        _LOGGER.info("🎯 No patterns detected, closing conversation")
+
+        if self.debug_mode:
+            _LOGGER.info(
+                f"🎯 Follow-up mode: {self.follow_up_mode}, Continue: {continue_conversation}"
+            )
+
+        return ConversationResult(
+            response=intent_response,
+            conversation_id=conversation_id,
+            continue_conversation=continue_conversation,
+        )
 
     def _detect_user_ending_intent(self, text: str) -> bool:
         """Detect if user wants to end conversation using stopwords+1 algorithm.
@@ -1678,7 +1715,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Build the compact system prompt used for model calls."""
         try:
             now = dt_util.now()
-            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_MOLTBOT:
+            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_OPENCLAW:
                 system_prompt = ""
             else:
                 system_prompt = self._resolve_prompt_setting(
@@ -1812,7 +1849,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Build system prompt (legacy sync version - note: cannot include index without async)."""
         try:
             now = dt_util.now()
-            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_MOLTBOT:
+            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_OPENCLAW:
                 system_prompt = ""
             else:
                 system_prompt = self._resolve_prompt_setting(
@@ -1887,9 +1924,8 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Build message list for LM Studio."""
         messages = [{"role": "system", "content": system_prompt}]
 
-        # For Moltbot, skip history - server manages context via user field
-        if self.server_type != SERVER_TYPE_MOLTBOT:
-            # Add conversation history using the configured limit
+        # OpenClaw manages its own session history on the gateway.
+        if self.server_type != SERVER_TYPE_OPENCLAW:
             history_limit = max(0, self.max_history)
             if history_limit > 0:
                 for turn in history[-history_limit:]:
@@ -2170,29 +2206,35 @@ class MCPAssistConversationEntity(ConversationEntity):
     def _strip_thinking_tags(self, text: str) -> tuple[str, str]:
         """Strip thinking/reasoning tags from model output.
 
-        Reasoning models like Qwen3, DeepSeek R1, and GPT-OSS output their
-        chain-of-thought reasoning in <think>...</think> tags. This content
-        should not be shown to users or spoken via TTS.
+        Reasoning models output chain-of-thought in various tag formats:
+        - <think>...</think> (Qwen3, DeepSeek R1, GPT-OSS)
+        - <|thought|>...<|/thought|> (some fine-tuned models)
+
+        This content should not be shown to users or spoken via TTS.
 
         Returns:
             Tuple of (cleaned_text, thinking_content)
             - cleaned_text: Response with thinking tags removed
             - thinking_content: The extracted thinking content (for debug logs)
         """
-        import re
+        # Match all known thinking tag formats (case insensitive, multiline)
+        patterns = [
+            r"<think>(.*?)</think>",
+            r"<\|thought\|>(.*?)<\|/thought\|>",
+        ]
 
-        # Match <think>...</think> tags (case insensitive, multiline)
-        pattern = r"<think>(.*?)</think>"
-        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+        all_matches = []
+        cleaned_text = text
 
-        if not matches:
+        for pattern in patterns:
+            matches = re.findall(pattern, cleaned_text, re.DOTALL | re.IGNORECASE)
+            all_matches.extend(matches)
+            cleaned_text = re.sub(pattern, "", cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+
+        if not all_matches:
             return text, ""
 
-        # Extract all thinking content
-        thinking_content = "\n".join(matches)
-
-        # Remove all <think>...</think> blocks from the text
-        cleaned_text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE)
+        thinking_content = "\n".join(all_matches)
 
         # Clean up extra whitespace that might be left
         cleaned_text = re.sub(r"\n\s*\n", "\n\n", cleaned_text)  # Multiple newlines
@@ -2202,8 +2244,6 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     def _clean_text_for_tts(self, text: str) -> str:
         """Clean text for TTS to handle special characters properly."""
-        import re
-
         # ALWAYS run character normalization (existing fixes)
         # Replace ALL apostrophe variants with standard apostrophe
         text = text.replace(
@@ -2451,9 +2491,6 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "HTTP-Referer": "https://github.com/mike-nott/mcp-assist",
                 "X-Title": "MCP Assist for Home Assistant",
             }
-        elif self.server_type == SERVER_TYPE_MOLTBOT:
-            # Moltbot uses Bearer token
-            return {"Authorization": f"Bearer {self.api_key}"}
         else:
             # Local servers (LM Studio, Ollama, llamacpp, vLLM) don't need auth
             return {}
@@ -2464,7 +2501,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         tools: Optional[List[Dict[str, Any]]] = None,
         stream: bool = True,
     ) -> Dict[str, Any]:
-        """Build OpenAI-compatible payload for LM Studio, OpenAI, Gemini, Anthropic, Moltbot, vLLM."""
+        """Build OpenAI-compatible payload for LM Studio, OpenAI, Gemini, Anthropic, OpenClaw, vLLM."""
         payload = {"model": self.model_name, "messages": messages, "stream": stream}
 
         # Temperature (skip for GPT-5+/o1 models)
@@ -2484,12 +2521,6 @@ class MCPAssistConversationEntity(ConversationEntity):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-
-        # Moltbot: Add session management via user field
-        if self.server_type == SERVER_TYPE_MOLTBOT and hasattr(
-            self, "_current_conversation_id"
-        ):
-            payload["user"] = self._current_conversation_id
 
         return payload
 

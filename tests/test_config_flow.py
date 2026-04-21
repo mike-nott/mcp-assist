@@ -80,7 +80,7 @@ from custom_components.mcp_assist.const import (
     PROMPT_MODE_CUSTOM,
     PROMPT_MODE_DEFAULT,
     SERVER_TYPE_OLLAMA,
-    SERVER_TYPE_MOLTBOT,
+    SERVER_TYPE_OPENCLAW,
     TOOL_FAMILY_PROFILE_SETTINGS,
     TOOL_FAMILY_SHARED_SETTINGS,
 )
@@ -185,8 +185,8 @@ def test_normalize_prompt_inputs_marks_nonblank_prompts_as_custom() -> None:
     assert normalized[CONF_TECHNICAL_PROMPT_MODE] == PROMPT_MODE_CUSTOM
 
 
-def test_normalize_prompt_inputs_for_moltbot_forces_default_system_prompt() -> None:
-    """Moltbot should always ignore custom system prompts."""
+def test_normalize_prompt_inputs_for_openclaw_forces_default_system_prompt() -> None:
+    """OpenClaw should always ignore custom system prompts."""
     normalized = _normalize_prompt_inputs(
         {
             CONF_SYSTEM_PROMPT_MODE: PROMPT_MODE_CUSTOM,
@@ -194,7 +194,7 @@ def test_normalize_prompt_inputs_for_moltbot_forces_default_system_prompt() -> N
             CONF_TECHNICAL_PROMPT_MODE: PROMPT_MODE_CUSTOM,
             CONF_TECHNICAL_PROMPT: "keep this one",
         },
-        server_type=SERVER_TYPE_MOLTBOT,
+        server_type=SERVER_TYPE_OPENCLAW,
         default_system_prompt="builtin system",
     )
 

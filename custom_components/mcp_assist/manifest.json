@@ -8,6 +8,6 @@
   "integration_type": "service",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/mike-nott/mcp-assist/issues",
-  "requirements": ["aiohttp>=3.8.0", "pyyaml>=6.0", "ddgs"],
-  "version": "0.15.4"
+  "requirements": ["aiohttp>=3.8.0", "pyyaml>=6.0", "duckduckgo-search>=6.0.0", "websockets>=12.0", "cryptography>=41.0.0"],
+  "version": "0.16.2"
 }

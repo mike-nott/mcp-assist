@@ -19,13 +19,25 @@
         "data": {
           "lmstudio_url": "Server URL",
           "api_key": "API Key",
-          "mcp_port": "MCP Server Port"
+          "mcp_port": "MCP Server Port",
+          "openclaw_host": "Gateway Host",
+          "openclaw_port": "Gateway Port",
+          "openclaw_token": "Gateway Token",
+          "openclaw_use_ssl": "Use SSL/TLS"
         },
         "data_description": {
           "lmstudio_url": "The base URL for the local or OpenAI-compatible server used by this profile.",
           "api_key": "The API key or bearer token required by this provider.",
-          "mcp_port": "The local port used by the shared MCP server."
+          "mcp_port": "The local port used by the shared MCP server.",
+          "openclaw_host": "Host name or IP address of the OpenClaw gateway.",
+          "openclaw_port": "Port used by the OpenClaw gateway WebSocket server.",
+          "openclaw_token": "Bearer token used to authenticate with the OpenClaw gateway.",
+          "openclaw_use_ssl": "Use a secure WebSocket connection when talking to the OpenClaw gateway."
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw Device Pairing",
+        "description": "Your device needs to be approved on the OpenClaw server.\n\nApprove it by running `openclaw devices approve` or using the OpenClaw Control UI, then click Submit.\n\nDevice ID: {device_id}"
       },
       "model": {
         "title": "Model & Prompts",
@@ -83,7 +95,8 @@
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
-          "clean_responses": "Clean Responses for Voice Output"
+          "clean_responses": "Clean Responses for Voice Output",
+          "openclaw_session_key": "Session Key"
         },
         "sections": {
           "conversation": {
@@ -129,11 +142,13 @@
             "description": "Provider-specific settings shown only when they apply.",
             "data": {
               "ollama_keep_alive": "Ollama Keep Alive",
-              "ollama_num_ctx": "Ollama Context Window"
+              "ollama_num_ctx": "Ollama Context Window",
+              "openclaw_session_key": "Session Key"
             },
             "data_description": {
               "ollama_keep_alive": "How long Ollama should keep the selected model loaded in memory.",
-              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default."
+              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default.",
+              "openclaw_session_key": "Name of the OpenClaw session to send messages to."
             }
           },
           "tools": {
@@ -273,7 +288,9 @@
       "invalid_json": "Invalid JSON format. Please check your MCP servers configuration.",
       "invalid_api_key": "Invalid API key. Please check and try again.",
       "auth_failed": "Authentication failed. Please verify your API key.",
-      "unknown": "An unknown error occurred."
+      "unknown": "An unknown error occurred.",
+      "openclaw_not_paired": "Device not yet approved on the OpenClaw server. Please approve it and try again.",
+      "openclaw_connection_failed": "Could not connect to the OpenClaw gateway. Check the host, port, and token."
     },
     "abort": {
       "already_configured": "A profile with this name already exists. Please choose a different name."
@@ -305,7 +322,12 @@
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
-          "clean_responses": "Clean Responses for Voice Output"
+          "clean_responses": "Clean Responses for Voice Output",
+          "openclaw_host": "Gateway Host",
+          "openclaw_port": "Gateway Port",
+          "openclaw_token": "Gateway Token",
+          "openclaw_use_ssl": "Use SSL/TLS",
+          "openclaw_session_key": "Session Key"
         },
         "data_description": {
           "model_name": "The LLM model this profile should use.",
@@ -328,11 +350,19 @@
             "description": "How this profile connects to its model provider.",
             "data": {
               "lmstudio_url": "Server URL",
-              "api_key": "API Key"
+              "api_key": "API Key",
+              "openclaw_host": "Gateway Host",
+              "openclaw_port": "Gateway Port",
+              "openclaw_token": "Gateway Token",
+              "openclaw_use_ssl": "Use SSL/TLS"
             },
             "data_description": {
               "lmstudio_url": "The base URL for the local or OpenAI-compatible server used by this profile.",
-              "api_key": "The API key or bearer token required by this provider."
+              "api_key": "The API key or bearer token required by this provider.",
+              "openclaw_host": "Host name or IP address of the OpenClaw gateway.",
+              "openclaw_port": "Port used by the OpenClaw gateway WebSocket server.",
+              "openclaw_token": "Bearer token used to authenticate with the OpenClaw gateway.",
+              "openclaw_use_ssl": "Use a secure WebSocket connection when talking to the OpenClaw gateway."
             }
           },
           "model_fields": {
@@ -386,7 +416,8 @@
               "timeout": "Response Time Out",
               "debug_mode": "Debug Mode",
               "ollama_keep_alive": "Ollama Keep Alive",
-              "ollama_num_ctx": "Ollama Context Window"
+              "ollama_num_ctx": "Ollama Context Window",
+              "openclaw_session_key": "Session Key"
             },
             "data_description": {
               "temperature": "Controls response randomness. Lower values are more deterministic.",
@@ -396,7 +427,8 @@
               "timeout": "How long to wait for a provider response before timing out.",
               "debug_mode": "Enable more detailed logging for troubleshooting.",
               "ollama_keep_alive": "How long Ollama should keep the selected model loaded in memory.",
-              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default."
+              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default.",
+              "openclaw_session_key": "Name of the OpenClaw session to send messages to."
             }
           },
           "tools": {
