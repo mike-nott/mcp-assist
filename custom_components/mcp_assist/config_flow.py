@@ -1987,6 +1987,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 MODEL_SECTION_KEY,
                 PROMPTS_SECTION_KEY,
                 CONVERSATION_SECTION_KEY,
+                PROVIDER_SECTION_KEY,
                 ADVANCED_SECTION_KEY,
                 TOOLS_SECTION_KEY,
             )
@@ -2285,6 +2286,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 technical_prompt_value=technical_prompt_suggestion,
             )
 
+        provider_schema_items: dict[Any, Any] = {}
+
         if server_type == SERVER_TYPE_OPENCLAW:
             schema_dict[CONVERSATION_SECTION_KEY] = _build_conversation_section(
                 {
@@ -2340,7 +2343,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ): bool,
                 }
             )
-            advanced_schema_items: dict[Any, Any] = {
+            provider_schema_items = {
                 vol.Optional(
                     CONF_OPENCLAW_SESSION_KEY,
                     default=_get_form_value(
@@ -2355,12 +2358,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): str,
+            }
+            advanced_schema_items: dict[Any, Any] = {
                 vol.Required(
                     CONF_TIMEOUT,
                     default=_get_form_value(
                         current_values,
                         CONF_TIMEOUT,
-                        options.get(CONF_TIMEOUT, data.get(CONF_TIMEOUT, 60)),
+                        options.get(
+                            CONF_TIMEOUT,
+                            data.get(CONF_TIMEOUT, 60),
+                        ),
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
                 vol.Required(
@@ -2519,39 +2527,41 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 ): bool,
             }
             if server_type == SERVER_TYPE_OLLAMA:
-                advanced_schema_items.update(
-                    {
-                        vol.Optional(
+                provider_schema_items = {
+                    vol.Optional(
+                        CONF_OLLAMA_NUM_CTX,
+                        default=_get_form_value(
+                            current_values,
                             CONF_OLLAMA_NUM_CTX,
-                            default=_get_form_value(
-                                current_values,
+                            options.get(
                                 CONF_OLLAMA_NUM_CTX,
-                                options.get(
+                                data.get(
                                     CONF_OLLAMA_NUM_CTX,
-                                    data.get(
-                                        CONF_OLLAMA_NUM_CTX,
-                                        DEFAULT_OLLAMA_NUM_CTX,
-                                    ),
+                                    DEFAULT_OLLAMA_NUM_CTX,
                                 ),
                             ),
-                        ): vol.Coerce(int),
-                        vol.Optional(
+                        ),
+                    ): vol.Coerce(int),
+                    vol.Optional(
+                        CONF_OLLAMA_KEEP_ALIVE,
+                        default=_get_form_value(
+                            current_values,
                             CONF_OLLAMA_KEEP_ALIVE,
-                            default=_get_form_value(
-                                current_values,
+                            options.get(
                                 CONF_OLLAMA_KEEP_ALIVE,
-                                options.get(
+                                data.get(
                                     CONF_OLLAMA_KEEP_ALIVE,
-                                    data.get(
-                                        CONF_OLLAMA_KEEP_ALIVE,
-                                        DEFAULT_OLLAMA_KEEP_ALIVE,
-                                    ),
+                                    DEFAULT_OLLAMA_KEEP_ALIVE,
                                 ),
                             ),
-                        ): str,
-                    }
-                )
+                        ),
+                    ): str,
+                }
 
+        if provider_schema_items:
+            schema_dict[PROVIDER_SECTION_KEY] = _build_provider_section(
+                provider_schema_items
+            )
         schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
             current_values,
             built_in_specs,
@@ -2569,10 +2579,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             description_placeholders = {
                 "server_info": (
                     "OpenClaw manages the model and system prompt on the gateway. "
-                    "Use the connection, conversation, and advanced sections here "
-                    "to control how this Home Assistant profile connects and follows "
-                    "up. The Tools section can still disable specific shared MCP "
-                    "tool families for this profile."
+                    "Use the connection, conversation, provider, and advanced "
+                    "sections here to control how this Home Assistant profile "
+                    "connects and follows up. The Tools section can still disable "
+                    "specific shared MCP tool families for this profile."
                 )
             }
         else:

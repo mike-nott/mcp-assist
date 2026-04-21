@@ -30,6 +30,7 @@ from custom_components.mcp_assist.config_flow import (
     PERFORMANCE_SECTION_KEY,
     PROFILE_SECTION_KEY,
     PROMPTS_SECTION_KEY,
+    PROVIDER_SECTION_KEY,
     PROFILE_DISABLE_FIELD_BY_FAMILY,
     STATIC_TOOL_FAMILY_ALPHABETICAL,
     TOOLS_SECTION_KEY,
@@ -65,6 +66,9 @@ from custom_components.mcp_assist.const import (
     CONF_MEMORY_MAX_ITEMS,
     CONF_MCP_PORT,
     CONF_LMSTUDIO_URL,
+    CONF_OLLAMA_KEEP_ALIVE,
+    CONF_OLLAMA_NUM_CTX,
+    CONF_OPENCLAW_SESSION_KEY,
     CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
     CONF_PROFILE_ENABLE_DEVICE_TOOLS,
     CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS,
@@ -136,6 +140,14 @@ SHARED_TOOL_ORDER = [
     _builtin_shared_key("unit_conversion"),
     CONF_ENABLE_WEATHER_FORECAST_TOOL,
 ]
+
+
+def _section_field_names(form_section: section) -> set[str]:
+    """Return normalized field names from a flow section."""
+    return {
+        getattr(marker, "schema", marker)
+        for marker in form_section.schema.schema.keys()
+    }
 
 
 def test_builtin_tool_toggle_specs_include_ui_descriptions() -> None:
@@ -582,6 +594,24 @@ def test_tool_checkbox_translations_cover_all_declared_tool_fields() -> None:
         assert expected_shared_fields <= set(shared_tools["data_description"])
 
 
+def test_provider_section_translations_cover_provider_specific_fields() -> None:
+    """Provider-only settings should have section translations in both config and options flows."""
+    strings = json.loads(
+        Path("custom_components/mcp_assist/strings.json").read_text(encoding="utf-8")
+    )
+
+    expected_provider_fields = {
+        CONF_OLLAMA_KEEP_ALIVE,
+        CONF_OLLAMA_NUM_CTX,
+        CONF_OPENCLAW_SESSION_KEY,
+    }
+
+    for root, step in (("config", "advanced"), ("options", "init")):
+        provider_section = strings[root]["step"][step]["sections"][PROVIDER_SECTION_KEY]
+        assert expected_provider_fields <= set(provider_section["data"])
+        assert expected_provider_fields <= set(provider_section["data_description"])
+
+
 async def test_options_step_groups_profile_settings_into_sections(
     hass, profile_entry_factory
 ) -> None:
@@ -604,3 +634,62 @@ async def test_options_step_groups_profile_settings_into_sections(
     assert CONVERSATION_SECTION_KEY in top_level_keys
     assert ADVANCED_SECTION_KEY in top_level_keys
     assert TOOLS_SECTION_KEY in top_level_keys
+
+
+async def test_options_step_for_ollama_keeps_provider_fields_in_provider_section(
+    hass, profile_entry_factory
+) -> None:
+    """Ollama provider-only settings should live in the provider section, not advanced."""
+    flow = MCPAssistOptionsFlow()
+    flow.hass = hass
+    entry = profile_entry_factory(
+        data={
+            CONF_SERVER_TYPE: SERVER_TYPE_OLLAMA,
+            CONF_LMSTUDIO_URL: "http://localhost:11434",
+        }
+    )
+    flow.handler = entry.entry_id
+
+    with patch(
+        "custom_components.mcp_assist.config_flow.fetch_models_from_lmstudio",
+        AsyncMock(return_value=["qwen3"]),
+    ):
+        result = await flow.async_step_init()
+
+    provider_section = result["data_schema"].schema[PROVIDER_SECTION_KEY]
+    advanced_section = result["data_schema"].schema[ADVANCED_SECTION_KEY]
+
+    assert isinstance(provider_section, section)
+    assert _section_field_names(provider_section) == {
+        CONF_OLLAMA_NUM_CTX,
+        CONF_OLLAMA_KEEP_ALIVE,
+    }
+    assert CONF_OLLAMA_NUM_CTX not in _section_field_names(advanced_section)
+    assert CONF_OLLAMA_KEEP_ALIVE not in _section_field_names(advanced_section)
+
+
+async def test_options_step_for_openclaw_hides_model_prompts_and_uses_provider_section(
+    hass, profile_entry_factory
+) -> None:
+    """OpenClaw options should hide model/prompts and keep the session key in provider settings."""
+    flow = MCPAssistOptionsFlow()
+    flow.hass = hass
+    entry = profile_entry_factory(
+        title="OpenClaw - Test Profile",
+        unique_id="mcp_assist_openclaw_test_profile",
+        data={CONF_SERVER_TYPE: SERVER_TYPE_OPENCLAW},
+    )
+    flow.handler = entry.entry_id
+
+    result = await flow.async_step_init()
+
+    top_level_keys = set(result["data_schema"].schema.keys())
+    provider_section = result["data_schema"].schema[PROVIDER_SECTION_KEY]
+    advanced_section = result["data_schema"].schema[ADVANCED_SECTION_KEY]
+
+    assert MODEL_SECTION_KEY not in top_level_keys
+    assert PROMPTS_SECTION_KEY not in top_level_keys
+    assert PROVIDER_SECTION_KEY in top_level_keys
+    assert isinstance(provider_section, section)
+    assert _section_field_names(provider_section) == {CONF_OPENCLAW_SESSION_KEY}
+    assert CONF_OPENCLAW_SESSION_KEY not in _section_field_names(advanced_section)

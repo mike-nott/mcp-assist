@@ -1395,7 +1395,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         _LOGGER.info(f"📡 Sending to OpenClaw (session: {self.session_key})...")
         response_text = await client.send_message(user_input.text, self.session_key)
         _LOGGER.info(
-            f"✅ OpenClaw response received, length: %d", len(response_text)
+            "✅ OpenClaw response received, length: %d", len(response_text)
         )
 
         return await self._build_response_result(

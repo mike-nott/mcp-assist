@@ -406,19 +406,30 @@
               "clean_responses": "Trim unnecessary formatting or filler to keep spoken responses cleaner."
             }
           },
+          "provider": {
+            "name": "Provider",
+            "description": "Provider-specific settings shown only when they apply.",
+            "data": {
+              "ollama_keep_alive": "Ollama Keep Alive",
+              "ollama_num_ctx": "Ollama Context Window",
+              "openclaw_session_key": "Session Key"
+            },
+            "data_description": {
+              "ollama_keep_alive": "How long Ollama should keep the selected model loaded in memory.",
+              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default.",
+              "openclaw_session_key": "Name of the OpenClaw session to send messages to."
+            }
+          },
           "advanced_settings": {
             "name": "Advanced",
-            "description": "Expert tuning for model behavior, limits, provider-specific options, timeout, and debugging.",
+            "description": "Expert tuning for model behavior, limits, timeout, and debugging.",
             "data": {
               "temperature": "Temperature",
               "max_tokens": "Max Response Tokens",
               "max_history": "Max History Messages",
               "max_iterations": "Max Tool Iterations",
               "timeout": "Response Time Out",
-              "debug_mode": "Debug Mode",
-              "ollama_keep_alive": "Ollama Keep Alive",
-              "ollama_num_ctx": "Ollama Context Window",
-              "openclaw_session_key": "Session Key"
+              "debug_mode": "Debug Mode"
             },
             "data_description": {
               "temperature": "Controls response randomness. Lower values are more deterministic.",
@@ -426,10 +437,7 @@
               "max_history": "How many prior conversation messages to keep in context.",
               "max_iterations": "Caps how many tool-calling turns the assistant may use for one request.",
               "timeout": "How long to wait for a provider response before timing out.",
-              "debug_mode": "Enable more detailed logging for troubleshooting.",
-              "ollama_keep_alive": "How long Ollama should keep the selected model loaded in memory.",
-              "ollama_num_ctx": "Override the context window size passed to Ollama. Use 0 to keep the model default.",
-              "openclaw_session_key": "Name of the OpenClaw session to send messages to."
+              "debug_mode": "Enable more detailed logging for troubleshooting."
             }
           },
           "tools": {
