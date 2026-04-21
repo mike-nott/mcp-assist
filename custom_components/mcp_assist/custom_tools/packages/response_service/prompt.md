@@ -1,1 +1,3 @@
-Use call_service_with_response for structured Home Assistant reads and get_calendar_events for calendar questions, preferring native Home Assistant service responses over web search when Home Assistant already has the answer
+- Use call_service_with_response for structured Home Assistant reads.
+- Prefer get_calendar_events for calendar questions.
+- Prefer native Home Assistant service responses over web search when Home Assistant already has the answer.

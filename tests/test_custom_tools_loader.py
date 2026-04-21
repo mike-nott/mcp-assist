@@ -235,6 +235,10 @@ async def test_initialize_loads_domain_tool_bundles_when_enabled(
         loader.get_builtin_toggle_spec("get_weather_forecast").package_id
         == "weather_forecast"
     )
+    builtin_prompt = loader.get_builtin_prompt_instructions()
+    assert "point-in-time questions" in builtin_prompt
+    assert "native Home Assistant service responses over web search" in builtin_prompt
+    assert "chooses a supported forecast type" in builtin_prompt
 
 
 @pytest.mark.asyncio

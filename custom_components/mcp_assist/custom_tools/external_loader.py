@@ -60,6 +60,7 @@ class ExternalCustomToolLoader:
         require_tool_name_prefix: bool = True,
         package_log_label: str = "external custom tool package",
         prompt_package_label: str = "Custom tool package",
+        prompt_chars_per_tool: int = _MAX_PROMPT_CHARS_PER_TOOL,
     ) -> None:
         """Initialize the loader."""
         self.hass = hass
@@ -69,6 +70,7 @@ class ExternalCustomToolLoader:
         self._require_tool_name_prefix = require_tool_name_prefix
         self._package_log_label = package_log_label
         self._prompt_package_label = prompt_package_label
+        self._prompt_chars_per_tool = prompt_chars_per_tool
         self.last_load_errors: list[dict[str, str]] = []
         self.last_tools_root: Path = self.get_tools_root()
         self.last_scanned_packages: tuple[str, ...] = ()
@@ -671,10 +673,19 @@ class ExternalCustomToolLoader:
         if not instruction_parts:
             return ""
 
-        combined_body = " ".join(instruction_parts).strip()
+        combined_body = "\n".join(instruction_parts).strip()
         label = str(manifest.name or manifest.tool_id).strip()
-        combined = f"- {label}: {combined_body}"
-        return self._compact_text(combined, max_len=_MAX_PROMPT_CHARS_PER_TOOL)
+        if "\n" in combined_body:
+            indented_body = "\n".join(
+                f"  {line}" for line in combined_body.splitlines() if line.strip()
+            )
+            combined = f"- {label}:\n{indented_body}"
+        else:
+            combined = f"- {label}: {combined_body}"
+        return self._compact_prompt_block(
+            combined,
+            max_len=self._prompt_chars_per_tool,
+        )
 
     async def _read_prompt_append_file(
         self,
@@ -726,12 +737,45 @@ class ExternalCustomToolLoader:
             trimmed = trimmed[:last_space]
         return trimmed.rstrip(" ,;:.") + "."
 
+    @staticmethod
+    def _compact_prompt_block(text: str, *, max_len: int) -> str:
+        """Compact prompt guidance while preserving short procedural components."""
+        lines = [
+            " ".join(line.strip().split())
+            for line in str(text or "").splitlines()
+            if line.strip()
+        ]
+        normalized = "\n".join(lines) if lines else " ".join(str(text).split()).strip()
+        if len(normalized) <= max_len:
+            return normalized
+
+        kept_lines: list[str] = []
+        current_len = 0
+        for line in lines:
+            candidate_len = current_len + (1 if kept_lines else 0) + len(line)
+            if candidate_len > max_len:
+                break
+            kept_lines.append(line)
+            current_len = candidate_len
+
+        if kept_lines:
+            return "\n".join(kept_lines)
+
+        trimmed = normalized[: max_len - 1].rstrip()
+        last_space = trimmed.rfind(" ")
+        if last_space > 40:
+            trimmed = trimmed[:last_space]
+        return trimmed.rstrip(" ,;:.") + "."
+
     def _dedupe_instruction_parts(self, raw_parts: list[str]) -> list[str]:
         """Normalize and deduplicate prompt-instruction fragments."""
         normalized_parts: list[str] = []
         seen: set[str] = set()
         for part in raw_parts:
-            compact = self._compact_text(part, max_len=180)
+            compact = self._compact_prompt_block(
+                part,
+                max_len=self._prompt_chars_per_tool,
+            )
             if not compact:
                 continue
             key = compact.casefold()

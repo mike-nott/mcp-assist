@@ -63,6 +63,7 @@ class CustomToolsLoader:
             require_tool_name_prefix=False,
             package_log_label="built-in tool package",
             prompt_package_label="Built-in tool package",
+            prompt_chars_per_tool=420,
         )
         self._external_loader = ExternalCustomToolLoader(self.hass)
         self._builtin_toggle_specs: tuple[BuiltInToolToggleSpec, ...] = ()
