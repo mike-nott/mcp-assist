@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Literal
 
@@ -99,6 +100,10 @@ from .conversation_history import ConversationHistory
 
 _LOGGER = logging.getLogger(__name__)
 
+MCP_TOOL_CACHE_TTL_SECONDS = 30.0
+MAX_TOOL_RESULT_CHARS = 8000
+MAX_TOOL_RESULT_LINES = 120
+
 
 class MCPAssistConversationEntity(ConversationEntity):
     """MCP Assist conversation entity with multi-provider support."""
@@ -111,6 +116,9 @@ class MCPAssistConversationEntity(ConversationEntity):
         self.entry = entry
         self.history = ConversationHistory()
         self._current_chat_log = None  # ChatLog for debug view tracking
+        self._cached_llm_tools: list[dict[str, Any]] | None = None
+        self._cached_llm_tools_key: tuple[Any, ...] | None = None
+        self._cached_llm_tools_fetched_at = 0.0
 
         # Entity attributes
         profile_name = entry.data.get("profile_name", "MCP Assist")
@@ -325,6 +333,162 @@ class MCPAssistConversationEntity(ConversationEntity):
             return "brave"
 
         return "none"
+
+    @staticmethod
+    def _compact_text(text: str, *, max_len: int = 160) -> str:
+        """Compact model-facing text to reduce tool prompt size."""
+        normalized = " ".join(str(text).split()).strip()
+        if not normalized:
+            return ""
+
+        for separator in (". ", "\n", "; "):
+            if separator in normalized:
+                normalized = normalized.split(separator, 1)[0].strip()
+                break
+
+        if len(normalized) <= max_len:
+            return normalized
+
+        truncated = normalized[: max_len - 1].rstrip()
+        last_space = truncated.rfind(" ")
+        if last_space > 40:
+            truncated = truncated[:last_space]
+        return truncated.rstrip(" ,;:.") + "."
+
+    def _compact_schema_for_llm(self, schema: Any) -> Any:
+        """Strip nonessential JSON Schema verbosity before sending tools to the LLM."""
+        if isinstance(schema, list):
+            compacted_list = [self._compact_schema_for_llm(item) for item in schema]
+            return [item for item in compacted_list if item not in (None, {}, [])]
+
+        if not isinstance(schema, dict):
+            return schema
+
+        compacted: dict[str, Any] = {}
+
+        for key, value in schema.items():
+            if key in {"$schema", "title", "default", "examples", "example"}:
+                continue
+
+            if key == "description":
+                continue
+
+            if key == "properties":
+                properties: dict[str, Any] = {}
+                for prop_name, prop_schema in value.items():
+                    compact_prop = self._compact_schema_for_llm(prop_schema)
+                    if compact_prop:
+                        properties[prop_name] = compact_prop
+                if properties:
+                    compacted[key] = properties
+                continue
+
+            if key == "required":
+                if value:
+                    compacted[key] = value
+                continue
+
+            if key == "additionalProperties":
+                continue
+
+            compact_value = self._compact_schema_for_llm(value)
+            if compact_value not in (None, {}, []):
+                compacted[key] = compact_value
+
+        return compacted
+
+    def _convert_mcp_tools_to_llm_tools(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert MCP tools to compact OpenAI-style tool schemas."""
+        openai_tools = []
+
+        for tool in tools:
+            parameters = self._compact_schema_for_llm(tool.get("inputSchema", {}))
+            if not parameters:
+                parameters = {"type": "object", "properties": {}}
+            elif parameters.get("type") == "object" and "properties" not in parameters:
+                parameters["properties"] = {}
+
+            description = self._compact_text(
+                str(tool.get("llmDescription") or tool.get("description") or ""),
+                max_len=180,
+            )
+
+            openai_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": description,
+                        "parameters": parameters,
+                    },
+                }
+            )
+
+        return openai_tools
+
+    def _build_mcp_tool_cache_key(self) -> tuple[Any, ...]:
+        """Build a cache key for the current MCP tool surface."""
+        return (
+            self.mcp_port,
+            self.search_provider,
+        )
+
+    def _compact_tool_result_for_llm(self, tool_name: str, content: Any) -> str:
+        """Keep tool results useful while avoiding oversized follow-up payloads."""
+        text = "" if content is None else str(content)
+        text = text.replace("\r\n", "\n").strip()
+        if not text:
+            return ""
+
+        original_length = len(text)
+        original_lines = text.count("\n") + 1
+
+        if (
+            original_length <= MAX_TOOL_RESULT_CHARS
+            and original_lines <= MAX_TOOL_RESULT_LINES
+        ):
+            return text
+
+        lines = text.splitlines()
+        truncated_lines = lines[:MAX_TOOL_RESULT_LINES]
+        compacted = "\n".join(truncated_lines).strip()
+
+        if len(compacted) > MAX_TOOL_RESULT_CHARS:
+            compacted = compacted[:MAX_TOOL_RESULT_CHARS].rstrip()
+            last_break = max(compacted.rfind("\n"), compacted.rfind(" "))
+            if last_break > int(MAX_TOOL_RESULT_CHARS * 0.7):
+                compacted = compacted[:last_break].rstrip()
+
+        omitted_lines = max(0, original_lines - len(truncated_lines))
+        omitted_chars = max(0, original_length - len(compacted))
+        hint = (
+            "Use narrower filters, paging, or a more specific follow-up tool call "
+            "if you need the omitted detail."
+        )
+        if tool_name == "discover_entities":
+            hint = (
+                "Use the limit parameter or narrower filters if you need more of "
+                "the result set."
+            )
+        elif tool_name in {"get_entity_details", "get_index"}:
+            hint = (
+                "Call again with a narrower target if you need more of this "
+                "structured detail."
+            )
+
+        summary_parts: list[str] = []
+        if omitted_lines:
+            summary_parts.append(f"{omitted_lines} more lines")
+        if omitted_chars:
+            summary_parts.append(f"{omitted_chars} more chars")
+        summary = ", ".join(summary_parts) or "additional content omitted"
+
+        return (
+            f"{compacted}\n\n"
+            f"[Tool result truncated for model context: {summary}. {hint}]"
+        )
 
     @property
     def attribution(self) -> str:
@@ -1120,8 +1284,8 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         return messages
 
-    async def _get_mcp_tools(self) -> Optional[List[Dict[str, Any]]]:
-        """Fetch available tools from MCP server."""
+    async def _fetch_mcp_tools_from_server(self) -> Optional[List[Dict[str, Any]]]:
+        """Fetch and convert available tools from MCP server."""
         try:
             mcp_url = f"http://localhost:{self.mcp_port}"
 
@@ -1146,20 +1310,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                         tools = data["result"]["tools"]
                         _LOGGER.info("Retrieved %d MCP tools", len(tools))
 
-                        # Convert to OpenAI format for LM Studio
-                        openai_tools = []
                         tool_names = []
                         for tool in tools:
-                            openai_tools.append(
-                                {
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool["name"],
-                                        "description": tool["description"],
-                                        "parameters": tool.get("inputSchema", {}),
-                                    },
-                                }
-                            )
                             tool_names.append(tool["name"])
 
                         _LOGGER.info("MCP tools available: %s", ", ".join(tool_names))
@@ -1168,12 +1320,38 @@ class MCPAssistConversationEntity(ConversationEntity):
                         else:
                             _LOGGER.warning("⚠️ perform_action tool NOT found!")
 
-                        return openai_tools
+                        return self._convert_mcp_tools_to_llm_tools(tools)
                     return None
 
         except Exception as err:
             _LOGGER.error("Failed to get MCP tools: %s", err)
             return None
+
+    async def _get_mcp_tools(self) -> Optional[List[Dict[str, Any]]]:
+        """Return available LLM-facing MCP tools, using a short-lived cache."""
+        cache_key = self._build_mcp_tool_cache_key()
+        now = time.monotonic()
+
+        if (
+            self._cached_llm_tools is not None
+            and self._cached_llm_tools_key == cache_key
+            and (now - self._cached_llm_tools_fetched_at) < MCP_TOOL_CACHE_TTL_SECONDS
+        ):
+            _LOGGER.debug("Using cached MCP tool schema")
+            return list(self._cached_llm_tools)
+
+        tools = await self._fetch_mcp_tools_from_server()
+        if tools is not None:
+            self._cached_llm_tools = list(tools)
+            self._cached_llm_tools_key = cache_key
+            self._cached_llm_tools_fetched_at = now
+            return list(tools)
+
+        if self._cached_llm_tools is not None and self._cached_llm_tools_key == cache_key:
+            _LOGGER.warning("Using stale cached MCP tools after refresh failure")
+            return list(self._cached_llm_tools)
+
+        return None
 
     async def _call_mcp_tool(
         self, tool_name: str, arguments: Dict[str, Any]
@@ -1208,31 +1386,104 @@ class MCPAssistConversationEntity(ConversationEntity):
                     data = await response.json()
                     _LOGGER.debug(f"MCP response: {json.dumps(data, indent=2)}")
 
-                    if "result" in data and "content" in data["result"]:
-                        # Extract the text content from the MCP response
-                        content = data["result"]["content"]
-                        if isinstance(content, list) and len(content) > 0:
-                            text_result = content[0].get("text", "")
-                            if self.debug_mode:
-                                _LOGGER.info(
-                                    f"🔍 MCP tool '{tool_name}' returned {len(text_result)} chars"
-                                )
-                                _LOGGER.info(
-                                    f"🔍 Full result (repr): {repr(text_result)}"
-                                )
-                                # Also log each line separately for readability
-                                for i, line in enumerate(text_result.split("\n")):
-                                    _LOGGER.info(f"  Line {i}: {line}")
-                            return {"result": text_result}
-                        return {"result": str(content)}
-                    elif "error" in data:
+                    if "result" in data:
+                        return self._normalize_mcp_tool_response(data["result"])
+                    if "error" in data:
                         return {"error": data["error"]}
-                    else:
-                        return {"result": str(data.get("result", ""))}
+                    return {"result": str(data.get("result", ""))}
 
         except Exception as e:
             _LOGGER.error(f"Error calling MCP tool {tool_name}: {e}")
             return {"error": str(e)}
+
+    def _normalize_mcp_tool_response(self, result: Any) -> Dict[str, Any]:
+        """Normalize an MCP JSON-RPC tool result into one predictable shape."""
+        if isinstance(result, dict):
+            if any(
+                key in result
+                for key in ("content", "structuredContent", "isError", "_meta")
+            ):
+                return result
+            return {"result": result}
+        return {"result": result}
+
+    def _format_tool_result_for_llm(self, tool_name: str, result: Dict[str, Any]) -> str:
+        """Serialize a tool result for follow-up LLM turns without losing structure."""
+        if "error" in result:
+            error_data = result["error"]
+            if isinstance(error_data, dict):
+                error_message = error_data.get("message", str(error_data))
+            else:
+                error_message = str(error_data)
+            return self._compact_tool_result_for_llm(
+                tool_name,
+                f"ERROR: {error_message}",
+            )
+
+        simple_text = self._extract_simple_text_result(result)
+        if simple_text is not None:
+            return self._compact_tool_result_for_llm(tool_name, simple_text)
+
+        if "result" in result and not any(
+            key in result for key in ("content", "structuredContent", "isError", "_meta")
+        ):
+            raw_result = result["result"]
+            if isinstance(raw_result, str):
+                return self._compact_tool_result_for_llm(tool_name, raw_result)
+            return self._compact_tool_result_for_llm(
+                tool_name,
+                json.dumps(
+                    self._sanitize_tool_result_for_llm(raw_result),
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
+
+        return self._compact_tool_result_for_llm(
+            tool_name,
+            json.dumps(
+                self._sanitize_tool_result_for_llm(result),
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+
+    def _extract_simple_text_result(self, result: Dict[str, Any]) -> str | None:
+        """Return plain text when the MCP result is a single text block."""
+        content = result.get("content")
+        if (
+            isinstance(content, list)
+            and len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get("type") == "text"
+            and "structuredContent" not in result
+            and "_meta" not in result
+        ):
+            return str(content[0].get("text") or "")
+        return None
+
+    def _sanitize_tool_result_for_llm(self, value: Any) -> Any:
+        """Sanitize structured tool results so large payloads stay compact."""
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, item in value.items():
+                if (
+                    key in {"data", "blob", "b64_json"}
+                    and isinstance(item, str)
+                    and len(item) > 512
+                ):
+                    sanitized[key] = f"[omitted {len(item)} chars]"
+                    continue
+                sanitized[key] = self._sanitize_tool_result_for_llm(item)
+            return sanitized
+
+        if isinstance(value, list):
+            return [self._sanitize_tool_result_for_llm(item) for item in value]
+
+        if isinstance(value, str) and len(value) > 2000:
+            return self._compact_tool_result_for_llm("structured_result", value)
+
+        return value
 
     def _strip_thinking_tags(self, text: str) -> tuple[str, str]:
         """Strip thinking/reasoning tags from model output.
@@ -1390,93 +1641,82 @@ class MCPAssistConversationEntity(ConversationEntity):
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Execute a list of tool calls and return results in OpenAI format."""
-        results = []
+        if not tool_calls:
+            return []
 
-        for tool_call in tool_calls:
-            tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
-            function = tool_call.get("function", {})
-            tool_name = function.get("name")
-            arguments_str = function.get("arguments")
+        return list(
+            await asyncio.gather(
+                *(self._execute_single_tool_call(tool_call) for tool_call in tool_calls)
+            )
+        )
 
-            _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
+    async def _execute_single_tool_call(
+        self, tool_call: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a single tool call and return an OpenAI/Ollama tool message."""
+        tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
+        function = tool_call.get("function", {})
+        tool_name = function.get("name")
+        arguments_str = function.get("arguments")
 
-            try:
-                arguments = self._parse_tool_arguments(arguments_str)
+        _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
 
-                # Execute the tool
-                result = await self._call_mcp_tool(tool_name, arguments)
+        try:
+            arguments = self._parse_tool_arguments(arguments_str)
 
-                # Format result for OpenAI
-                if "error" in result:
-                    # Extract error message as plain text so LLM actually reads it
-                    error_data = result["error"]
-                    if isinstance(error_data, dict):
-                        error_msg = error_data.get("message", str(error_data))
-                    else:
-                        error_msg = str(error_data)
-                    content = f"ERROR: {error_msg}"
-                else:
-                    content = result.get("result", "")
+            # Execute the tool
+            result = await self._call_mcp_tool(tool_name, arguments)
 
-                # Check if this is the conversation state tool
-                if tool_name == "set_conversation_state" and content:
-                    # Parse the expecting_response value from the result
-                    if "conversation_state:true" in content.lower():
-                        self._expecting_response = True
-                        _LOGGER.debug(
-                            "🔄 Conversation will continue - expecting response"
-                        )
-                    elif "conversation_state:false" in content.lower():
-                        self._expecting_response = False
-                        _LOGGER.debug(
-                            "🔄 Conversation will close - not expecting response"
-                        )
+            # Format result for LLM consumption
+            content = self._format_tool_result_for_llm(tool_name, result)
 
-                # Format result based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama doesn't use tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "content": content if content is not None else "",
-                        }
-                    )
-                else:
-                    # OpenAI format with tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": content if content is not None else "",
-                        }
-                    )
+            # Check if this is the conversation state tool
+            if tool_name == "set_conversation_state" and content:
+                # Parse the expecting_response value from the result
+                if "conversation_state:true" in content.lower():
+                    self._expecting_response = True
+                    _LOGGER.debug("🔄 Conversation will continue - expecting response")
+                elif "conversation_state:false" in content.lower():
+                    self._expecting_response = False
+                    _LOGGER.debug("🔄 Conversation will close - not expecting response")
 
-                _LOGGER.info(f"✅ Tool {tool_name} executed successfully")
+            _LOGGER.info(f"✅ Tool {tool_name} executed successfully")
 
-            except Exception as e:
-                _LOGGER.error(f"Error executing tool {tool_name}: {e}")
-                # Format error result based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama doesn't use tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
-                else:
-                    # OpenAI format with tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
+            # Format result based on server type
+            if self.server_type == SERVER_TYPE_OLLAMA:
+                # Ollama doesn't use tool_call_id
+                return {
+                    "role": "tool",
+                    "tool_name": tool_name,
+                    "content": content if content is not None else "",
+                }
 
-        return results
+            # OpenAI format with tool_call_id
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": content if content is not None else "",
+            }
+
+        except Exception as e:
+            _LOGGER.error(f"Error executing tool {tool_name}: {e}")
+            error_content = json.dumps({"error": str(e)})
+
+            # Format error result based on server type
+            if self.server_type == SERVER_TYPE_OLLAMA:
+                # Ollama doesn't use tool_call_id
+                return {
+                    "role": "tool",
+                    "tool_name": tool_name,
+                    "content": error_content,
+                }
+
+            # OpenAI format with tool_call_id
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": error_content,
+            }
 
     async def _test_streaming_basic(self) -> bool:
         """Test basic streaming without tools to isolate connection issues."""
