@@ -1550,7 +1550,7 @@ class MCPServer(
             },
             {
                 "name": "get_index",
-                "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, floors, labels, devices, domains, device classes, people, pets, calendars, zones, automations, scripts, and aliases for alias-capable objects. Call this ONCE at the start of a conversation to understand what exists in the system, then use discover_entities or discover_devices to query specifics. The index is much smaller than a full entity dump.",
+                "description": "Get the pre-generated system structure index. This index provides a lightweight overview of the Home Assistant system including areas, floors, labels, devices, domains, device classes, people, pets, calendars, zones, automations, scripts, and aliases for alias-capable objects. Use only when a broad system overview is needed; do not call by default at the start of every conversation. Prefer discover_entities or discover_devices for specific lookups.",
                 "llmDescription": "Get a compact overview of areas, labels, devices, domains, and aliases.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",

@@ -71,6 +71,8 @@ class CustomToolsLoader:
         self._external_prompt_instructions = ""
         self._tool_registry: dict[str, _RegisteredTool] = {}
         self._tool_definitions_cache: list[dict[str, Any]] = []
+        self._tool_registry_ready = False
+        self._cache_signature: tuple[Any, ...] = ((), "", "")
 
     async def initialize(self):
         """Initialize built-in bundles and optional external tool packages."""
@@ -178,6 +180,7 @@ class CustomToolsLoader:
 
         self.builtin_packages = []
         self._builtin_prompt_instructions = ""
+        self._tool_registry_ready = False
 
     async def _shutdown_external_tools(self) -> None:
         """Shut down only the currently loaded external custom tool packages."""
@@ -195,6 +198,7 @@ class CustomToolsLoader:
 
         self.external_tools = []
         self._external_prompt_instructions = ""
+        self._tool_registry_ready = False
 
     def _get_shared_setting(self, key: str, default: Any = None) -> Any:
         """Get a shared setting from system entry with fallback to profile entry."""
@@ -240,7 +244,7 @@ class CustomToolsLoader:
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Get MCP tool definitions for all enabled tools."""
-        if not self._tool_definitions_cache:
+        if not self._tool_registry_ready:
             self._refresh_tool_registry()
         return list(self._tool_definitions_cache)
 
@@ -317,36 +321,9 @@ class CustomToolsLoader:
 
     def get_cache_signature(self) -> tuple[Any, ...]:
         """Return a stable cache signature for the current tool surface."""
-        try:
-            tool_definitions = tuple(
-                json.dumps(tool_definition, sort_keys=True, separators=(",", ":"))
-                for tool_definition in self.get_tool_definitions()
-            )
-        except Exception as err:
-            _LOGGER.debug("Unable to serialize tool definitions for cache key: %s", err)
-            tool_definitions = ()
-
-        try:
-            builtin_prompt_instructions = self.get_builtin_prompt_instructions()
-        except Exception as err:
-            _LOGGER.debug(
-                "Unable to read built-in prompt instructions for cache key: %s", err
-            )
-            builtin_prompt_instructions = ""
-
-        try:
-            external_prompt_instructions = self.get_external_prompt_instructions()
-        except Exception as err:
-            _LOGGER.debug(
-                "Unable to read external prompt instructions for cache key: %s", err
-            )
-            external_prompt_instructions = ""
-
-        return (
-            tool_definitions,
-            builtin_prompt_instructions,
-            external_prompt_instructions,
-        )
+        if not self._tool_registry_ready:
+            self._refresh_tool_registry()
+        return self._cache_signature
 
     async def reload_external_tools(self) -> dict[str, Any]:
         """Backward-compatible alias that reloads all manifest-based tool packages."""
@@ -540,6 +517,28 @@ class CustomToolsLoader:
 
         self._tool_registry = registry
         self._tool_definitions_cache = ordered_definitions
+        self._tool_registry_ready = True
+        self._cache_signature = self._build_cache_signature(ordered_definitions)
+
+    def _build_cache_signature(
+        self,
+        tool_definitions: list[dict[str, Any]],
+    ) -> tuple[Any, ...]:
+        """Build a stable signature once when the loaded tool surface changes."""
+        try:
+            serialized_tool_definitions = tuple(
+                json.dumps(tool_definition, sort_keys=True, separators=(",", ":"))
+                for tool_definition in tool_definitions
+            )
+        except Exception as err:
+            _LOGGER.debug("Unable to serialize tool definitions for cache key: %s", err)
+            serialized_tool_definitions = ()
+
+        return (
+            serialized_tool_definitions,
+            self._builtin_prompt_instructions,
+            self._external_prompt_instructions,
+        )
 
     async def _handle_package_tool_call(
         self,

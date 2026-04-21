@@ -124,7 +124,9 @@ from .conversation_history import ConversationHistory
 
 _LOGGER = logging.getLogger(__name__)
 
-MCP_TOOL_CACHE_TTL_SECONDS = 30.0
+# Tool schemas are invalidated by settings and custom-tool signatures; this TTL is
+# just a safety refresh, not the primary change detector.
+MCP_TOOL_CACHE_TTL_SECONDS = 300.0
 MAX_TOOL_RESULT_CHARS = 8000
 MAX_TOOL_RESULT_LINES = 120
 

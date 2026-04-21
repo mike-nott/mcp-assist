@@ -462,6 +462,12 @@ async def test_default_tool_list_stays_streamlined(
     assert "get_last_entity_event" not in tool_names
     assert "list_assist_tools" not in tool_names
 
+    get_index_tool = next(
+        tool for tool in result["tools"] if tool["name"] == "get_index"
+    )
+    assert "start of a conversation" not in get_index_tool["description"]
+    assert "do not call by default" in get_index_tool["description"]
+
 
 @pytest.mark.asyncio
 async def test_handle_tools_list_uses_cache_for_stable_signature(

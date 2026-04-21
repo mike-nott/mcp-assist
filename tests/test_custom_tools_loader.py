@@ -600,6 +600,42 @@ async def test_cache_signature_includes_tool_surface_and_prompt_instructions(
 
 
 @pytest.mark.asyncio
+async def test_cache_signature_is_precomputed_after_registry_refresh(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
+) -> None:
+    """Cache-signature reads should not repeatedly serialize every tool definition."""
+    _write_external_tool_package(tmp_path)
+    monkeypatch.setattr(
+        hass.config,
+        "path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: True,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+
+    loader = CustomToolsLoader(hass, profile_entry)
+    await loader.initialize()
+
+    expected_signature = loader.get_cache_signature()
+
+    def fail_json_dumps(*args, **kwargs):
+        raise AssertionError("cache signature should be precomputed")
+
+    monkeypatch.setattr(
+        "custom_components.mcp_assist.custom_tools.json.dumps",
+        fail_json_dumps,
+    )
+
+    assert loader.get_cache_signature() == expected_signature
+
+
+@pytest.mark.asyncio
 async def test_external_tool_package_id_cannot_conflict_with_builtin_package(
     hass, profile_entry_factory, system_entry_factory, monkeypatch, tmp_path
 ) -> None:
