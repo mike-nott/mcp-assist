@@ -487,14 +487,17 @@ class MCPAssistConversationEntity(ConversationEntity):
     @property
     def native_response_service_tools_enabled(self) -> bool:
         """Get effective response-service tool setting for this profile."""
-        return self._is_optional_tool_family_enabled("response_service")
+        return self._is_builtin_package_enabled_by_id(
+            "response_service",
+            fallback_family="response_service",
+        )
 
     @property
     def weather_forecast_tools_enabled(self) -> bool:
         """Get effective weather forecast helper setting for this profile."""
-        return (
-            self.native_response_service_tools_enabled
-            and self._is_optional_tool_family_enabled("weather_forecast")
+        return self._is_builtin_package_enabled_by_id(
+            "weather_forecast",
+            fallback_family="weather_forecast",
         )
 
     @property
@@ -505,7 +508,10 @@ class MCPAssistConversationEntity(ConversationEntity):
     @property
     def recorder_tools_enabled(self) -> bool:
         """Get effective recorder tool setting for this profile."""
-        return self._is_optional_tool_family_enabled("recorder")
+        return self._is_builtin_package_enabled_by_id(
+            "recorder",
+            fallback_family="recorder",
+        )
 
     @property
     def memory_tools_enabled(self) -> bool:

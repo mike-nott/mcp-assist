@@ -19,6 +19,11 @@ import custom_components.mcp_assist.mcp_server as mcp_server_module
 from custom_components.mcp_assist.custom_tools.builtin_catalog import (
     load_builtin_tool_toggle_specs,
 )
+from custom_components.mcp_assist.custom_tools.recorder import RECORDER_TOOL_DEFINITIONS
+from custom_components.mcp_assist.custom_tools.response_services import (
+    RESPONSE_SERVICE_TOOL_DEFINITIONS,
+)
+from custom_components.mcp_assist.custom_tools.weather import WEATHER_TOOL_DEFINITIONS
 from custom_components.mcp_assist.const import (
     CONF_ALLOWED_IPS,
     CONF_ENABLE_ASSIST_BRIDGE,
@@ -44,6 +49,21 @@ def _builtin_spec(tool_name: str):
         if tool_name in spec.tool_names:
             return spec
     raise AssertionError(f"Missing built-in spec for {tool_name}")
+
+
+def _domain_package_tool_stub() -> SimpleNamespace:
+    """Return a custom-tool stub exposing the built-in domain package definitions."""
+    tool_definitions = [
+        *RECORDER_TOOL_DEFINITIONS,
+        *RESPONSE_SERVICE_TOOL_DEFINITIONS,
+        *WEATHER_TOOL_DEFINITIONS,
+    ]
+    tool_names = {tool["name"] for tool in tool_definitions}
+    return SimpleNamespace(
+        get_tool_definitions=lambda: list(tool_definitions),
+        is_custom_tool=lambda tool_name: tool_name in tool_names,
+        get_cache_signature=lambda: tuple(sorted(tool_names)),
+    )
 
 
 def _is_exact_http_origin(url: object, *, scheme: str, host: str, port: int) -> bool:
@@ -132,6 +152,7 @@ def test_tool_enablement_follows_shared_settings(
             CONF_ENABLE_DEVICE_TOOLS: False,
             CONF_ENABLE_ASSIST_BRIDGE: False,
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
             CONF_ENABLE_MEMORY_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
@@ -199,6 +220,7 @@ async def test_handle_tools_list_filters_disabled_tool_families(
             CONF_ENABLE_DEVICE_TOOLS: False,
             CONF_ENABLE_ASSIST_BRIDGE: False,
             CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
             CONF_ENABLE_RECORDER_TOOLS: False,
             CONF_ENABLE_MEMORY_TOOLS: False,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
@@ -299,6 +321,55 @@ async def test_handle_tool_call_routes_music_assistant_to_custom_tool_loader(
 
 
 @pytest.mark.asyncio
+async def test_handle_tool_call_routes_domain_packages_to_custom_tool_loader(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Domain package tool calls should be dispatched through the custom tool loader."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    calls = []
+
+    async def handle_tool_call(tool_name, arguments, *, context=None):
+        calls.append((tool_name, arguments, context))
+        return {"content": [{"type": "text", "text": f"called {tool_name}"}]}
+
+    server.custom_tools = SimpleNamespace(
+        is_custom_tool=lambda tool_name: tool_name
+        in {"get_calendar_events", "get_entity_history"},
+        handle_tool_call=handle_tool_call,
+    )
+
+    calendar_result = await server.handle_tool_call(
+        {
+            "name": "get_calendar_events",
+            "arguments": {"query": "Mariners"},
+            "context": {"profile_entry_id": "profile-1"},
+        }
+    )
+    history_result = await server.handle_tool_call(
+        {
+            "name": "get_entity_history",
+            "arguments": {"entity_id": "binary_sensor.front_door"},
+        }
+    )
+
+    assert calendar_result["content"][0]["text"] == "called get_calendar_events"
+    assert history_result["content"][0]["text"] == "called get_entity_history"
+    assert calls == [
+        (
+            "get_calendar_events",
+            {"query": "Mariners"},
+            {"profile_entry_id": "profile-1"},
+        ),
+        (
+            "get_entity_history",
+            {"entity_id": "binary_sensor.front_door"},
+            {},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handle_tools_list_can_keep_unit_conversion_when_calculator_math_is_disabled(
     hass, profile_entry_factory, system_entry_factory
 ) -> None:
@@ -380,6 +451,7 @@ async def test_default_tool_list_stays_streamlined(
     """Compatibility aliases and optional bridge tools should stay out of the default list."""
     system_entry_factory()
     server = MCPServer(hass, 8099, profile_entry_factory())
+    server.custom_tools = _domain_package_tool_stub()
 
     result = await server.handle_tools_list()
     tool_names = {tool["name"] for tool in result["tools"]}
@@ -1203,7 +1275,7 @@ def test_history_resolution_prefers_related_contact_sensor_for_open_requests(
     )
 
     with patch(
-        "custom_components.mcp_assist.mcp_server.async_should_expose",
+        "custom_components.mcp_assist.server_tools.recorder.async_should_expose",
         return_value=True,
     ):
         history_entity_id, resolution_note = server._resolve_history_entity_for_request(
@@ -1300,7 +1372,7 @@ async def test_analyze_history_falls_back_to_related_contact_sensor_when_primary
     server._fetch_entity_history_states = AsyncMock(side_effect=fake_fetch)
 
     with patch(
-        "custom_components.mcp_assist.mcp_server.async_should_expose",
+        "custom_components.mcp_assist.server_tools.recorder.async_should_expose",
         return_value=True,
     ):
         result = await server.tool_analyze_entity_history(
@@ -1326,6 +1398,7 @@ async def test_handle_tools_list_includes_media_tools(
     """The core MCP tool list should include the generic image/media helpers."""
     system_entry_factory()
     server = MCPServer(hass, 8099, profile_entry_factory())
+    server.custom_tools = _domain_package_tool_stub()
 
     result = await server.handle_tools_list()
     tool_names = {tool["name"] for tool in result["tools"]}

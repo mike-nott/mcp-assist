@@ -16,8 +16,11 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEB_SEARCH,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
     CONF_SEARCH_PROVIDER,
     CUSTOM_TOOL_MANIFEST_FILENAME,
     CUSTOM_TOOL_SETTINGS_DIRECTORY,
@@ -196,6 +199,45 @@ async def test_initialize_loads_music_assistant_bundle_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_initialize_loads_domain_tool_bundles_when_enabled(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """Recorder, response-service, and weather tools should load as built-in packages."""
+    profile_entry = profile_entry_factory()
+    system_entry_factory(
+        data={
+            CONF_ENABLE_RECORDER_TOOLS: True,
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: True,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: True,
+            CONF_ENABLE_CALCULATOR_TOOLS: False,
+            CONF_ENABLE_UNIT_CONVERSION_TOOLS: False,
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: False,
+            CONF_ENABLE_WEB_SEARCH: False,
+        }
+    )
+    loader = CustomToolsLoader(hass, profile_entry)
+
+    await loader.initialize()
+
+    assert {"recorder", "response_service", "weather_forecast"}.issubset(
+        loader.tools
+    )
+    tool_names = {tool["name"] for tool in loader.get_tool_definitions()}
+    assert "get_entity_history" in tool_names
+    assert "get_calendar_events" in tool_names
+    assert "get_weather_forecast" in tool_names
+    assert loader.get_builtin_toggle_spec("get_entity_history").package_id == "recorder"
+    assert (
+        loader.get_builtin_toggle_spec("get_calendar_events").package_id
+        == "response_service"
+    )
+    assert (
+        loader.get_builtin_toggle_spec("get_weather_forecast").package_id
+        == "weather_forecast"
+    )
+
+
+@pytest.mark.asyncio
 async def test_builtin_tool_packages_use_executor_for_manifest_reads(
     hass, profile_entry_factory, system_entry_factory, monkeypatch
 ) -> None:
@@ -319,7 +361,8 @@ async def test_initialize_loads_search_and_read_url_for_brave(
     loader = CustomToolsLoader(hass, profile_entry)
     await loader.initialize()
 
-    assert set(loader.tools) == {"search", "read_url"}
+    assert {"search", "read_url"}.issubset(loader.tools)
+    assert "calculator" not in loader.tools
 
 
 @pytest.mark.asyncio
@@ -356,7 +399,8 @@ async def test_initialize_loads_search_and_read_url_for_duckduckgo(
     loader = CustomToolsLoader(hass, profile_entry)
     await loader.initialize()
 
-    assert set(loader.tools) == {"search", "read_url"}
+    assert {"search", "read_url"}.issubset(loader.tools)
+    assert "calculator" not in loader.tools
 
 
 @pytest.mark.asyncio
@@ -470,6 +514,9 @@ async def test_external_custom_tool_package_loads_and_handles_calls(
             CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
             CONF_ENABLE_WEB_SEARCH: False,
+            CONF_ENABLE_RECORDER_TOOLS: False,
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
         }
     )
 
@@ -652,6 +699,9 @@ async def test_invalid_external_tool_package_is_skipped_without_crashing(
             CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: True,
             CONF_ENABLE_CALCULATOR_TOOLS: False,
             CONF_ENABLE_WEB_SEARCH: False,
+            CONF_ENABLE_RECORDER_TOOLS: False,
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: False,
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: False,
         }
     )
 
