@@ -5,6 +5,7 @@
   "description": "Built-in Home Assistant response-service and calendar-event read tools.",
   "version": "1.0.0",
   "entrypoint": "tool:ResponseServicePackageTool",
+  "prompt_append_file": "prompt.md",
   "capabilities": [
     "Calls Home Assistant services that return structured data."
   ],

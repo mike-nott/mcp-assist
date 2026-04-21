@@ -5,6 +5,7 @@
   "description": "Built-in Home Assistant weather forecast helper tool.",
   "version": "1.0.0",
   "entrypoint": "tool:WeatherPackageTool",
+  "prompt_append_file": "prompt.md",
   "capabilities": [
     "Finds and summarizes Home Assistant weather forecasts."
   ],

@@ -511,6 +511,10 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     }
     external_default = tool_markers[CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS].default
     assert external_default() is False if callable(external_default) else external_default is False
+    recorder_default = tool_markers[_builtin_shared_key("recorder")].default
+    assert recorder_default() is True if callable(recorder_default) else recorder_default is True
+    response_default = tool_markers[_builtin_shared_key("response_service")].default
+    assert response_default() is True if callable(response_default) else response_default is True
     assert tool_markers[_builtin_shared_key("calculator")].description is None
     assert tool_markers[_builtin_shared_key("read_url")].description is None
 

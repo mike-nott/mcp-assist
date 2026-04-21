@@ -30,7 +30,6 @@ from homeassistant.util import dt as dt_util
 
 from .custom_tools.builtin_catalog import (
     BuiltInToolToggleSpec,
-    get_builtin_toggle_spec_by_package_id,
     is_builtin_package_enabled_for_profile,
 )
 from .provider_runtime import (
@@ -98,8 +97,6 @@ from .const import (
     DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
     RESPONSE_MODE_INSTRUCTIONS,
     DEVICE_TECHNICAL_INSTRUCTIONS,
-    RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS,
-    RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS,
     MEMORY_TECHNICAL_INSTRUCTIONS,
     ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS,
     MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS,
@@ -331,23 +328,6 @@ class MCPAssistConversationEntity(ConversationEntity):
             search_provider=self.search_provider,
         )
 
-    def _is_builtin_package_enabled_by_id(
-        self,
-        package_id: str,
-        *,
-        fallback_family: str | None = None,
-    ) -> bool:
-        """Return whether a built-in package is enabled, with family fallback."""
-        spec = get_builtin_toggle_spec_by_package_id(
-            package_id,
-            self._get_builtin_toggle_specs(),
-        )
-        if spec is not None:
-            return self._is_builtin_package_enabled(spec)
-        if fallback_family is not None:
-            return self._is_optional_tool_family_enabled(fallback_family)
-        return False
-
     def _is_tool_enabled_for_profile(self, tool_name: str) -> bool:
         """Return whether a tool should be visible to this profile."""
         built_in_spec = self._get_builtin_toggle_spec(tool_name)
@@ -485,54 +465,14 @@ class MCPAssistConversationEntity(ConversationEntity):
         return self._is_optional_tool_family_enabled("assist_bridge")
 
     @property
-    def native_response_service_tools_enabled(self) -> bool:
-        """Get effective response-service tool setting for this profile."""
-        return self._is_builtin_package_enabled_by_id(
-            "response_service",
-            fallback_family="response_service",
-        )
-
-    @property
-    def weather_forecast_tools_enabled(self) -> bool:
-        """Get effective weather forecast helper setting for this profile."""
-        return self._is_builtin_package_enabled_by_id(
-            "weather_forecast",
-            fallback_family="weather_forecast",
-        )
-
-    @property
     def external_custom_tools_enabled(self) -> bool:
         """Get effective external custom tool setting for this profile."""
         return self._is_optional_tool_family_enabled(TOOL_FAMILY_EXTERNAL_CUSTOM)
 
     @property
-    def recorder_tools_enabled(self) -> bool:
-        """Get effective recorder tool setting for this profile."""
-        return self._is_builtin_package_enabled_by_id(
-            "recorder",
-            fallback_family="recorder",
-        )
-
-    @property
     def memory_tools_enabled(self) -> bool:
         """Get effective persisted memory tool setting for this profile."""
         return self._is_optional_tool_family_enabled("memory")
-
-    @property
-    def calculator_tools_enabled(self) -> bool:
-        """Get effective calculator tool setting for this profile."""
-        return self._is_builtin_package_enabled_by_id(
-            "calculator",
-            fallback_family="calculator",
-        )
-
-    @property
-    def unit_conversion_tools_enabled(self) -> bool:
-        """Get effective unit-conversion tool setting for this profile."""
-        return self._is_builtin_package_enabled_by_id(
-            "unit_conversion",
-            fallback_family="unit_conversion",
-        )
 
     @property
     def device_tools_enabled(self) -> bool:
@@ -607,20 +547,6 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "- Native Assist bridge tools are disabled. Do not call list_assist_tools, call_assist_tool, get_assist_prompt, or get_assist_context_snapshot."
             )
 
-        if not self.native_response_service_tools_enabled:
-            lines.append(
-                "- Native response-service tools are disabled. Do not call get_calendar_events, list_response_services, or call_service_with_response. Use entity details or other MCP tools instead."
-            )
-        elif not self.weather_forecast_tools_enabled:
-            lines.append(
-                "- Weather forecast tools are disabled. Do not call get_weather_forecast, and do not use call_service_with_response for weather forecasts."
-            )
-
-        if not self.recorder_tools_enabled:
-            lines.append(
-                "- Recorder history analysis tools are disabled. Do not call analyze_entity_history or get_entity_state_at_time."
-            )
-
         if not self.memory_tools_enabled:
             lines.append(
                 "- Memory tools are disabled. Do not call remember_memory, recall_memories, or forget_memory."
@@ -649,12 +575,6 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         if self.device_tools_enabled:
             sections.append(DEVICE_TECHNICAL_INSTRUCTIONS.strip())
-
-        if self.native_response_service_tools_enabled:
-            sections.append(RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS.strip())
-
-        if self.recorder_tools_enabled:
-            sections.append(RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS.strip())
 
         if self.memory_tools_enabled:
             sections.append(MEMORY_TECHNICAL_INSTRUCTIONS.strip())
@@ -856,9 +776,6 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.mcp_port,
             self.search_provider,
             self.assist_bridge_enabled,
-            self.native_response_service_tools_enabled,
-            self.weather_forecast_tools_enabled,
-            self.recorder_tools_enabled,
             self.memory_tools_enabled,
             self.external_custom_tools_enabled,
             self.device_tools_enabled,
@@ -2038,24 +1955,6 @@ class MCPAssistConversationEntity(ConversationEntity):
                         "type": "text",
                         "text": (
                             f"Tool '{tool_name}' is disabled for this profile. "
-                            "Use this profile's enabled tools instead."
-                        ),
-                    }
-                ],
-            }
-
-        if (
-            tool_name == "call_service_with_response"
-            and str(arguments.get("domain") or "").strip().lower() == "weather"
-            and not self.weather_forecast_tools_enabled
-        ):
-            return {
-                "isError": True,
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "Weather forecast tools are disabled for this profile. "
                             "Use this profile's enabled tools instead."
                         ),
                     }

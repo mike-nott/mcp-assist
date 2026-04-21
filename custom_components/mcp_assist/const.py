@@ -410,20 +410,6 @@ Device tools are enabled.
 - Prefer discover_entities for most direct control.
 """
 
-RESPONSE_SERVICE_TECHNICAL_INSTRUCTIONS = """
-Response-service tools are enabled.
-- Use call_service_with_response for structured Home Assistant reads.
-- Prefer get_calendar_events for calendar questions and get_weather_forecast for weather.
-- Prefer native Home Assistant service responses over web search when Home Assistant already has the answer.
-"""
-
-RECORDER_ANALYSIS_TECHNICAL_INSTRUCTIONS = """
-Recorder tools are enabled.
-- Use get_entity_history(mode="last_event") for the latest matching event.
-- Use analyze_entity_history for counts, durations, streaks, and numeric summaries.
-- Use get_entity_state_at_time for point-in-time questions.
-"""
-
 MEMORY_TECHNICAL_INSTRUCTIONS = """
 Memory tools are enabled.
 - Use remember_memory only when the user explicitly asks you to remember something.

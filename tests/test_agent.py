@@ -96,7 +96,7 @@ def test_unit_conversion_tool_enablement_has_backward_compatible_fallbacks(
 
     agent = MCPAssistConversationEntity(hass, entry)
 
-    assert agent.unit_conversion_tools_enabled is True
+    assert agent._is_tool_enabled_for_profile("convert_unit") is True
 
 
 def test_profile_tool_filtering_hides_disabled_optional_tools(

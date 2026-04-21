@@ -5,6 +5,7 @@
   "description": "Built-in recorder-backed history, analysis, and point-in-time tools.",
   "version": "1.0.0",
   "entrypoint": "tool:RecorderPackageTool",
+  "prompt_append_file": "prompt.md",
   "capabilities": [
     "Reads and analyzes Home Assistant recorder history."
   ],
