@@ -1,3 +1,4 @@
 - Use get_entity_history(mode="last_event") for the latest matching event.
-- Use analyze_entity_history for counts, durations, streaks, and numeric summaries.
+- Use analyze_entity_history for counts, durations, streaks, and numeric summaries. For "today" or "yesterday", pass period instead of approximating with hours.
+- If you already selected get_entity_history for a how-many-times question, use mode="count".
 - Use get_entity_state_at_time for point-in-time questions.

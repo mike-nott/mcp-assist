@@ -11,7 +11,9 @@ from .tool_runtime import HomeAssistantToolRuntime
 RECORDER_TOOL_DEFINITIONS: list[dict[str, Any]] = [{'name': 'get_entity_history',
   'description': 'Get recorder-backed history for a specific entity. By default this returns a '
                  "recent timeline, and with mode='last_event' it returns only the most recent "
-                 'matching event or change.',
+                 "matching event or change. Use mode='count' for how-many-times questions so "
+                 'the count is computed from recorder transitions instead of inferred from a '
+                 'limited timeline.',
   'llmDescription': 'Get recorder-backed history for an entity.',
   'inputSchema': {'$schema': 'http://json-schema.org/draft-07/schema#',
                   'type': 'object',
@@ -21,11 +23,15 @@ RECORDER_TOOL_DEFINITIONS: list[dict[str, Any]] = [{'name': 'get_entity_history'
                                                               'pass the discovered entity ID '
                                                               'here.'},
                                  'mode': {'type': 'string',
-                                          'enum': ['timeline', 'last_event'],
+                                          'enum': ['timeline',
+                                                   'last_event',
+                                                   'count'],
                                           'default': 'timeline',
                                           'description': 'timeline returns recent history entries; '
                                                          'last_event returns only the most recent '
-                                                         'matching event or change.'},
+                                                         'matching event or change; count returns '
+                                                         'a computed count of matching recorder '
+                                                         'transitions.'},
                                  'event': {'type': 'string',
                                            'description': 'Optional semantic event filter for '
                                                           'last_event mode, such as opened, '
@@ -39,12 +45,32 @@ RECORDER_TOOL_DEFINITIONS: list[dict[str, Any]] = [{'name': 'get_entity_history'
                                                           'last_event modes.'},
                                  'hours': {'type': 'integer',
                                            'description': 'Number of hours of recorder history to '
-                                                          'search. In timeline mode the default is '
-                                                          '24 hours; in last_event mode the '
+                                                          'search when period/start_datetime are '
+                                                          'not provided. In timeline/count mode '
+                                                          'the default is 24 hours; in last_event mode the '
                                                           'default is 720 hours (30 days). Max: '
                                                           '8760 hours / 1 year.',
                                            'minimum': 1,
                                            'maximum': 8760},
+                                 'period': {'type': 'string',
+                                            'enum': ['today',
+                                                     'yesterday',
+                                                     'last_24_hours',
+                                                     'custom'],
+                                            'description': 'Optional Home Assistant-local calendar '
+                                                           'window. Use yesterday/today for '
+                                                           'calendar-day questions instead of '
+                                                           'approximating with hours.'},
+                                 'start_datetime': {'type': 'string',
+                                                    'description': 'Optional ISO 8601 start '
+                                                                   'datetime for a custom '
+                                                                   'recorder window. If timezone '
+                                                                   'is omitted, Home Assistant '
+                                                                   'local time is assumed.'},
+                                 'end_datetime': {'type': 'string',
+                                                  'description': 'Optional ISO 8601 end datetime '
+                                                                 'for a custom recorder window. '
+                                                                 'Defaults to now.'},
                                  'limit': {'type': 'integer',
                                            'description': 'Maximum number of timeline entries to '
                                                           'return in timeline mode (default: 50, '
@@ -59,7 +85,7 @@ RECORDER_TOOL_DEFINITIONS: list[dict[str, Any]] = [{'name': 'get_entity_history'
   'description': "Analyze Home Assistant recorder history for aggregate questions such as 'how "
                  "many times was the door opened in the last hour?', 'how long has it been "
                  "locked?', or 'how often did this sensor trigger today?'. Can count all changes "
-                 'or matching states/events.',
+                 'or matching states/events. Supports calendar windows like today/yesterday.',
   'llmDescription': 'Analyze recorder history for counts, durations, or matching transitions.',
   'inputSchema': {'$schema': 'http://json-schema.org/draft-07/schema#',
                   'type': 'object',
@@ -80,12 +106,32 @@ RECORDER_TOOL_DEFINITIONS: list[dict[str, Any]] = [{'name': 'get_entity_history'
                                                           'window.'},
                                  'hours': {'type': 'integer',
                                            'description': 'How far back to analyze recorder '
-                                                          'history. Default is 24 hours for '
+                                                          'history when period/start_datetime are '
+                                                          'not provided. Default is 24 hours for '
                                                           'count/summary/duration/stats, and 720 '
                                                           'hours (30 days) for streak. Max: 8760 '
                                                           'hours / 1 year.',
                                            'minimum': 1,
                                            'maximum': 8760},
+                                 'period': {'type': 'string',
+                                            'enum': ['today',
+                                                     'yesterday',
+                                                     'last_24_hours',
+                                                     'custom'],
+                                            'description': 'Optional Home Assistant-local calendar '
+                                                           'window. Use yesterday/today for '
+                                                           'calendar-day count questions.'},
+                                 'start_datetime': {'type': 'string',
+                                                    'description': 'Optional ISO 8601 start '
+                                                                   'datetime for a custom '
+                                                                   'recorder analysis window. If '
+                                                                   'timezone is omitted, Home '
+                                                                   'Assistant local time is '
+                                                                   'assumed.'},
+                                 'end_datetime': {'type': 'string',
+                                                  'description': 'Optional ISO 8601 end datetime '
+                                                                 'for a custom recorder analysis '
+                                                                 'window. Defaults to now.'},
                                  'analysis': {'type': 'string',
                                               'enum': ['count',
                                                        'summary',

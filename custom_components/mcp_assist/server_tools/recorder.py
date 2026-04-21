@@ -30,12 +30,15 @@ class RecorderToolsMixin:
     async def tool_get_entity_history(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Get entity history with human-readable formatting."""
         mode = str(args.get("mode", "timeline")).strip().casefold()
+        if mode == "count":
+            count_args = {**args, "analysis": "count"}
+            return await self.tool_analyze_entity_history(count_args)
         if mode not in {"timeline", "last_event"}:
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": "Invalid mode. Use 'timeline' or 'last_event'.",
+                        "text": "Invalid mode. Use 'timeline', 'last_event', or 'count'.",
                     }
                 ]
             }
@@ -74,10 +77,15 @@ class RecorderToolsMixin:
         friendly_name = current_state.attributes.get("friendly_name", entity_id)
 
         # 2. Calculate time range (UTC)
+        query_start_time, query_end_time, window_label, _ = self._history_query_window(
+            args,
+            default_hours=hours,
+        )
         try:
             entity_states = await self._fetch_entity_history_states(
                 entity_id,
-                hours=hours,
+                start_time=query_start_time,
+                end_time=query_end_time,
                 descending=True,
                 limit=None if target_states else limit,
             )
@@ -118,7 +126,7 @@ class RecorderToolsMixin:
                             "text": (
                                 f"{friendly_name} ({entity_id})\n"
                                 f"Current state: {current_state.state}\n\n"
-                                f"No recorded {search_label} entries were found in the last {hours} hours."
+                                f"No recorded {search_label} entries were found during {window_label}."
                             ),
                         }
                     ]
@@ -127,7 +135,7 @@ class RecorderToolsMixin:
                 "content": [
                     {
                         "type": "text",
-                        "text": f"{friendly_name} ({entity_id})\nCurrent state: {current_state.state}\n\nNo history available for the last {hours} hours.",
+                        "text": f"{friendly_name} ({entity_id})\nCurrent state: {current_state.state}\n\nNo history available during {window_label}.",
                     }
                 ]
             }
@@ -139,9 +147,9 @@ class RecorderToolsMixin:
             "",
             (
                 f"Matching history for {self._describe_history_target(args.get('state'), args.get('event'))} "
-                f"(last {hours} hours):"
+                f"({window_label}):"
                 if target_states
-                else f"Recent history (last {hours} hours):"
+                else f"Recent history ({window_label}):"
             ),
         ]
 
@@ -158,6 +166,9 @@ class RecorderToolsMixin:
                 if target_states
                 else f"Showing {len(entity_states)} change{'s' if len(entity_states) != 1 else ''}"
             )
+        )
+        text_parts.append(
+            "For count questions, use mode='count' or analyze_entity_history so the count is computed from recorder transitions instead of inferred from this limited timeline."
         )
 
         return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
@@ -336,6 +347,10 @@ class RecorderToolsMixin:
         hours = self._coerce_int_arg(
             args.get("hours"), default=default_hours, minimum=1, maximum=8760
         )
+        query_start_time, query_end_time, window_label, hours = self._history_query_window(
+            args,
+            default_hours=hours,
+        )
         history_candidates = self._history_resolution_candidates(
             entity_id,
             args.get("state"),
@@ -365,8 +380,6 @@ class RecorderToolsMixin:
             entity_id=history_entity_id,
         )
 
-        query_end_time = dt_util.utcnow()
-        query_start_time = query_end_time - timedelta(hours=hours)
         include_start_time_state = analysis in {"duration", "streak", "stats"}
 
         async def _load_candidate_history(candidate: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -377,7 +390,7 @@ class RecorderToolsMixin:
 
             candidate_entity_states = await self._fetch_entity_history_states(
                 candidate_entity_id,
-                hours=hours,
+                start_time=query_start_time,
                 end_time=query_end_time,
                 descending=False,
                 include_start_time_state=include_start_time_state,
@@ -497,7 +510,7 @@ class RecorderToolsMixin:
             text_parts = [
                 f"{friendly_name} ({history_entity_id})",
                 f"Current state: {current_state.state}",
-                f"Total time in {search_label} state during the last {hours} hour{'s' if hours != 1 else ''}: {self._format_duration(total_duration)}",
+                f"Total time in {search_label} state during {window_label}: {self._format_duration(total_duration)}",
                 f"Matching interval{'s' if interval_count != 1 else ''}: {interval_count}",
             ]
             text_parts = self._prepend_resolution_note(text_parts, resolution_note)
@@ -680,7 +693,7 @@ class RecorderToolsMixin:
             text_parts = [
                 f"{friendly_name} ({history_entity_id})",
                 f"Current state: {current_state.state}",
-                f"Numeric recorder stats for the last {hours} hour{'s' if hours != 1 else ''}:",
+                f"Numeric recorder stats for {window_label}:",
                 f"Minimum: {self._format_number(stats_result['min'])}"
                 + (
                     f" at {self._format_relative_absolute_time(min_time)}"
@@ -747,7 +760,7 @@ class RecorderToolsMixin:
         text_parts = [
             f"{friendly_name} ({history_entity_id})",
             f"Current state: {current_state.state}",
-            f"Recorded {noun}{'s' if match_count != 1 else ''} in the last {hours} hour{'s' if hours != 1 else ''}: {match_count}",
+            f"Recorded {noun}{'s' if match_count != 1 else ''} during {window_label}: {match_count}",
         ]
 
         if target_filter_states:
@@ -1484,6 +1497,70 @@ class RecorderToolsMixin:
             )
 
         return dt_util.as_utc(parsed)
+
+    def _history_query_window(
+        self,
+        args: Dict[str, Any],
+        *,
+        default_hours: int,
+    ) -> Tuple[Any, Any, str, int]:
+        """Resolve recorder history arguments into an explicit UTC query window."""
+        raw_period = str(args.get("period", "") or "").strip().casefold()
+        start_arg = args.get("start_datetime")
+        end_arg = args.get("end_datetime")
+        now_utc = dt_util.utcnow()
+
+        if start_arg or end_arg or raw_period == "custom":
+            end_time = self._parse_history_datetime(end_arg) if end_arg else now_utc
+            start_time = self._parse_history_datetime(start_arg) if start_arg else None
+            if start_time is None:
+                hours = self._coerce_int_arg(
+                    args.get("hours"),
+                    default=default_hours,
+                    minimum=1,
+                    maximum=8760,
+                )
+                start_time = end_time - timedelta(hours=hours)
+            else:
+                hours = self._window_hours(start_time, end_time, default_hours)
+            return start_time, end_time, "the requested time window", hours
+
+        if raw_period in {"today", "yesterday"}:
+            local_now = dt_util.now()
+            local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if raw_period == "yesterday":
+                end_local = local_midnight
+                start_local = end_local - timedelta(days=1)
+            else:
+                start_local = local_midnight
+                end_local = local_now
+            start_time = dt_util.as_utc(start_local)
+            end_time = dt_util.as_utc(end_local)
+            return (
+                start_time,
+                end_time,
+                raw_period,
+                self._window_hours(start_time, end_time, default_hours),
+            )
+
+        hours = self._coerce_int_arg(
+            args.get("hours"),
+            default=default_hours,
+            minimum=1,
+            maximum=8760,
+        )
+        end_time = now_utc
+        start_time = end_time - timedelta(hours=hours)
+        label = "the last 24 hours" if raw_period == "last_24_hours" else f"the last {hours} hour{'s' if hours != 1 else ''}"
+        return start_time, end_time, label, hours
+
+    def _window_hours(self, start_time: Any, end_time: Any, default_hours: int) -> int:
+        """Return a clamped hour count that represents a concrete history window."""
+        try:
+            hours = int((end_time - start_time).total_seconds() // 3600)
+        except Exception:
+            return default_hours
+        return max(1, min(hours or 1, 8760))
 
     def _build_history_search_windows(self, max_hours: int) -> List[int]:
         """Build progressively larger recorder search windows."""

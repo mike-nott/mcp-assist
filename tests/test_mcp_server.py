@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -1388,7 +1388,104 @@ async def test_analyze_history_falls_back_to_related_contact_sensor_when_primary
 
     assert "Using related entity binary_sensor.front_door" in text
     assert "Front Door (binary_sensor.front_door)" in text
-    assert "Recorded opened event in the last 24 hours: 1" in text
+    assert "Recorded opened event during the last 24 hours: 1" in text
+
+
+@pytest.mark.asyncio
+async def test_analyze_history_counts_calendar_yesterday_transitions(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Calendar-day count questions should query the exact local day window."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    hass.states.async_set(
+        "binary_sensor.front_door",
+        "off",
+        {"friendly_name": "Front Door", "device_class": "door"},
+    )
+
+    fixed_now = datetime(2026, 4, 20, 21, 0, tzinfo=timezone.utc)
+    expected_start = datetime(2026, 4, 19, 0, 0, tzinfo=timezone.utc)
+    expected_end = datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "custom_components.mcp_assist.server_tools.recorder.dt_util.now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "custom_components.mcp_assist.server_tools.recorder.dt_util.utcnow",
+        lambda: fixed_now,
+    )
+
+    history_rows = []
+    for index in range(35):
+        history_rows.append(
+            SimpleNamespace(
+                state="on",
+                last_changed=expected_start + timedelta(minutes=index * 10 + 1),
+                last_updated=expected_start + timedelta(minutes=index * 10 + 1),
+            )
+        )
+        history_rows.append(
+            SimpleNamespace(
+                state="off",
+                last_changed=expected_start + timedelta(minutes=index * 10 + 2),
+                last_updated=expected_start + timedelta(minutes=index * 10 + 2),
+            )
+        )
+
+    async def fake_fetch(entity_id, *args, **kwargs):
+        assert entity_id == "binary_sensor.front_door"
+        assert kwargs["start_time"] == expected_start
+        assert kwargs["end_time"] == expected_end
+        assert kwargs["include_start_time_state"] is False
+        return history_rows
+
+    server._fetch_entity_history_states = AsyncMock(side_effect=fake_fetch)
+
+    result = await server.tool_analyze_entity_history(
+        {
+            "entity_id": "binary_sensor.front_door",
+            "event": "opened",
+            "analysis": "count",
+            "period": "yesterday",
+        }
+    )
+
+    text = result["content"][0]["text"]
+    assert "Recorded opened events during yesterday: 35" in text
+    assert "Counted using recorder state: on" in text
+
+
+@pytest.mark.asyncio
+async def test_get_entity_history_count_mode_delegates_to_analyzer(
+    hass, profile_entry_factory, system_entry_factory
+) -> None:
+    """The generic history tool should not return a limited timeline for count mode."""
+    system_entry_factory()
+    server = MCPServer(hass, 8099, profile_entry_factory())
+    server.tool_analyze_entity_history = AsyncMock(
+        return_value={"content": [{"type": "text", "text": "counted"}]}
+    )
+
+    result = await server.tool_get_entity_history(
+        {
+            "entity_id": "binary_sensor.front_door",
+            "event": "opened",
+            "mode": "count",
+            "period": "yesterday",
+        }
+    )
+
+    assert result["content"][0]["text"] == "counted"
+    server.tool_analyze_entity_history.assert_awaited_once_with(
+        {
+            "entity_id": "binary_sensor.front_door",
+            "event": "opened",
+            "mode": "count",
+            "period": "yesterday",
+            "analysis": "count",
+        }
+    )
 
 
 @pytest.mark.asyncio
