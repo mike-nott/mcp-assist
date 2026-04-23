@@ -1,6 +1,7 @@
 """LM Studio MCP conversation agent."""
 
 import asyncio
+from contextvars import ContextVar, Token
 import json
 import logging
 import re
@@ -64,6 +65,8 @@ from .const import (
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
     CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
@@ -94,6 +97,8 @@ from .const import (
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_INCLUDE_CURRENT_USER,
     DEFAULT_INCLUDE_HOME_LOCATION,
+    DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
     RESPONSE_MODE_INSTRUCTIONS,
     DEVICE_TECHNICAL_INSTRUCTIONS,
@@ -129,6 +134,9 @@ _LOGGER = logging.getLogger(__name__)
 MCP_TOOL_CACHE_TTL_SECONDS = 300.0
 MAX_TOOL_RESULT_CHARS = 8000
 MAX_TOOL_RESULT_LINES = 120
+_REQUEST_USER_INPUT: ContextVar[ConversationInput | None] = ContextVar(
+    "mcp_assist_request_user_input", default=None
+)
 
 
 class MCPAssistConversationEntity(ConversationEntity):
@@ -1223,6 +1231,9 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         # Store ChatLog for tool execution methods to access
         self._current_chat_log = chat_log_instance
+        user_input_token: Token[ConversationInput | None] = _REQUEST_USER_INPUT.set(
+            user_input
+        )
         conversation_id = chat_log_instance.conversation_id
 
         try:
@@ -1231,6 +1242,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             )
         finally:
             # Clean up
+            _REQUEST_USER_INPUT.reset(user_input_token)
             self._current_chat_log = None
 
     async def _async_handle_message_inner(
@@ -1599,6 +1611,71 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.debug("Unable to resolve current HA user: %s", err)
             return ""
 
+    async def _get_current_user_context(
+        self, user_input: ConversationInput | None
+    ) -> dict[str, str]:
+        """Return current HA user metadata for MCP tool call context."""
+        if not self._get_shared_setting(
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+            DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+        ):
+            return {}
+
+        user_id = str(
+            getattr(getattr(user_input, "context", None), "user_id", None) or ""
+        ).strip()
+        if not user_id:
+            return {}
+
+        context = {"user_id": user_id}
+        try:
+            user = await self.hass.auth.async_get_user(user_id)
+            user_name = str(getattr(user, "name", "") or "").strip() if user else ""
+            if user_name:
+                context["user_name"] = user_name
+        except Exception as err:
+            _LOGGER.debug("Unable to resolve current HA user for tool context: %s", err)
+        return context
+
+    def _get_home_location_context(self) -> dict[str, Any]:
+        """Return home-location metadata for MCP tool call context."""
+        if not self._get_shared_setting(
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+            DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+        ):
+            return {}
+
+        context: dict[str, Any] = {}
+
+        location_name = str(
+            getattr(self.hass.config, "location_name", "") or ""
+        ).strip()
+        if location_name:
+            context["home_location"] = location_name
+            context["home_location_name"] = location_name
+
+        latitude = getattr(self.hass.config, "latitude", None)
+        longitude = getattr(self.hass.config, "longitude", None)
+        try:
+            if latitude is not None and longitude is not None:
+                context["home_latitude"] = float(latitude)
+                context["home_longitude"] = float(longitude)
+        except (TypeError, ValueError):
+            pass
+        return context
+
+    async def _build_mcp_tool_call_context(
+        self, user_input: ConversationInput | None = None
+    ) -> dict[str, Any]:
+        """Build privacy-gated MCP tool call context for the active profile."""
+        context: dict[str, Any] = {
+            "profile_entry_id": self.entry.entry_id,
+            "profile_name": self.profile_name,
+        }
+        context.update(await self._get_current_user_context(user_input))
+        context.update(self._get_home_location_context())
+        return context
+
     def _get_default_system_prompt(self) -> str:
         """Get the built-in localized default system prompt."""
         return (
@@ -1944,7 +2021,10 @@ class MCPAssistConversationEntity(ConversationEntity):
         return filtered_tools
 
     async def _call_mcp_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        user_input: ConversationInput | None = None,
     ) -> Dict[str, Any]:
         """Execute a single MCP tool and return the result."""
         _LOGGER.info(f"🔧 Executing MCP tool: {tool_name} with args: {arguments}")
@@ -1968,16 +2048,18 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             # Create JSON-RPC request for tool execution
             request_id = f"tool_{uuid.uuid4().hex[:8]}"
+            tool_user_input = (
+                user_input if user_input is not None else _REQUEST_USER_INPUT.get()
+            )
             payload = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
                 "params": {
                     "name": tool_name,
                     "arguments": arguments,
-                    "context": {
-                        "profile_entry_id": self.entry.entry_id,
-                        "profile_name": self.profile_name,
-                    },
+                    "context": await self._build_mcp_tool_call_context(
+                        tool_user_input
+                    ),
                 },
                 "id": request_id,
             }
