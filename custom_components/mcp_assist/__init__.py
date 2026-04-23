@@ -25,6 +25,8 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_GAP_FILLING,
@@ -47,6 +49,8 @@ from .const import (
     DEFAULT_ALLOWED_IPS,
     DEFAULT_INCLUDE_CURRENT_USER,
     DEFAULT_INCLUDE_HOME_LOCATION,
+    DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     DEFAULT_SEARCH_PROVIDER,
     DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_ENABLE_GAP_FILLING,
@@ -224,6 +228,20 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                         DEFAULT_INCLUDE_HOME_LOCATION,
                     ),
                 ),
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: first_profile.options.get(
+                    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    first_profile.data.get(
+                        CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    ),
+                ),
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: first_profile.options.get(
+                    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    first_profile.data.get(
+                        CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    ),
+                ),
                 CONF_ENABLE_GAP_FILLING: first_profile.options.get(
                     CONF_ENABLE_GAP_FILLING,
                     first_profile.data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING)
@@ -342,6 +360,8 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_ALLOWED_IPS: DEFAULT_ALLOWED_IPS,
                 CONF_INCLUDE_CURRENT_USER: DEFAULT_INCLUDE_CURRENT_USER,
                 CONF_INCLUDE_HOME_LOCATION: DEFAULT_INCLUDE_HOME_LOCATION,
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
                 CONF_ENABLE_ASSIST_BRIDGE: DEFAULT_ENABLE_ASSIST_BRIDGE,
                 CONF_ENABLE_RESPONSE_SERVICE_TOOLS: DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
