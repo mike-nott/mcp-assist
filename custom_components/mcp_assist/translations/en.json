@@ -201,14 +201,18 @@
         "sections": {
           "context": {
             "name": "Context",
-            "description": "Control which shared Home Assistant identity and location details are included in the AI prompt context.",
+            "description": "Control which Home Assistant identity and location details are included in AI prompts and MCP tool-call payloads.",
             "data": {
-              "include_current_user": "Include Current User",
-              "include_home_location": "Include Home Location"
+              "include_current_user": "Include Current User in Prompt",
+              "include_home_location": "Include Home Location in Prompt",
+              "include_current_user_in_tool_calls": "Share Current User with MCP Tools",
+              "include_home_location_in_tool_calls": "Share Home Location with MCP Tools"
             },
             "data_description": {
               "include_current_user": "Include the current Home Assistant user's name in the AI prompt when available.",
-              "include_home_location": "Include a compact home-location summary in the AI prompt, using Home Assistant's configured home name and coordinates."
+              "include_home_location": "Include a compact home-location summary in the AI prompt, using Home Assistant's configured home name and coordinates.",
+              "include_current_user_in_tool_calls": "Send the current Home Assistant user ID and name in MCP tools/call context so tool packages can audit or personalize actions.",
+              "include_home_location_in_tool_calls": "Send Home Assistant's configured home name, latitude, and longitude in MCP tools/call context for tool packages that need location metadata."
             }
           },
           "discovery": {
@@ -489,14 +493,18 @@
         "sections": {
           "context": {
             "name": "Context",
-            "description": "Control which shared Home Assistant identity and location details are included in the AI prompt context.",
+            "description": "Control which Home Assistant identity and location details are included in AI prompts and MCP tool-call payloads.",
             "data": {
-              "include_current_user": "Include Current User",
-              "include_home_location": "Include Home Location"
+              "include_current_user": "Include Current User in Prompt",
+              "include_home_location": "Include Home Location in Prompt",
+              "include_current_user_in_tool_calls": "Share Current User with MCP Tools",
+              "include_home_location_in_tool_calls": "Share Home Location with MCP Tools"
             },
             "data_description": {
               "include_current_user": "Include the current Home Assistant user's name in the AI prompt when available.",
-              "include_home_location": "Include a compact home-location summary in the AI prompt, using Home Assistant's configured home name and coordinates."
+              "include_home_location": "Include a compact home-location summary in the AI prompt, using Home Assistant's configured home name and coordinates.",
+              "include_current_user_in_tool_calls": "Send the current Home Assistant user ID and name in MCP tools/call context so tool packages can audit or personalize actions.",
+              "include_home_location_in_tool_calls": "Send Home Assistant's configured home name, latitude, and longitude in MCP tools/call context for tool packages that need location metadata."
             }
           },
           "discovery": {

@@ -60,6 +60,8 @@ from .const import (
     CONF_ALLOWED_IPS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_GAP_FILLING,
@@ -123,6 +125,8 @@ from .const import (
     DEFAULT_ALLOWED_IPS,
     DEFAULT_INCLUDE_CURRENT_USER,
     DEFAULT_INCLUDE_HOME_LOCATION,
+    DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     DEFAULT_SEARCH_PROVIDER,
     DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_ENABLE_GAP_FILLING,
@@ -665,6 +669,14 @@ def _build_shared_context_section(defaults: dict[str, Any]) -> section:
                 vol.Optional(
                     CONF_INCLUDE_HOME_LOCATION,
                     default=defaults[CONF_INCLUDE_HOME_LOCATION],
+                ): bool,
+                vol.Optional(
+                    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    default=defaults[CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS],
+                ): bool,
+                vol.Optional(
+                    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    default=defaults[CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS],
                 ): bool,
             }
         ),
@@ -1433,6 +1445,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 CONF_INCLUDE_HOME_LOCATION,
                                 DEFAULT_INCLUDE_HOME_LOCATION,
                             ),
+                            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: existing_entry.data.get(
+                                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                                DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                            ),
+                            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: existing_entry.data.get(
+                                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                                DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                            ),
                             CONF_ENABLE_GAP_FILLING: existing_entry.data.get(
                                 CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
                             ),
@@ -1791,6 +1811,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 current_values,
                 CONF_INCLUDE_HOME_LOCATION,
                 DEFAULT_INCLUDE_HOME_LOCATION,
+            ),
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+            ),
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
             ),
             CONF_ENABLE_GAP_FILLING: _get_form_value(
                 current_values,
@@ -2715,6 +2745,28 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     sys_data.get(
                         CONF_INCLUDE_HOME_LOCATION,
                         DEFAULT_INCLUDE_HOME_LOCATION,
+                    ),
+                ),
+            ),
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                sys_options.get(
+                    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    sys_data.get(
+                        CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    ),
+                ),
+            ),
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                sys_options.get(
+                    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    sys_data.get(
+                        CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
                     ),
                 ),
             ),

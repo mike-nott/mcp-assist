@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from custom_components.mcp_assist import agent as agent_module
 from custom_components.mcp_assist.agent import MCPAssistConversationEntity
 from custom_components.mcp_assist.custom_tools.builtin_catalog import (
     load_builtin_tool_toggle_specs,
@@ -17,6 +19,8 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_ENABLE_WEB_SEARCH,
     CONF_CLEAN_RESPONSES,
@@ -484,6 +488,76 @@ async def test_default_prompt_omits_optional_identity_context_when_disabled(
 
 
 @pytest.mark.asyncio
+async def test_mcp_tool_call_context_includes_enabled_user_and_home_location(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Tool packages should receive identity/location context when explicitly enabled."""
+    system_entry_factory(
+        data={
+            CONF_INCLUDE_CURRENT_USER: False,
+            CONF_INCLUDE_HOME_LOCATION: False,
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: True,
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: True,
+        }
+    )
+    hass.config.location_name = "Example Home"
+    hass.config.latitude = 12.3456
+    hass.config.longitude = -65.4321
+    monkeypatch.setattr(
+        hass.auth,
+        "async_get_user",
+        AsyncMock(return_value=SimpleNamespace(name="Jason")),
+    )
+    entry = profile_entry_factory(data={CONF_PROFILE_NAME: "Kitchen Profile"})
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    context = await agent._build_mcp_tool_call_context(
+        SimpleNamespace(context=SimpleNamespace(user_id="user-123"))
+    )
+
+    assert context["profile_entry_id"] == entry.entry_id
+    assert context["profile_name"] == "Kitchen Profile"
+    assert context["user_id"] == "user-123"
+    assert context["user_name"] == "Jason"
+    assert context["home_location"] == "Example Home"
+    assert context["home_location_name"] == "Example Home"
+    assert context["home_latitude"] == 12.3456
+    assert context["home_longitude"] == -65.4321
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_call_context_omits_disabled_user_and_home_location(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Prompt context settings should not automatically share metadata with tools."""
+    system_entry_factory(
+        data={
+            CONF_INCLUDE_CURRENT_USER: True,
+            CONF_INCLUDE_HOME_LOCATION: True,
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: False,
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: False,
+        }
+    )
+    hass.config.location_name = "Test Home"
+    monkeypatch.setattr(
+        hass.auth,
+        "async_get_user",
+        AsyncMock(return_value=SimpleNamespace(name="Jason")),
+    )
+    entry = profile_entry_factory(data={CONF_PROFILE_NAME: "Kitchen Profile"})
+    agent = MCPAssistConversationEntity(hass, entry)
+
+    context = await agent._build_mcp_tool_call_context(
+        SimpleNamespace(context=SimpleNamespace(user_id="user-123"))
+    )
+
+    assert context == {
+        "profile_entry_id": entry.entry_id,
+        "profile_name": "Kitchen Profile",
+    }
+
+
+@pytest.mark.asyncio
 async def test_custom_prompt_with_index_placeholder_fetches_index(
     hass, profile_entry_factory
 ) -> None:
@@ -758,9 +832,15 @@ def test_format_tool_result_for_llm_preserves_structured_results_without_binary(
 
 @pytest.mark.asyncio
 async def test_call_mcp_tool_includes_profile_context(
-    hass, profile_entry_factory, monkeypatch
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
 ) -> None:
     """MCP tool calls should identify the active profile for settings-aware tools."""
+    system_entry_factory(
+        data={
+            CONF_INCLUDE_CURRENT_USER: False,
+            CONF_INCLUDE_HOME_LOCATION: False,
+        }
+    )
     entry = profile_entry_factory(data={CONF_PROFILE_NAME: "Kitchen Profile"})
     agent = MCPAssistConversationEntity(hass, entry)
     captured: dict[str, object] = {}
@@ -810,6 +890,85 @@ async def test_call_mcp_tool_includes_profile_context(
         "profile_entry_id": entry.entry_id,
         "profile_name": "Kitchen Profile",
     }
+
+
+@pytest.mark.asyncio
+async def test_call_mcp_tool_uses_task_local_user_context(
+    hass, profile_entry_factory, system_entry_factory, monkeypatch
+) -> None:
+    """Concurrent requests must not borrow user context from shared entity state."""
+    system_entry_factory(
+        data={
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: True,
+            CONF_INCLUDE_HOME_LOCATION: False,
+        }
+    )
+
+    async def async_get_user(user_id):
+        await asyncio.sleep(0)
+        return SimpleNamespace(name=f"Name {user_id}")
+
+    monkeypatch.setattr(hass.auth, "async_get_user", async_get_user)
+    entry = profile_entry_factory(data={CONF_PROFILE_NAME: "Kitchen Profile"})
+    agent = MCPAssistConversationEntity(hass, entry)
+    captured: list[dict[str, object]] = []
+
+    class _FakeResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [{"type": "text", "text": "ok"}],
+                    "isError": False,
+                },
+            }
+
+    class _FakeSession:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, json):
+            del url
+            captured.append(json)
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "custom_components.mcp_assist.agent.aiohttp.ClientSession",
+        _FakeSession,
+    )
+
+    async def call_as(user_id: str) -> None:
+        token = agent_module._REQUEST_USER_INPUT.set(
+            SimpleNamespace(context=SimpleNamespace(user_id=user_id))
+        )
+        try:
+            await agent._call_mcp_tool("sample_tool_status", {})
+        finally:
+            agent_module._REQUEST_USER_INPUT.reset(token)
+
+    await asyncio.gather(call_as("user-a"), call_as("user-b"))
+
+    contexts = {
+        payload["params"]["context"]["user_id"]: payload["params"]["context"]
+        for payload in captured
+    }
+    assert set(contexts) == {"user-a", "user-b"}
+    assert contexts["user-a"]["user_name"] == "Name user-a"
+    assert contexts["user-b"]["user_name"] == "Name user-b"
 
 
 def test_clean_text_for_tts_removes_spaces_before_punctuation(

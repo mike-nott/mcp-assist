@@ -54,6 +54,8 @@ from custom_components.mcp_assist.const import (
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_INCLUDE_CURRENT_USER,
     CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
     CONF_ENABLE_MEMORY_TOOLS,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
@@ -490,6 +492,8 @@ async def test_shared_mcp_step_groups_context_discovery_and_tools(hass) -> None:
     assert context_keys == {
         CONF_INCLUDE_CURRENT_USER,
         CONF_INCLUDE_HOME_LOCATION,
+        CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+        CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     }
     assert discovery_keys == {
         CONF_ENABLE_GAP_FILLING,
