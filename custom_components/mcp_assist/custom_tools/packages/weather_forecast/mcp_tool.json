@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "weather_forecast",
+  "name": "Weather Forecast",
+  "description": "Built-in Home Assistant weather forecast helper tool.",
+  "version": "1.0.0",
+  "entrypoint": "tool:WeatherPackageTool",
+  "prompt_append_file": "prompt.md",
+  "capabilities": [
+    "Finds and summarizes Home Assistant weather forecasts."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "get_weather_forecast"
+    ],
+    "shared_setting_key": "enable_weather_forecast_tool",
+    "profile_setting_key": "profile_enable_weather_forecast_tool",
+    "shared_default": true,
+    "profile_default": true,
+    "shared_label": "Weather Forecast",
+    "shared_description": "Expose the dedicated Home Assistant weather forecast helper.",
+    "profile_disable_label": "Disable Weather Forecast",
+    "profile_disable_description": "Prevents this profile from using the dedicated Home Assistant weather forecast helper."
+  }
+}

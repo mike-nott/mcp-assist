@@ -5,10 +5,13 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.components import conversation
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 
+from .custom_tools.builtin_catalog import (
+    get_builtin_shared_setting_value,
+    load_builtin_tool_toggle_specs,
+)
 from .const import (
     DOMAIN,
     SYSTEM_ENTRY_UNIQUE_ID,
@@ -17,17 +20,53 @@ from .const import (
     CONF_TECHNICAL_PROMPT,
     CONF_PROFILE_NAME,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
+    SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
     CONF_SERVER_TYPE,
     CONF_TIMEOUT,
-    DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_INCLUDE_CURRENT_USER,
+    DEFAULT_INCLUDE_HOME_LOCATION,
+    DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_ENABLE_GAP_FILLING,
+    DEFAULT_ENABLE_ASSIST_BRIDGE,
+    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+    DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+    DEFAULT_ENABLE_DEVICE_TOOLS,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_TIMEOUT,
     SERVER_TYPE_OPENCLAW,
     CONF_OPENCLAW_HOST,
@@ -69,11 +108,57 @@ def get_system_entry(hass: HomeAssistant) -> ConfigEntry | None:
     return None
 
 
+async def _async_handle_reload_external_custom_tools(call: ServiceCall) -> dict:
+    """Reload external custom tools on the shared MCP server."""
+    hass = call.hass
+    server = hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+    if server is None:
+        return {
+            "enabled": False,
+            "loaded_tools": [],
+            "load_errors": ["Shared MCP server is not running"],
+        }
+
+    reload_external_custom_tools = getattr(
+        server,
+        "reload_external_custom_tools",
+        None,
+    )
+    if not callable(reload_external_custom_tools):
+        return {
+            "enabled": False,
+            "loaded_tools": [],
+            "load_errors": ["Reload is not supported by this MCP server build"],
+        }
+
+    return await reload_external_custom_tools()
+
+
+async def _async_register_services(hass: HomeAssistant) -> None:
+    """Register MCP Assist domain services once."""
+    if hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS):
+        return
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS,
+        _async_handle_reload_external_custom_tools,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+
+async def _async_unregister_services(hass: HomeAssistant) -> None:
+    """Unregister MCP Assist domain services when the last profile unloads."""
+    if hass.services.has_service(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS):
+        hass.services.async_remove(DOMAIN, SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS)
+
+
 async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
     """Ensure system entry exists, create from first profile if not (self-healing)."""
     system_entry = get_system_entry(hass)
 
     if system_entry is None:
+        built_in_specs = await hass.async_add_executor_job(load_builtin_tool_toggle_specs)
         _LOGGER.info("System entry not found, creating from first profile's settings (self-healing)")
 
         # Find first profile entry to copy shared settings from
@@ -106,6 +191,20 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     CONF_MCP_PORT,
                     first_profile.data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
                 ),
+                CONF_ENABLE_WEB_SEARCH: first_profile.options.get(
+                    CONF_ENABLE_WEB_SEARCH,
+                    first_profile.data.get(
+                        CONF_ENABLE_WEB_SEARCH,
+                        (
+                            search_provider != DEFAULT_SEARCH_PROVIDER
+                            if search_provider
+                            else first_profile.options.get(
+                                CONF_ENABLE_CUSTOM_TOOLS,
+                                first_profile.data.get(CONF_ENABLE_CUSTOM_TOOLS, False),
+                            )
+                        ),
+                    ),
+                ),
                 CONF_SEARCH_PROVIDER: search_provider,
                 CONF_BRAVE_API_KEY: first_profile.options.get(
                     CONF_BRAVE_API_KEY,
@@ -115,21 +214,171 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     CONF_ALLOWED_IPS,
                     first_profile.data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
                 ),
+                CONF_INCLUDE_CURRENT_USER: first_profile.options.get(
+                    CONF_INCLUDE_CURRENT_USER,
+                    first_profile.data.get(
+                        CONF_INCLUDE_CURRENT_USER,
+                        DEFAULT_INCLUDE_CURRENT_USER,
+                    ),
+                ),
+                CONF_INCLUDE_HOME_LOCATION: first_profile.options.get(
+                    CONF_INCLUDE_HOME_LOCATION,
+                    first_profile.data.get(
+                        CONF_INCLUDE_HOME_LOCATION,
+                        DEFAULT_INCLUDE_HOME_LOCATION,
+                    ),
+                ),
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: first_profile.options.get(
+                    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    first_profile.data.get(
+                        CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    ),
+                ),
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: first_profile.options.get(
+                    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    first_profile.data.get(
+                        CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    ),
+                ),
                 CONF_ENABLE_GAP_FILLING: first_profile.options.get(
                     CONF_ENABLE_GAP_FILLING,
                     first_profile.data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING)
                 ),
+                CONF_ENABLE_ASSIST_BRIDGE: first_profile.options.get(
+                    CONF_ENABLE_ASSIST_BRIDGE,
+                    first_profile.data.get(
+                        CONF_ENABLE_ASSIST_BRIDGE, DEFAULT_ENABLE_ASSIST_BRIDGE
+                    ),
+                ),
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                        DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_WEATHER_FORECAST_TOOL: first_profile.options.get(
+                    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                    first_profile.data.get(
+                        CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                    ),
+                ),
+                CONF_ENABLE_RECORDER_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_RECORDER_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_RECORDER_TOOLS, DEFAULT_ENABLE_RECORDER_TOOLS
+                    ),
+                ),
+                CONF_ENABLE_MEMORY_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_MEMORY_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_MEMORY_TOOLS, DEFAULT_ENABLE_MEMORY_TOOLS
+                    ),
+                ),
+                CONF_ENABLE_CALCULATOR_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_CALCULATOR_TOOLS,
+                        DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                        first_profile.options.get(
+                            CONF_ENABLE_CALCULATOR_TOOLS,
+                            first_profile.data.get(
+                                CONF_ENABLE_CALCULATOR_TOOLS,
+                                DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                            ),
+                        ),
+                    ),
+                ),
+                CONF_ENABLE_DEVICE_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_DEVICE_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_DEVICE_TOOLS,
+                        DEFAULT_ENABLE_DEVICE_TOOLS,
+                    ),
+                ),
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: first_profile.options.get(
+                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    first_profile.data.get(
+                        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                        DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    ),
+                ),
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: first_profile.options.get(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    first_profile.data.get(
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    ),
+                ),
+                CONF_MEMORY_DEFAULT_TTL_DAYS: first_profile.options.get(
+                    CONF_MEMORY_DEFAULT_TTL_DAYS,
+                    first_profile.data.get(
+                        CONF_MEMORY_DEFAULT_TTL_DAYS,
+                        DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+                    ),
+                ),
+                CONF_MEMORY_MAX_TTL_DAYS: first_profile.options.get(
+                    CONF_MEMORY_MAX_TTL_DAYS,
+                    first_profile.data.get(
+                        CONF_MEMORY_MAX_TTL_DAYS,
+                        DEFAULT_MEMORY_MAX_TTL_DAYS,
+                    ),
+                ),
+                CONF_MEMORY_MAX_ITEMS: first_profile.options.get(
+                    CONF_MEMORY_MAX_ITEMS,
+                    first_profile.data.get(
+                        CONF_MEMORY_MAX_ITEMS,
+                        DEFAULT_MEMORY_MAX_ITEMS,
+                    ),
+                ),
             }
+            for spec in built_in_specs:
+                shared_settings[spec.shared_setting_key] = get_builtin_shared_setting_value(
+                    spec,
+                    lambda key, default=None: first_profile.options.get(
+                        key,
+                        first_profile.data.get(key, default),
+                    ),
+                )
         else:
             # No profiles exist yet (shouldn't happen in normal flow), use defaults
             _LOGGER.info("No existing profiles found, using default shared settings")
             shared_settings = {
                 CONF_MCP_PORT: DEFAULT_MCP_PORT,
+                CONF_ENABLE_WEB_SEARCH: DEFAULT_ENABLE_WEB_SEARCH,
                 CONF_SEARCH_PROVIDER: DEFAULT_SEARCH_PROVIDER,
                 CONF_BRAVE_API_KEY: DEFAULT_BRAVE_API_KEY,
                 CONF_ALLOWED_IPS: DEFAULT_ALLOWED_IPS,
+                CONF_INCLUDE_CURRENT_USER: DEFAULT_INCLUDE_CURRENT_USER,
+                CONF_INCLUDE_HOME_LOCATION: DEFAULT_INCLUDE_HOME_LOCATION,
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
+                CONF_ENABLE_ASSIST_BRIDGE: DEFAULT_ENABLE_ASSIST_BRIDGE,
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS: DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                CONF_ENABLE_WEATHER_FORECAST_TOOL: DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                CONF_ENABLE_RECORDER_TOOLS: DEFAULT_ENABLE_RECORDER_TOOLS,
+                CONF_ENABLE_MEMORY_TOOLS: DEFAULT_ENABLE_MEMORY_TOOLS,
+                CONF_ENABLE_CALCULATOR_TOOLS: DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS: DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                CONF_ENABLE_DEVICE_TOOLS: DEFAULT_ENABLE_DEVICE_TOOLS,
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                CONF_MEMORY_DEFAULT_TTL_DAYS: DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+                CONF_MEMORY_MAX_TTL_DAYS: DEFAULT_MEMORY_MAX_TTL_DAYS,
+                CONF_MEMORY_MAX_ITEMS: DEFAULT_MEMORY_MAX_ITEMS,
             }
+            for spec in built_in_specs:
+                shared_settings[spec.shared_setting_key] = spec.shared_default
 
         # Create system entry with extracted/default settings
         await hass.config_entries.flow.async_init(
@@ -208,10 +457,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.data[DOMAIN]["mcp_port"] = mcp_port
 
                 _LOGGER.info("✅ Shared MCP server and index manager created successfully")
+                await _async_register_services(hass)
             else:
                 # Reuse existing MCP server
                 mcp_port = hass.data[DOMAIN]["mcp_port"]
                 _LOGGER.info("Reusing existing shared MCP server on port %d", mcp_port)
+                await _async_register_services(hass)
 
             # Increment reference count
             hass.data[DOMAIN]["mcp_refcount"] += 1
@@ -332,6 +583,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN].pop("index_manager", None)
             hass.data[DOMAIN].pop("mcp_port", None)
             hass.data[DOMAIN].pop("mcp_refcount", None)
+            await _async_unregister_services(hass)
         else:
             _LOGGER.info("Shared MCP server still in use by %d profile(s)", refcount)
 

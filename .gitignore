@@ -131,6 +131,7 @@ known_devices.yaml
 # Development/Test files
 test_*.py
 test_*.sh
+!tests/test_*.py
 restart_ha.py
 monitor_mcp.sh
 quick_test_tools.sh

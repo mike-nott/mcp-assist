@@ -1,4 +1,5 @@
-"""Read URL custom tool for ha-lmstudio-mcp."""
+"""Read URL custom tool for MCP Assist."""
+import asyncio
 import aiohttp
 import logging
 from typing import Dict, Any, List
@@ -27,6 +28,7 @@ class ReadUrlTool:
         return [{
             "name": "read_url",
             "description": "Read and extract text content from a webpage URL",
+            "llmDescription": "Read webpage text from a URL.",
             "inputSchema": {
                 "$schema": "http://json-schema.org/draft-07/schema#",
                 "type": "object",
@@ -74,7 +76,7 @@ class ReadUrlTool:
 
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (compatible; ha-lmstudio-mcp/1.0)"
+                "User-Agent": "Mozilla/5.0 (compatible; mcp-assist/1.0)"
             }
 
             async with aiohttp.ClientSession() as session:
@@ -139,7 +141,7 @@ class ReadUrlTool:
                         }]
                     }
 
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:
             return {
                 "content": [{
                     "type": "text",
@@ -164,8 +166,18 @@ class ReadUrlTool:
         import re
 
         # Remove script and style blocks
-        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(
+            r"<script\b[^>]*>.*?</script\b[^>]*>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        html = re.sub(
+            r"<style\b[^>]*>.*?</style\b[^>]*>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
 
         # Remove HTML comments
         html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)

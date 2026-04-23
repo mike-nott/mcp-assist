@@ -240,7 +240,41 @@ DOMAIN_REGISTRY = {
                 ],
             },
         },
+        "response_services": ["browse_media", "search_media"],
         "description": "Control media players and streaming devices",
+    },
+    "music_assistant": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_COMMON,
+        "services": [
+            "play_media",
+            "play_announcement",
+            "transfer_queue",
+        ],
+        "parameters": {
+            "play_media": {
+                "required": ["media_id"],
+                "optional": [
+                    "media_type",
+                    "artist",
+                    "album",
+                    "enqueue",
+                    "radio_mode",
+                ],
+            },
+            "play_announcement": {
+                "required": ["url"],
+                "optional": [
+                    "use_pre_announce",
+                    "pre_announce_url",
+                    "announce_volume",
+                ],
+            },
+            "transfer_queue": {
+                "optional": ["source_player", "auto_play"],
+            },
+        },
+        "description": "Control Music Assistant playback and queue transfer actions",
     },
     "vacuum": {
         "type": TYPE_CONTROLLABLE,
@@ -584,7 +618,59 @@ DOMAIN_REGISTRY = {
             "get_forecast": {"required": ["type"]},
             "get_forecasts": {"required": ["type"]},
         },
+        "response_services": ["get_forecast", "get_forecasts"],
         "description": "Weather information and forecasts",
+    },
+    "calendar": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_SPECIALIZED,
+        "services": ["create_event"],
+        "parameters": {
+            "create_event": {
+                "required": ["summary"],
+                "optional": [
+                    "description",
+                    "location",
+                    "start_date",
+                    "end_date",
+                    "start_date_time",
+                    "end_date_time",
+                    "in",
+                ]
+            }
+        },
+        "response_services": ["get_events"],
+        "description": "Read calendar events and create new calendar events",
+    },
+    "todo": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_SPECIALIZED,
+        "services": [
+            "add_item",
+            "update_item",
+            "remove_item",
+            "remove_completed_items",
+        ],
+        "parameters": {
+            "add_item": {
+                "required": ["item"],
+                "optional": ["due_date", "due_datetime", "description"],
+            },
+            "update_item": {
+                "required": ["item"],
+                "optional": [
+                    "rename",
+                    "status",
+                    "due_date",
+                    "due_datetime",
+                    "description",
+                ],
+            },
+            "remove_item": {"required": ["item"]},
+            "remove_completed_items": {"required": []},
+        },
+        "response_services": ["get_items"],
+        "description": "Manage to-do lists and query their items",
     },
     "sun": {
         "type": TYPE_READ_ONLY,
@@ -733,11 +819,21 @@ def map_action_to_service(domain: str, action: str) -> str:
             return "open_cover"
         elif action in ["lower", "drop"]:
             return "close_cover"
+    elif domain == "calendar":
+        if action in ["create", "add", "new", "schedule"]:
+            return "create_event"
     elif domain == "lock":
         if action == "secure":
             return "lock"
         elif action == "unsecure":
             return "unlock"
+    elif domain == "todo":
+        if action in ["create", "add", "new"]:
+            return "add_item"
+        if action in ["delete", "remove"]:
+            return "remove_item"
+        if action in ["clear_completed", "remove_completed", "cleanup"]:
+            return "remove_completed_items"
     elif domain == "vacuum":
         if action == "clean":
             return "start"
@@ -845,7 +941,115 @@ def validate_service_parameters(
             f"Missing required parameters for {domain}.{service}: {', '.join(missing)}",
         )
 
+    if domain == "calendar" and service == "create_event":
+        has_date_range = "start_date" in provided_params or "end_date" in provided_params
+        has_datetime_range = (
+            "start_date_time" in provided_params or "end_date_time" in provided_params
+        )
+        has_relative_time = "in" in provided_params
+
+        mode_count = sum((has_date_range, has_datetime_range, has_relative_time))
+        if mode_count == 0:
+            return (
+                False,
+                "Missing calendar time fields for calendar.create_event. Provide either "
+                "start_date/end_date, start_date_time/end_date_time, or 'in'.",
+            )
+        if mode_count > 1:
+            return (
+                False,
+                "calendar.create_event accepts only one scheduling mode: either "
+                "start_date/end_date, start_date_time/end_date_time, or 'in'.",
+            )
+        if has_date_range and not {
+            "start_date",
+            "end_date",
+        }.issubset(provided_params):
+            return (
+                False,
+                "calendar.create_event requires both start_date and end_date when using all-day dates.",
+            )
+        if has_datetime_range and not {
+            "start_date_time",
+            "end_date_time",
+        }.issubset(provided_params):
+            return (
+                False,
+                "calendar.create_event requires both start_date_time and end_date_time when using timed events.",
+            )
+
+    if domain == "todo":
+        if "due_date" in provided_params and "due_datetime" in provided_params:
+            return (
+                False,
+                f"{domain}.{service} accepts only one of due_date or due_datetime.",
+            )
+
+        if service == "update_item" and not any(
+            key in provided_params
+            for key in (
+                "rename",
+                "status",
+                "due_date",
+                "due_datetime",
+                "description",
+            )
+        ):
+            return (
+                False,
+                "todo.update_item requires at least one update field such as rename, status, due_date, due_datetime, or description.",
+            )
+
     return True, "Parameters valid"
+
+
+def get_response_services(domain: str) -> List[str]:
+    """Get response-returning services for a domain."""
+    domain_info = get_domain_info(domain)
+    if not domain_info:
+        return []
+
+    response_services = domain_info.get("response_services")
+    if response_services is not None:
+        return list(response_services)
+
+    if domain_info.get("type") == TYPE_READ_ONLY:
+        return list(domain_info.get("services", []))
+
+    return []
+
+
+def validate_response_service(domain: str, service: str) -> Tuple[bool, str]:
+    """Validate if a service is supported for response-returning reads."""
+    domain_info = get_domain_info(domain)
+
+    if not domain_info:
+        similar = [d for d in DOMAIN_REGISTRY.keys() if domain in d or d in domain]
+        if similar:
+            return (
+                False,
+                f"Domain '{domain}' not supported. Did you mean: {', '.join(similar[:3])}?",
+            )
+        return (
+            False,
+            f"Domain '{domain}' not supported. Use 'list_domains' to see available domains.",
+        )
+
+    available_services = get_response_services(domain)
+    if service in available_services:
+        return True, service
+
+    if available_services:
+        return (
+            False,
+            f"Service '{service}' is not supported for response reads on {domain}. "
+            f"Available: {', '.join(available_services[:5])}",
+        )
+
+    return (
+        False,
+        f"Domain '{domain}' has no supported response-returning read services.",
+    )
 
 
 def get_domains_by_type(domain_type: str) -> List[str]:
@@ -892,9 +1096,11 @@ __all__ = [
     "get_domain_info",
     "get_supported_domains",
     "validate_domain_action",
+    "validate_response_service",
     "map_action_to_service",
     "get_service_parameters",
     "validate_service_parameters",
+    "get_response_services",
     "get_domains_by_type",
     "get_domain_statistics",
     "PRIORITY_ESSENTIAL",
