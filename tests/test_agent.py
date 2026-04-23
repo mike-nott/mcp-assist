@@ -438,8 +438,8 @@ async def test_default_prompt_includes_current_user_and_home_location_context(
         }
     )
     hass.config.location_name = "Test Home"
-    hass.config.latitude = 47.6205
-    hass.config.longitude = -122.3493
+    hass.config.latitude = 12.3456
+    hass.config.longitude = -65.4321
     monkeypatch.setattr(
         hass.auth,
         "async_get_user",
@@ -453,7 +453,7 @@ async def test_default_prompt_includes_current_user_and_home_location_context(
     )
 
     assert "Current user: Jason" in prompt
-    assert "Home location: Test Home (47.6205, -122.3493)" in prompt
+    assert "Home location: Test Home (12.3456, -65.4321)" in prompt
 
 
 @pytest.mark.asyncio
