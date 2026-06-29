@@ -12,18 +12,24 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
-    BooleanSelector,
 )
 
+from .custom_tools.builtin_catalog import (
+    BuiltInToolToggleSpec,
+    get_builtin_profile_setting_value,
+    get_builtin_shared_setting_value,
+    load_builtin_tool_toggle_specs,
+)
 from .localization import get_language_instruction, get_follow_up_phrases, get_end_words
 
 from .const import (
@@ -38,6 +44,8 @@ from .const import (
     CONF_AUTO_START,
     CONF_SYSTEM_PROMPT,
     CONF_TECHNICAL_PROMPT,
+    CONF_SYSTEM_PROMPT_MODE,
+    CONF_TECHNICAL_PROMPT_MODE,
     CONF_CONTROL_HA,
     CONF_FOLLOW_UP_MODE,
     CONF_RESPONSE_MODE,
@@ -47,10 +55,28 @@ from .const import (
     CONF_MAX_ITERATIONS,
     CONF_DEBUG_MODE,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     CONF_SEARCH_PROVIDER,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_ENABLE_GAP_FILLING,
+    CONF_ENABLE_ASSIST_BRIDGE,
+    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+    CONF_ENABLE_RECORDER_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_DEVICE_TOOLS,
+    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    CONF_MEMORY_DEFAULT_TTL_DAYS,
+    CONF_MEMORY_MAX_TTL_DAYS,
+    CONF_MEMORY_MAX_ITEMS,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
     CONF_OLLAMA_KEEP_ALIVE,
@@ -86,32 +112,676 @@ from .const import (
     DEFAULT_MODEL_NAME,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
+    PROMPT_MODE_DEFAULT,
+    PROMPT_MODE_CUSTOM,
     DEFAULT_CONTROL_HA,
-    DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
     DEFAULT_TEMPERATURE,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_HISTORY,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_DEBUG_MODE,
-    DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
+    DEFAULT_INCLUDE_CURRENT_USER,
+    DEFAULT_INCLUDE_HOME_LOCATION,
+    DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
     DEFAULT_SEARCH_PROVIDER,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_ENABLE_GAP_FILLING,
+    DEFAULT_ENABLE_ASSIST_BRIDGE,
+    DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+    DEFAULT_ENABLE_RECORDER_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+    DEFAULT_ENABLE_DEVICE_TOOLS,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_TTL_DAYS,
+    DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_NUM_CTX,
     DEFAULT_FOLLOW_UP_PHRASES,
     DEFAULT_END_WORDS,
     DEFAULT_CLEAN_RESPONSES,
     DEFAULT_TIMEOUT,
-    DEFAULT_API_KEY,
+    TOOL_FAMILY_ASSIST_BRIDGE,
+    TOOL_FAMILY_DEVICE,
+    TOOL_FAMILY_EXTERNAL_CUSTOM,
+    TOOL_FAMILY_MEMORY,
+    TOOL_FAMILY_PROFILE_SETTINGS,
+    TOOL_FAMILY_SHARED_SETTINGS,
     OPENAI_BASE_URL,
-    GEMINI_BASE_URL,
     OPENROUTER_BASE_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _prompt_mode_selector() -> SelectSelector:
+    """Build a prompt source selector."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=[PROMPT_MODE_DEFAULT, PROMPT_MODE_CUSTOM],
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key="prompt_source_mode",
+        )
+    )
+
+
+def _get_default_system_prompt(hass: HomeAssistant) -> str:
+    """Get the localized default system prompt."""
+    return get_language_instruction(hass.config.language) or DEFAULT_SYSTEM_PROMPT
+
+
+def _infer_prompt_mode(
+    explicit_mode: Any, stored_prompt: Any, default_prompt: str
+) -> str:
+    """Infer prompt mode with backward compatibility for older entries."""
+    if explicit_mode in {PROMPT_MODE_DEFAULT, PROMPT_MODE_CUSTOM}:
+        return explicit_mode
+    if stored_prompt in (None, "", default_prompt):
+        return PROMPT_MODE_DEFAULT
+    return PROMPT_MODE_CUSTOM
+
+
+def _get_current_prompt_mode(
+    current_values: dict[str, Any] | None,
+    *,
+    mode_key: str,
+    stored_mode: Any,
+    stored_prompt: Any,
+    default_prompt: str,
+) -> str:
+    """Get the prompt mode from current form values or stored settings."""
+    if current_values and mode_key in current_values:
+        current_mode = current_values.get(mode_key)
+        if current_mode in {PROMPT_MODE_DEFAULT, PROMPT_MODE_CUSTOM}:
+            return current_mode
+
+    return _infer_prompt_mode(stored_mode, stored_prompt, default_prompt)
+
+
+def _get_prompt_text_default(
+    current_values: dict[str, Any] | None,
+    *,
+    prompt_key: str,
+    stored_mode: Any = None,
+    stored_prompt: Any,
+    default_prompt: str = "",
+) -> str:
+    """Get the effective prompt text to prefill in the form."""
+    if current_values and prompt_key in current_values:
+        value = current_values.get(prompt_key)
+        return "" if value is None else str(value)
+
+    inferred_mode = _infer_prompt_mode(stored_mode, stored_prompt, default_prompt)
+    if inferred_mode == PROMPT_MODE_DEFAULT or stored_prompt in (None, ""):
+        return str(default_prompt)
+
+    return str(stored_prompt)
+
+
+def _normalize_prompt_inputs(
+    user_input: dict[str, Any], server_type: str, default_system_prompt: str
+) -> dict[str, Any]:
+    """Normalize prompt override inputs before storing."""
+    normalized = dict(user_input)
+
+    def _normalize_prompt(prompt_key: str, mode_key: str, default_prompt: str) -> None:
+        raw_value = normalized.get(prompt_key, "")
+        text = "" if raw_value is None else str(raw_value)
+        if not text.strip() or text.strip() == default_prompt.strip():
+            normalized.pop(prompt_key, None)
+            normalized[mode_key] = PROMPT_MODE_DEFAULT
+        else:
+            normalized[prompt_key] = text
+            normalized[mode_key] = PROMPT_MODE_CUSTOM
+
+    if server_type == SERVER_TYPE_OPENCLAW:
+        normalized[CONF_SYSTEM_PROMPT_MODE] = PROMPT_MODE_DEFAULT
+        normalized.pop(CONF_SYSTEM_PROMPT, None)
+    else:
+        _normalize_prompt(
+            CONF_SYSTEM_PROMPT,
+            CONF_SYSTEM_PROMPT_MODE,
+            default_system_prompt,
+        )
+
+    _normalize_prompt(
+        CONF_TECHNICAL_PROMPT,
+        CONF_TECHNICAL_PROMPT_MODE,
+        DEFAULT_TECHNICAL_PROMPT,
+    )
+
+    return normalized
+
+
+def _get_form_value(
+    current_values: dict[str, Any] | None, key: str, fallback: Any
+) -> Any:
+    """Prefer in-progress form values over stored defaults."""
+    if current_values and key in current_values:
+        return current_values[key]
+    return fallback
+
+
+def _optional_with_suggested_value(key: str, suggested_value: str | None) -> vol.Optional:
+    """Build an optional marker that pre-fills a value without forcing it."""
+    if suggested_value not in (None, ""):
+        return vol.Optional(key, description={"suggested_value": suggested_value})
+    return vol.Optional(key)
+
+
+TOOLS_SECTION_KEY = "tools"
+DISCOVERY_SECTION_KEY = "discovery"
+CONTEXT_SECTION_KEY = "context"
+MEMORY_SECTION_KEY = "memory"
+PROFILE_SECTION_KEY = "profile"
+CONNECTION_SECTION_KEY = "connection"
+MODEL_SECTION_KEY = "model_fields"
+PROMPTS_SECTION_KEY = "prompts"
+CONVERSATION_SECTION_KEY = "conversation"
+PERFORMANCE_SECTION_KEY = "performance"
+PROVIDER_SECTION_KEY = "provider"
+ADVANCED_SECTION_KEY = "advanced_settings"
+DISABLE_ASSIST_BRIDGE_FIELD = "disable_assist_bridge"
+DISABLE_CUSTOM_TOOLS_FIELD = "disable_custom_tools"
+DISABLE_DEVICE_FIELD = "disable_device"
+DISABLE_MEMORY_FIELD = "disable_memory"
+DISABLE_MUSIC_ASSISTANT_FIELD = "disable_music_assistant"
+DISABLE_RECORDER_FIELD = "disable_recorder"
+DISABLE_RESPONSE_SERVICE_FIELD = "disable_response_service"
+DISABLE_WEATHER_FORECAST_FIELD = "disable_weather_forecast"
+
+STATIC_TOOL_FAMILY_ALPHABETICAL = [
+    TOOL_FAMILY_ASSIST_BRIDGE,
+    TOOL_FAMILY_EXTERNAL_CUSTOM,
+    TOOL_FAMILY_DEVICE,
+    TOOL_FAMILY_MEMORY,
+]
+
+PROFILE_DISABLE_FIELD_BY_FAMILY = {
+    TOOL_FAMILY_ASSIST_BRIDGE: DISABLE_ASSIST_BRIDGE_FIELD,
+    TOOL_FAMILY_EXTERNAL_CUSTOM: DISABLE_CUSTOM_TOOLS_FIELD,
+    TOOL_FAMILY_DEVICE: DISABLE_DEVICE_FIELD,
+    TOOL_FAMILY_MEMORY: DISABLE_MEMORY_FIELD,
+}
+
+STATIC_TOOL_FAMILY_SHARED_LABELS = {
+    TOOL_FAMILY_ASSIST_BRIDGE: "Assist Bridge",
+    TOOL_FAMILY_EXTERNAL_CUSTOM: "Custom Tools",
+    TOOL_FAMILY_DEVICE: "Device Tools",
+    TOOL_FAMILY_MEMORY: "Memory",
+}
+
+STATIC_TOOL_FAMILY_PROFILE_DISABLE_LABELS = {
+    TOOL_FAMILY_ASSIST_BRIDGE: "Disable Assist Bridge",
+    TOOL_FAMILY_EXTERNAL_CUSTOM: "Disable Custom Tools",
+    TOOL_FAMILY_DEVICE: "Disable Device Tools",
+    TOOL_FAMILY_MEMORY: "Disable Memory",
+}
+
+
+def _flatten_section_values(
+    user_input: dict[str, Any], *section_keys: str
+) -> dict[str, Any]:
+    """Flatten nested section payloads into a plain config dict."""
+    normalized = dict(user_input)
+
+    for section_key in section_keys:
+        section_values = normalized.pop(section_key, None)
+        if isinstance(section_values, dict):
+            normalized.update(section_values)
+
+    return normalized
+
+
+async def _async_load_builtin_tool_toggle_specs(
+    hass: HomeAssistant,
+) -> tuple[BuiltInToolToggleSpec, ...]:
+    """Load built-in packaged-tool metadata asynchronously."""
+    return await hass.async_add_executor_job(load_builtin_tool_toggle_specs)
+
+
+def _builtin_shared_field_key(spec: BuiltInToolToggleSpec) -> str:
+    """Return the stable shared-form checkbox key for a built-in package."""
+    return spec.shared_setting_key
+
+
+def _builtin_profile_disable_field_key(spec: BuiltInToolToggleSpec) -> str:
+    """Return the stable profile disable checkbox key for a built-in package."""
+    return f"disable_{spec.package_id}"
+
+
+def _profile_tool_disabled_default(
+    current_values: dict[str, Any] | None,
+    family: str,
+    options: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> bool:
+    """Return whether a profile tool family should default to disabled in the form."""
+    options = options or {}
+    data = data or {}
+    disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+    if current_values and disable_field in current_values:
+        return bool(current_values[disable_field])
+
+    setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
+    stored_value = options.get(setting_key, data.get(setting_key))
+    return stored_value is False
+
+
+def _builtin_profile_tool_disabled_default(
+    current_values: dict[str, Any] | None,
+    spec: BuiltInToolToggleSpec,
+    options: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> bool:
+    """Return whether a built-in packaged tool should default to disabled."""
+    options = options or {}
+    data = data or {}
+    disable_field = _builtin_profile_disable_field_key(spec)
+    if current_values and disable_field in current_values:
+        return bool(current_values[disable_field])
+
+    stored_value = get_builtin_profile_setting_value(
+        spec,
+        lambda key, default=None: options.get(key, data.get(key, default)),
+    )
+    return stored_value is False
+
+
+def _apply_profile_tool_disables(
+    user_input: dict[str, Any],
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...] = (),
+) -> dict[str, Any]:
+    """Map profile disable checkboxes to stored profile enable flags."""
+    normalized = dict(user_input)
+    for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
+        disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+        disabled = bool(normalized.pop(disable_field, False))
+        setting_key, _default = TOOL_FAMILY_PROFILE_SETTINGS[family]
+        if disabled:
+            normalized[setting_key] = False
+        else:
+            normalized.pop(setting_key, None)
+
+    for spec in built_in_specs:
+        disable_field = _builtin_profile_disable_field_key(spec)
+        disabled = bool(normalized.pop(disable_field, False))
+        if not disabled and spec.profile_disable_label in normalized:
+            disabled = bool(normalized.pop(spec.profile_disable_label, False))
+        if disabled:
+            normalized[spec.profile_setting_key] = False
+        else:
+            normalized.pop(spec.profile_setting_key, None)
+
+    return normalized
+
+
+def _normalize_search_provider(value: Any) -> str:
+    """Normalize a stored search provider value."""
+    normalized = str(value or "").strip().casefold()
+    return normalized or DEFAULT_SEARCH_PROVIDER
+
+
+def _infer_web_search_enabled(
+    explicit_enabled: Any,
+    search_provider: Any,
+    legacy_enable_custom_tools: Any = False,
+) -> bool:
+    """Infer whether web search should be enabled."""
+    if explicit_enabled is not None:
+        return bool(explicit_enabled)
+
+    provider = _normalize_search_provider(search_provider)
+    if provider != DEFAULT_SEARCH_PROVIDER:
+        return True
+
+    return bool(legacy_enable_custom_tools)
+
+
+def _normalize_shared_tool_inputs(
+    user_input: dict[str, Any],
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...] = (),
+) -> dict[str, Any]:
+    """Normalize shared tool-family settings before storing."""
+    normalized = dict(user_input)
+
+    for spec in built_in_specs:
+        field_key = _builtin_shared_field_key(spec)
+        if field_key in normalized:
+            normalized[spec.shared_setting_key] = bool(normalized.pop(field_key))
+            continue
+
+        legacy_label_key = spec.shared_label
+        if legacy_label_key in normalized:
+            normalized[spec.shared_setting_key] = bool(normalized.pop(legacy_label_key))
+
+    search_provider = _normalize_search_provider(
+        normalized.get(CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER)
+    )
+
+    built_in_search_enabled = any(
+        bool(normalized.get(spec.shared_setting_key, spec.shared_default))
+        for spec in built_in_specs
+        if spec.requires_search_provider
+    )
+    legacy_web_search_enabled = bool(
+        normalized.get(CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH)
+    )
+
+    if (
+        built_in_search_enabled or legacy_web_search_enabled
+    ) and search_provider == DEFAULT_SEARCH_PROVIDER:
+        normalized[CONF_SEARCH_PROVIDER] = "duckduckgo"
+    else:
+        normalized[CONF_SEARCH_PROVIDER] = search_provider
+
+    memory_max_ttl = normalized.get(
+        CONF_MEMORY_MAX_TTL_DAYS,
+        DEFAULT_MEMORY_MAX_TTL_DAYS,
+    )
+    try:
+        memory_max_ttl = max(1, int(memory_max_ttl))
+    except (TypeError, ValueError):
+        memory_max_ttl = DEFAULT_MEMORY_MAX_TTL_DAYS
+    normalized[CONF_MEMORY_MAX_TTL_DAYS] = memory_max_ttl
+
+    memory_default_ttl = normalized.get(
+        CONF_MEMORY_DEFAULT_TTL_DAYS,
+        DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+    )
+    try:
+        memory_default_ttl = int(memory_default_ttl)
+    except (TypeError, ValueError):
+        memory_default_ttl = DEFAULT_MEMORY_DEFAULT_TTL_DAYS
+    normalized[CONF_MEMORY_DEFAULT_TTL_DAYS] = max(1, min(memory_default_ttl, memory_max_ttl))
+
+    return normalized
+
+
+def _build_profile_tools_section(
+    current_values: dict[str, Any] | None,
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...],
+    options: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> section:
+    """Build the per-profile tool preferences section."""
+    options = options or {}
+    data = data or {}
+    profile_tool_entries: list[tuple[str, vol.Optional, type[bool]]] = []
+    for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
+        disable_field = PROFILE_DISABLE_FIELD_BY_FAMILY[family]
+        profile_tool_entries.append(
+            (
+                STATIC_TOOL_FAMILY_PROFILE_DISABLE_LABELS[family].casefold(),
+                vol.Optional(
+                    disable_field,
+                    default=_profile_tool_disabled_default(
+                        current_values, family, options, data
+                    ),
+                ),
+                bool,
+            )
+        )
+
+    for spec in built_in_specs:
+        profile_tool_entries.append(
+            (
+                spec.profile_disable_label.casefold(),
+                vol.Optional(
+                    _builtin_profile_disable_field_key(spec),
+                    default=_builtin_profile_tool_disabled_default(
+                        current_values,
+                        spec,
+                        options,
+                        data,
+                    ),
+                ),
+                bool,
+            )
+        )
+
+    profile_tool_fields = {
+        marker: value_type
+        for _label, marker, value_type in sorted(
+            profile_tool_entries,
+            key=lambda item: item[0],
+        )
+    }
+
+    return section(
+        vol.Schema(profile_tool_fields),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_tools_section(
+    defaults: dict[str, Any],
+    built_in_specs: tuple[BuiltInToolToggleSpec, ...],
+) -> section:
+    """Build the shared MCP server optional tools section."""
+    shared_tool_entries: list[tuple[str, vol.Optional, type[bool]]] = []
+    for family in STATIC_TOOL_FAMILY_ALPHABETICAL:
+        setting_key, default = TOOL_FAMILY_SHARED_SETTINGS[family]
+        shared_tool_entries.append(
+            (
+                STATIC_TOOL_FAMILY_SHARED_LABELS[family].casefold(),
+                vol.Optional(
+                    setting_key,
+                    default=_get_form_value(defaults, setting_key, default),
+                ),
+                bool,
+            )
+        )
+
+    for spec in built_in_specs:
+        shared_tool_entries.append(
+            (
+                spec.shared_label.casefold(),
+                vol.Optional(
+                    _builtin_shared_field_key(spec),
+                    default=_get_form_value(
+                        defaults,
+                        spec.shared_setting_key,
+                        spec.shared_default,
+                    ),
+                ),
+                bool,
+            )
+        )
+
+    shared_tool_fields = {
+        marker: value_type
+        for _label, marker, value_type in sorted(
+            shared_tool_entries,
+            key=lambda item: item[0],
+        )
+    }
+
+    return section(
+        vol.Schema(
+            {
+                **shared_tool_fields,
+                vol.Required(
+                    CONF_SEARCH_PROVIDER,
+                    default=_get_form_value(
+                        defaults, CONF_SEARCH_PROVIDER, DEFAULT_SEARCH_PROVIDER
+                    ),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": "duckduckgo", "label": "DuckDuckGo"},
+                            {
+                                "value": "brave",
+                                "label": "Brave Search (requires API key)",
+                            },
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_BRAVE_API_KEY,
+                    default=_get_form_value(
+                        defaults, CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
+                    ),
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_discovery_section(defaults: dict[str, Any]) -> section:
+    """Build the shared MCP server discovery settings section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ENABLE_GAP_FILLING,
+                    default=defaults[CONF_ENABLE_GAP_FILLING],
+                ): bool,
+                vol.Optional(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    default=defaults[CONF_MAX_ENTITIES_PER_DISCOVERY],
+                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_context_section(defaults: dict[str, Any]) -> section:
+    """Build the shared AI-context settings section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_INCLUDE_CURRENT_USER,
+                    default=defaults[CONF_INCLUDE_CURRENT_USER],
+                ): bool,
+                vol.Optional(
+                    CONF_INCLUDE_HOME_LOCATION,
+                    default=defaults[CONF_INCLUDE_HOME_LOCATION],
+                ): bool,
+                vol.Optional(
+                    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    default=defaults[CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS],
+                ): bool,
+                vol.Optional(
+                    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    default=defaults[CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS],
+                ): bool,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_shared_memory_section(defaults: dict[str, Any]) -> section:
+    """Build shared persisted-memory settings."""
+    return section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MEMORY_DEFAULT_TTL_DAYS,
+                    default=defaults[CONF_MEMORY_DEFAULT_TTL_DAYS],
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                vol.Optional(
+                    CONF_MEMORY_MAX_TTL_DAYS,
+                    default=defaults[CONF_MEMORY_MAX_TTL_DAYS],
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                vol.Optional(
+                    CONF_MEMORY_MAX_ITEMS,
+                    default=defaults[CONF_MEMORY_MAX_ITEMS],
+                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=5000)),
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_profile_identity_section(profile_name: str) -> section:
+    """Build the profile identity section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Required(CONF_PROFILE_NAME, default=profile_name): str,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_connection_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap connection-related fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_model_section(current_model: str, model_field: Any) -> section:
+    """Build the model-selection section."""
+    return section(
+        vol.Schema(
+            {
+                vol.Required(CONF_MODEL_NAME, default=current_model): model_field,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+
+def _build_prompt_section(
+    *,
+    system_prompt_value: str | None = None,
+    technical_prompt_value: str | None,
+    include_system_prompt: bool = True,
+) -> section:
+    """Build the prompt editing section."""
+    schema_items: dict[Any, Any] = {}
+    if include_system_prompt:
+        schema_items[
+            _optional_with_suggested_value(CONF_SYSTEM_PROMPT, system_prompt_value)
+        ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
+    schema_items[
+        _optional_with_suggested_value(
+            CONF_TECHNICAL_PROMPT, technical_prompt_value
+        )
+    ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_conversation_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap conversation-behavior fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_performance_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap performance-related fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_provider_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap provider-specific fields in a section."""
+    return section(vol.Schema(schema_items), {"collapsed": False})
+
+
+def _build_advanced_section(schema_items: dict[Any, Any]) -> section:
+    """Wrap advanced settings in a collapsed section."""
+    return section(vol.Schema(schema_items), {"collapsed": True})
+
+
+def _needs_prompt_followup(
+    user_input: dict[str, Any], server_type: str
+) -> bool:
+    """Config-flow forms are static per step; prompt followup is no longer used."""
+    del user_input, server_type
+    return False
 
 
 async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]:
@@ -159,7 +829,7 @@ async def fetch_models_from_openai(
 
         # Only include Authorization header if API key looks valid
         # Some custom OpenAI-compatible services don't require authentication
-        if api_key and len(api_key) > 5 and not api_key.lower() in ["none", "null", "fake", "na", "n/a"]:
+        if api_key and len(api_key) > 5 and api_key.lower() not in ["none", "null", "fake", "na", "n/a"]:
             headers["Authorization"] = f"Bearer {api_key}"
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -566,21 +1236,31 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle step 3 - model selection and prompts."""
         errors: dict[str, str] = {}
 
+        # Get server type to determine model source
+        server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        default_system_prompt = _get_default_system_prompt(self.hass)
+
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input, MODEL_SECTION_KEY, PROMPTS_SECTION_KEY
+            )
+            user_input = _normalize_prompt_inputs(
+                user_input, server_type, default_system_prompt
+            )
             # Store data and move to step 4 (advanced)
             self.step3_data = user_input
             return await self.async_step_advanced()
 
-        # Get server type to determine model source
-        server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
         models = []
+        current_values = getattr(self, "step3_data", {})
 
-        # OpenClaw doesn't need model/prompt selection — skip straight to advanced
         if server_type == SERVER_TYPE_OPENCLAW:
             self.step3_data = {
-                CONF_MODEL_NAME: "",
+                CONF_MODEL_NAME: "main",
                 CONF_SYSTEM_PROMPT: "",
                 CONF_TECHNICAL_PROMPT: "",
+                CONF_SYSTEM_PROMPT_MODE: PROMPT_MODE_DEFAULT,
+                CONF_TECHNICAL_PROMPT_MODE: PROMPT_MODE_DEFAULT,
             }
             return await self.async_step_advanced()
         elif server_type in [
@@ -630,59 +1310,51 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_api_key"
 
         # Build dynamic schema based on whether models were fetched
+        current_model = current_values.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
         if models:
             # Show dropdown with available models (custom_value allows free text input)
             _LOGGER.info("Showing model dropdown with %d models", len(models))
-            model_schema = vol.Schema(
-                {
-                    vol.Required(CONF_MODEL_NAME): SelectSelector(
-                        SelectSelectorConfig(
-                            options=models,
-                            mode=SelectSelectorMode.DROPDOWN,
-                            custom_value=True,
-                        )
-                    ),
-                    vol.Required(
-                        CONF_SYSTEM_PROMPT,
-                        default=get_language_instruction(self.hass.config.language)
-                        or DEFAULT_SYSTEM_PROMPT,
-                    ): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-                    ),
-                    vol.Required(
-                        CONF_TECHNICAL_PROMPT, default=DEFAULT_TECHNICAL_PROMPT
-                    ): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-                    ),
-                }
+            model_field = SelectSelector(
+                SelectSelectorConfig(
+                    options=models,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    custom_value=True,
+                )
             )
         else:
             # Show text input as fallback
             _LOGGER.info("No models fetched, showing text input")
-            model_schema = vol.Schema(
-                {
-                    vol.Required(CONF_MODEL_NAME, default=DEFAULT_MODEL_NAME): str,
-                    vol.Required(
-                        CONF_SYSTEM_PROMPT,
-                        default=get_language_instruction(self.hass.config.language)
-                        or DEFAULT_SYSTEM_PROMPT,
-                    ): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-                    ),
-                    vol.Required(
-                        CONF_TECHNICAL_PROMPT, default=DEFAULT_TECHNICAL_PROMPT
-                    ): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
-                    ),
-                }
-            )
+            model_field = str
+
+        system_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_SYSTEM_PROMPT,
+            stored_prompt=None,
+            default_prompt=default_system_prompt,
+        )
+        technical_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_TECHNICAL_PROMPT,
+            stored_prompt=None,
+            default_prompt=DEFAULT_TECHNICAL_PROMPT,
+        )
+
+        schema_dict: dict[Any, Any] = {
+            MODEL_SECTION_KEY: _build_model_section(current_model, model_field),
+            PROMPTS_SECTION_KEY: _build_prompt_section(
+                system_prompt_value=system_prompt_suggestion,
+                technical_prompt_value=technical_prompt_suggestion,
+            ),
+        }
+
+        model_schema = vol.Schema(schema_dict)
 
         return self.async_show_form(
             step_id="model",
             data_schema=model_schema,
             errors=errors,
             description_placeholders={
-                "server_info": "Select a model and customize the system prompt. Models are automatically loaded from your server."
+                "server_info": "Select a model. The prompt fields are prefilled with the current effective prompts so you can review, copy, or edit them directly. If you leave a prompt unchanged, the integration keeps using the built-in version from code. Models are automatically loaded from your server."
             },
         )
 
@@ -691,11 +1363,21 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle step 4 - advanced settings."""
         errors: dict[str, str] = {}
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         # Get server type to determine which fields to show
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input,
+                CONVERSATION_SECTION_KEY,
+                PERFORMANCE_SECTION_KEY,
+                PROVIDER_SECTION_KEY,
+                TOOLS_SECTION_KEY,
+            )
+            user_input = _apply_profile_tool_disables(user_input, built_in_specs)
+
             # For OpenClaw, set defaults for LLM-specific fields (not shown in UI)
             if server_type == SERVER_TYPE_OPENCLAW:
                 user_input[CONF_TEMPERATURE] = DEFAULT_TEMPERATURE
@@ -755,10 +1437,73 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_ALLOWED_IPS: existing_entry.data.get(
                                 CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
                             ),
+                            CONF_INCLUDE_CURRENT_USER: existing_entry.data.get(
+                                CONF_INCLUDE_CURRENT_USER,
+                                DEFAULT_INCLUDE_CURRENT_USER,
+                            ),
+                            CONF_INCLUDE_HOME_LOCATION: existing_entry.data.get(
+                                CONF_INCLUDE_HOME_LOCATION,
+                                DEFAULT_INCLUDE_HOME_LOCATION,
+                            ),
+                            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: existing_entry.data.get(
+                                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                                DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                            ),
+                            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: existing_entry.data.get(
+                                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                                DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                            ),
                             CONF_ENABLE_GAP_FILLING: existing_entry.data.get(
                                 CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
                             ),
+                            CONF_ENABLE_ASSIST_BRIDGE: existing_entry.data.get(
+                                CONF_ENABLE_ASSIST_BRIDGE,
+                                DEFAULT_ENABLE_ASSIST_BRIDGE,
+                            ),
+                            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                            ),
+                            CONF_ENABLE_WEATHER_FORECAST_TOOL: existing_entry.data.get(
+                                CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                                DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                            ),
+                            CONF_ENABLE_RECORDER_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_RECORDER_TOOLS,
+                                DEFAULT_ENABLE_RECORDER_TOOLS,
+                            ),
+                            CONF_ENABLE_CALCULATOR_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_CALCULATOR_TOOLS,
+                                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                            ),
+                            CONF_ENABLE_UNIT_CONVERSION_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                                existing_entry.data.get(
+                                    CONF_ENABLE_CALCULATOR_TOOLS,
+                                    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                                ),
+                            ),
+                            CONF_ENABLE_DEVICE_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_DEVICE_TOOLS,
+                                DEFAULT_ENABLE_DEVICE_TOOLS,
+                            ),
+                            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: existing_entry.data.get(
+                                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                            ),
                         }
+                        for spec in built_in_specs:
+                            shared_settings[spec.shared_setting_key] = (
+                                existing_entry.data.get(
+                                    spec.shared_setting_key,
+                                    get_builtin_shared_setting_value(
+                                        spec,
+                                        lambda key, default=None: existing_entry.data.get(
+                                            key, default
+                                        ),
+                                    ),
+                                )
+                            )
 
                     # Combine data from steps 1-4 + shared settings
                     combined_data = {
@@ -802,12 +1547,75 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Build schema based on server type
         if server_type == SERVER_TYPE_OPENCLAW:
-            # OpenClaw - show conversation settings but hide LLM-specific fields
             advanced_schema_dict = {
+                CONVERSATION_SECTION_KEY: _build_conversation_section(
+                    {
+                        vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
+                        vol.Required(
+                            CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
+                        ): SelectSelector(
+                            SelectSelectorConfig(
+                                options=[
+                                    {"value": "none", "label": "None"},
+                                    {"value": "default", "label": "Smart"},
+                                    {"value": "always", "label": "Always"},
+                                ],
+                                mode=SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_FOLLOW_UP_PHRASES,
+                            default=get_follow_up_phrases(self.hass.config.language),
+                        ): TextSelector(TextSelectorConfig(multiline=True)),
+                        vol.Optional(
+                            CONF_END_WORDS,
+                            default=get_end_words(self.hass.config.language),
+                        ): TextSelector(TextSelectorConfig(multiline=True)),
+                        vol.Optional(
+                            CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
+                        ): bool,
+                    }
+                ),
+                PERFORMANCE_SECTION_KEY: _build_performance_section(
+                    {
+                        vol.Required(CONF_TIMEOUT, default=60): vol.All(
+                            vol.Coerce(int), vol.Range(min=5, max=300)
+                        ),
+                        vol.Required(
+                            CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE
+                        ): bool,
+                    }
+                ),
+                PROVIDER_SECTION_KEY: _build_provider_section(
+                    {
+                        vol.Optional(
+                            CONF_OPENCLAW_SESSION_KEY,
+                            default=DEFAULT_OPENCLAW_SESSION_KEY,
+                        ): str,
+                    }
+                ),
+            }
+        else:
+            performance_schema_items: dict[Any, Any] = {
+                vol.Required(CONF_TEMPERATURE, default=default_temp): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
+                vol.Required(CONF_MAX_TOKENS, default=DEFAULT_MAX_TOKENS): vol.Coerce(
+                    int
+                ),
+                vol.Required(CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY): vol.Coerce(
+                    int
+                ),
+                vol.Required(
+                    CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS
+                ): vol.Coerce(int),
+                vol.Required(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
+                    vol.Coerce(int), vol.Range(min=5, max=300)
+                ),
+                vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
+            }
+            conversation_schema_items: dict[Any, Any] = {
                 vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
-                vol.Optional(
-                    CONF_OPENCLAW_SESSION_KEY, default=DEFAULT_OPENCLAW_SESSION_KEY
-                ): str,
                 vol.Required(
                     CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
                 ): SelectSelector(
@@ -827,85 +1635,57 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_END_WORDS, default=get_end_words(self.hass.config.language)
                 ): TextSelector(TextSelectorConfig(multiline=True)),
-                vol.Optional(
-                    CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
-                ): bool,
-                vol.Required(CONF_TIMEOUT, default=60): vol.All(
-                    vol.Coerce(int), vol.Range(min=5, max=300)
-                ),
-                vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
+                vol.Optional(CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES): bool,
             }
-        else:
-            # Other servers - show all fields
             advanced_schema_dict = {
-                vol.Required(CONF_TEMPERATURE, default=default_temp): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                CONVERSATION_SECTION_KEY: _build_conversation_section(
+                    conversation_schema_items
                 ),
-                vol.Required(CONF_MAX_TOKENS, default=DEFAULT_MAX_TOKENS): vol.Coerce(
-                    int
+                PERFORMANCE_SECTION_KEY: _build_performance_section(
+                    performance_schema_items
                 ),
             }
 
             # Add Ollama-specific fields in correct position (after Max Tokens)
             if server_type == SERVER_TYPE_OLLAMA:
-                advanced_schema_dict[
-                    vol.Optional(CONF_OLLAMA_NUM_CTX, default=DEFAULT_OLLAMA_NUM_CTX)
-                ] = vol.Coerce(int)
-                advanced_schema_dict[
-                    vol.Optional(
-                        CONF_OLLAMA_KEEP_ALIVE, default=DEFAULT_OLLAMA_KEEP_ALIVE
-                    )
-                ] = str
+                advanced_schema_dict[PROVIDER_SECTION_KEY] = _build_provider_section(
+                    {
+                        vol.Optional(
+                            CONF_OLLAMA_NUM_CTX, default=DEFAULT_OLLAMA_NUM_CTX
+                        ): vol.Coerce(int),
+                        vol.Optional(
+                            CONF_OLLAMA_KEEP_ALIVE,
+                            default=DEFAULT_OLLAMA_KEEP_ALIVE,
+                        ): str,
+                    }
+                )
 
-            # Continue with remaining fields
-            advanced_schema_dict.update(
-                {
-                    vol.Required(
-                        CONF_MAX_HISTORY, default=DEFAULT_MAX_HISTORY
-                    ): vol.Coerce(int),
-                    vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
-                    vol.Required(
-                        CONF_MAX_ITERATIONS, default=DEFAULT_MAX_ITERATIONS
-                    ): vol.Coerce(int),
-                    vol.Required(
-                        CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[
-                                {"value": "none", "label": "None"},
-                                {"value": "default", "label": "Smart"},
-                                {"value": "always", "label": "Always"},
-                            ],
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_FOLLOW_UP_PHRASES,
-                        default=get_follow_up_phrases(self.hass.config.language),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_END_WORDS, default=get_end_words(self.hass.config.language)
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_CLEAN_RESPONSES, default=DEFAULT_CLEAN_RESPONSES
-                    ): bool,
-                    vol.Required(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
-                        vol.Coerce(int), vol.Range(min=5, max=300)
-                    ),
-                    vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
-                }
-            )
+        advanced_schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
+            getattr(self, "step4_data", {}),
+            built_in_specs,
+        )
 
         advanced_schema = vol.Schema(advanced_schema_dict)
 
         # Set description based on server type
         if server_type == SERVER_TYPE_OPENCLAW:
             description_placeholders = {
-                "advanced_info": "OpenClaw manages temperature, token limits, history, and tool iterations internally. Only essential settings are shown."
+                "advanced_info": (
+                    "OpenClaw manages model selection, token limits, history, and "
+                    "tool execution on the gateway. Only conversation, timeout, "
+                    "session, and profile-level tool settings are shown here. The "
+                    "Tools section still lets this profile disable specific shared "
+                    "MCP tool families."
+                )
             }
         else:
             description_placeholders = {
-                "advanced_info": "Configure temperature, token limits, and other advanced options."
+                "advanced_info": (
+                    "These settings are organized by conversation behavior, performance, "
+                    "provider-specific options, and tools. The Tools section only affects "
+                    "this profile and can disable specific shared MCP tool families for "
+                    "smaller models."
+                )
             }
 
         return self.async_show_form(
@@ -918,8 +1698,20 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_mcp_server(self, user_input=None) -> FlowResult:
         """Handle step 5 - shared MCP server settings (first profile only)."""
         errors: dict[str, str] = {}
+        current_values = user_input or {}
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input,
+                CONTEXT_SECTION_KEY,
+                DISCOVERY_SECTION_KEY,
+                MEMORY_SECTION_KEY,
+                TOOLS_SECTION_KEY,
+            )
+            user_input = _normalize_shared_tool_inputs(user_input, built_in_specs)
+            current_values = user_input
+
             # Validate MCP port
             mcp_port = user_input.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
             if not 1024 <= mcp_port <= 65535:
@@ -991,36 +1783,143 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data=combined_data,
                 )
 
+        shared_defaults = {
+            CONF_SEARCH_PROVIDER: _get_form_value(
+                current_values,
+                CONF_SEARCH_PROVIDER,
+                DEFAULT_SEARCH_PROVIDER,
+            ),
+            CONF_ENABLE_WEB_SEARCH: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEB_SEARCH,
+                _infer_web_search_enabled(
+                    current_values.get(CONF_ENABLE_WEB_SEARCH),
+                    current_values.get(CONF_SEARCH_PROVIDER),
+                ),
+            ),
+            CONF_BRAVE_API_KEY: _get_form_value(
+                current_values,
+                CONF_BRAVE_API_KEY,
+                DEFAULT_BRAVE_API_KEY,
+            ),
+            CONF_INCLUDE_CURRENT_USER: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER,
+                DEFAULT_INCLUDE_CURRENT_USER,
+            ),
+            CONF_INCLUDE_HOME_LOCATION: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION,
+                DEFAULT_INCLUDE_HOME_LOCATION,
+            ),
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+            ),
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+            ),
+            CONF_ENABLE_GAP_FILLING: _get_form_value(
+                current_values,
+                CONF_ENABLE_GAP_FILLING,
+                DEFAULT_ENABLE_GAP_FILLING,
+            ),
+            CONF_MAX_ENTITIES_PER_DISCOVERY: _get_form_value(
+                current_values,
+                CONF_MAX_ENTITIES_PER_DISCOVERY,
+                DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+            ),
+            CONF_ENABLE_ASSIST_BRIDGE: _get_form_value(
+                current_values,
+                CONF_ENABLE_ASSIST_BRIDGE,
+                DEFAULT_ENABLE_ASSIST_BRIDGE,
+            ),
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+            ),
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+            ),
+            CONF_ENABLE_RECORDER_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RECORDER_TOOLS,
+                DEFAULT_ENABLE_RECORDER_TOOLS,
+            ),
+            CONF_ENABLE_MEMORY_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_MEMORY_TOOLS,
+                DEFAULT_ENABLE_MEMORY_TOOLS,
+            ),
+            CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_DEVICE_TOOLS,
+                DEFAULT_ENABLE_DEVICE_TOOLS,
+            ),
+            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: _get_form_value(
+                current_values,
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+            ),
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+            ),
+            CONF_MEMORY_DEFAULT_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_DEFAULT_TTL_DAYS,
+                DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+            ),
+            CONF_MEMORY_MAX_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_TTL_DAYS,
+                DEFAULT_MEMORY_MAX_TTL_DAYS,
+            ),
+            CONF_MEMORY_MAX_ITEMS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_ITEMS,
+                DEFAULT_MEMORY_MAX_ITEMS,
+            ),
+        }
+        for spec in built_in_specs:
+            shared_defaults[spec.shared_setting_key] = _get_form_value(
+                current_values,
+                spec.shared_setting_key,
+                get_builtin_shared_setting_value(
+                    spec,
+                    lambda key, default=None: current_values.get(key, default),
+                ),
+            )
+
         # Build schema for MCP server settings
         mcp_schema = vol.Schema(
             {
-                vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
                 vol.Required(
-                    CONF_SEARCH_PROVIDER, default=DEFAULT_SEARCH_PROVIDER
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {"value": "none", "label": "Disabled"},
-                            {"value": "duckduckgo", "label": "DuckDuckGo"},
-                            {
-                                "value": "brave",
-                                "label": "Brave Search (requires API key)",
-                            },
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
+                    CONF_MCP_PORT,
+                    default=_get_form_value(
+                        current_values, CONF_MCP_PORT, DEFAULT_MCP_PORT
+                    ),
+                ): vol.Coerce(int),
+                vol.Optional(
+                    CONF_ALLOWED_IPS,
+                    default=_get_form_value(
+                        current_values, CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
+                    ),
+                ): str,
+                CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
+                DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
+                MEMORY_SECTION_KEY: _build_shared_memory_section(shared_defaults),
+                TOOLS_SECTION_KEY: _build_shared_tools_section(
+                    shared_defaults,
+                    built_in_specs,
                 ),
-                vol.Optional(
-                    CONF_BRAVE_API_KEY, default=DEFAULT_BRAVE_API_KEY
-                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-                vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
-                vol.Optional(
-                    CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING
-                ): bool,
-                vol.Optional(
-                    CONF_MAX_ENTITIES_PER_DISCOVERY,
-                    default=DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
-                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
             }
         )
 
@@ -1029,7 +1928,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=mcp_schema,
             errors=errors,
             description_placeholders={
-                "info": "⚠️ These settings will be shared across ALL profiles. Restart Home Assistant after making changes."
+                "info": (
+                    "⚠️ These settings define the shared MCP server capabilities "
+                    "available to all profiles and external MCP clients. Individual "
+                    "profiles can still disable specific tool families later."
+                )
             },
         )
 
@@ -1082,8 +1985,27 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_mcp_server()
 
         errors: dict[str, str] = {}
+        server_type = self.config_entry.data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        default_system_prompt = _get_default_system_prompt(self.hass)
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input,
+                PROFILE_SECTION_KEY,
+                CONNECTION_SECTION_KEY,
+                MODEL_SECTION_KEY,
+                PROMPTS_SECTION_KEY,
+                CONVERSATION_SECTION_KEY,
+                PROVIDER_SECTION_KEY,
+                ADVANCED_SECTION_KEY,
+                TOOLS_SECTION_KEY,
+            )
+            user_input = _apply_profile_tool_disables(user_input, built_in_specs)
+            user_input = _normalize_prompt_inputs(
+                user_input, server_type, default_system_prompt
+            )
+
             if not errors:
                 # Support both old and new config keys
                 if (
@@ -1100,8 +2022,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 if server_type == SERVER_TYPE_OPENCLAW:
                     if CONF_MODEL_NAME not in user_input:
                         user_input[CONF_MODEL_NAME] = "main"
-                    if CONF_SYSTEM_PROMPT not in user_input:
-                        user_input[CONF_SYSTEM_PROMPT] = ""  # OpenClaw manages its own
+                    user_input[CONF_SYSTEM_PROMPT] = ""
+                    user_input[CONF_TECHNICAL_PROMPT] = ""
+                    user_input[CONF_SYSTEM_PROMPT_MODE] = PROMPT_MODE_DEFAULT
+                    user_input[CONF_TECHNICAL_PROMPT_MODE] = PROMPT_MODE_DEFAULT
 
                 # Store profile settings and proceed to MCP server settings
                 self.profile_options = user_input
@@ -1110,9 +2034,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
         # Get current values from options, then data, then defaults
         options = self.config_entry.options
         data = self.config_entry.data
-
-        # Get server type (can't be changed in options)
-        server_type = data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+        current_values = self.profile_options or {}
 
         # Handle backward compatibility
         response_mode_value = options.get(
@@ -1121,8 +2043,9 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
 
         # Fetch models based on server type
         models = []
-        current_model = options.get(
-            CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
+        current_model = current_values.get(
+            CONF_MODEL_NAME,
+            options.get(CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)),
         )
 
         # OpenClaw doesn't have /v1/models - skip model fetching
@@ -1136,8 +2059,12 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             SERVER_TYPE_VLLM,
         ]:
             # Local servers - fetch from URL
-            server_url = options.get(
-                CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)
+            server_url = _get_form_value(
+                current_values,
+                CONF_LMSTUDIO_URL,
+                options.get(
+                    CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)
+                ),
             ).rstrip("/")
             _LOGGER.info(
                 f"🔍 OPTIONS: Attempting to fetch models from {server_type} at {server_url}"
@@ -1149,7 +2076,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 _LOGGER.error(f"❌ OPTIONS: Failed to fetch models: {err}")
         elif server_type == SERVER_TYPE_OPENAI:
             # OpenAI - fetch from API
-            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            api_key = _get_form_value(
+                current_values,
+                CONF_API_KEY,
+                options.get(CONF_API_KEY, data.get(CONF_API_KEY, "")),
+            )
             if api_key:
                 _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from OpenAI")
                 try:
@@ -1161,7 +2092,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     _LOGGER.error(f"❌ OPTIONS: Failed to fetch OpenAI models: {err}")
         elif server_type == SERVER_TYPE_GEMINI:
             # Gemini - fetch from API
-            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            api_key = _get_form_value(
+                current_values,
+                CONF_API_KEY,
+                options.get(CONF_API_KEY, data.get(CONF_API_KEY, "")),
+            )
             if api_key:
                 _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from Gemini")
                 try:
@@ -1173,7 +2108,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     _LOGGER.error(f"❌ OPTIONS: Failed to fetch Gemini models: {err}")
         elif server_type == SERVER_TYPE_OPENROUTER:
             # OpenRouter - fetch from API
-            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            api_key = _get_form_value(
+                current_values,
+                CONF_API_KEY,
+                options.get(CONF_API_KEY, data.get(CONF_API_KEY, "")),
+            )
             if api_key:
                 _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from OpenRouter")
                 try:
@@ -1200,36 +2139,98 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             # Show text input as fallback
             model_selector = str
 
-        # Build schema based on server type
-        schema_dict = {
-            # 1. Profile Name
-            vol.Required(
-                CONF_PROFILE_NAME,
-                default=options.get(
-                    CONF_PROFILE_NAME, data.get(CONF_PROFILE_NAME, "Default")
-                ),
-            ): str,
+        schema_dict: dict[Any, Any] = {
+            PROFILE_SECTION_KEY: _build_profile_identity_section(
+                _get_form_value(
+                    current_values,
+                    CONF_PROFILE_NAME,
+                    options.get(
+                        CONF_PROFILE_NAME,
+                        data.get(CONF_PROFILE_NAME, "Default"),
+                    ),
+                )
+            ),
         }
 
-        # 2. Server URL or API Key (based on server type)
+        system_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_SYSTEM_PROMPT,
+            stored_mode=options.get(
+                CONF_SYSTEM_PROMPT_MODE, data.get(CONF_SYSTEM_PROMPT_MODE)
+            ),
+            stored_prompt=options.get(CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT)),
+            default_prompt=default_system_prompt,
+        )
+        technical_prompt_suggestion = _get_prompt_text_default(
+            current_values,
+            prompt_key=CONF_TECHNICAL_PROMPT,
+            stored_mode=options.get(
+                CONF_TECHNICAL_PROMPT_MODE,
+                data.get(CONF_TECHNICAL_PROMPT_MODE),
+            ),
+            stored_prompt=options.get(
+                CONF_TECHNICAL_PROMPT, data.get(CONF_TECHNICAL_PROMPT)
+            ),
+            default_prompt=DEFAULT_TECHNICAL_PROMPT,
+        )
+
+        connection_schema_items: dict[Any, Any] = {}
         if server_type == SERVER_TYPE_OPENCLAW:
-            # OpenClaw Gateway - host, port, token, SSL
-            schema_dict[vol.Required(
-                CONF_OPENCLAW_HOST,
-                default=options.get(CONF_OPENCLAW_HOST, data.get(CONF_OPENCLAW_HOST, DEFAULT_OPENCLAW_HOST)),
-            )] = str
-            schema_dict[vol.Required(
-                CONF_OPENCLAW_PORT,
-                default=options.get(CONF_OPENCLAW_PORT, data.get(CONF_OPENCLAW_PORT, DEFAULT_OPENCLAW_PORT)),
-            )] = vol.Coerce(int)
-            schema_dict[vol.Required(
-                CONF_OPENCLAW_TOKEN,
-                default=options.get(CONF_OPENCLAW_TOKEN, data.get(CONF_OPENCLAW_TOKEN, "")),
-            )] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
-            schema_dict[vol.Required(
-                CONF_OPENCLAW_USE_SSL,
-                default=options.get(CONF_OPENCLAW_USE_SSL, data.get(CONF_OPENCLAW_USE_SSL, DEFAULT_OPENCLAW_USE_SSL)),
-            )] = BooleanSelector()
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_HOST,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_HOST,
+                        options.get(
+                            CONF_OPENCLAW_HOST,
+                            data.get(CONF_OPENCLAW_HOST, DEFAULT_OPENCLAW_HOST),
+                        ),
+                    ),
+                )
+            ] = str
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_PORT,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_PORT,
+                        options.get(
+                            CONF_OPENCLAW_PORT,
+                            data.get(CONF_OPENCLAW_PORT, DEFAULT_OPENCLAW_PORT),
+                        ),
+                    ),
+                )
+            ] = vol.Coerce(int)
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_TOKEN,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_TOKEN,
+                        options.get(
+                            CONF_OPENCLAW_TOKEN,
+                            data.get(CONF_OPENCLAW_TOKEN, ""),
+                        ),
+                    ),
+                )
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+            connection_schema_items[
+                vol.Required(
+                    CONF_OPENCLAW_USE_SSL,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_USE_SSL,
+                        options.get(
+                            CONF_OPENCLAW_USE_SSL,
+                            data.get(
+                                CONF_OPENCLAW_USE_SSL,
+                                DEFAULT_OPENCLAW_USE_SSL,
+                            ),
+                        ),
+                    ),
+                )
+            ] = BooleanSelector()
         elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
@@ -1239,80 +2240,78 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             server_url = options.get(
                 CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)
             )
-            schema_dict[vol.Required(CONF_LMSTUDIO_URL, default=server_url)] = str
+            connection_schema_items[
+                vol.Required(
+                    CONF_LMSTUDIO_URL,
+                    default=_get_form_value(
+                        current_values, CONF_LMSTUDIO_URL, server_url
+                    ),
+                )
+            ] = str
         elif server_type == SERVER_TYPE_OPENAI:
             # OpenAI - hybrid (URL + API key)
             server_url = options.get(
                 CONF_LMSTUDIO_URL,
                 data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
             )
-            schema_dict[vol.Required(CONF_LMSTUDIO_URL, default=server_url)] = str
+            connection_schema_items[
+                vol.Required(
+                    CONF_LMSTUDIO_URL,
+                    default=_get_form_value(
+                        current_values, CONF_LMSTUDIO_URL, server_url
+                    ),
+                )
+            ] = str
 
             api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-            schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = TextSelector(
-                TextSelectorConfig(type=TextSelectorType.PASSWORD)
-            )
+            connection_schema_items[
+                vol.Required(
+                    CONF_API_KEY,
+                    default=_get_form_value(current_values, CONF_API_KEY, api_key),
+                )
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
         else:
             # Other cloud providers (Gemini, Anthropic, OpenRouter) - API key only
             api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
-            schema_dict[vol.Required(CONF_API_KEY, default=api_key)] = TextSelector(
-                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            connection_schema_items[
+                vol.Required(
+                    CONF_API_KEY,
+                    default=_get_form_value(current_values, CONF_API_KEY, api_key),
+                )
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
+        schema_dict[CONNECTION_SECTION_KEY] = _build_connection_section(
+            connection_schema_items
+        )
+
+        if server_type != SERVER_TYPE_OPENCLAW:
+            schema_dict[MODEL_SECTION_KEY] = _build_model_section(
+                current_model, model_selector
             )
 
-        # 3. Model Name (skip for OpenClaw - hardcoded to "main")
         if server_type != SERVER_TYPE_OPENCLAW:
-            schema_dict[
-                vol.Required(CONF_MODEL_NAME, default=current_model)
-            ] = model_selector
-
-        # Continue with remaining common fields
-        # 4. System Prompt (skip for OpenClaw - it manages its own)
-        if server_type != SERVER_TYPE_OPENCLAW:
-            schema_dict[
-                vol.Required(
-                    CONF_SYSTEM_PROMPT,
-                    default=options.get(
-                        CONF_SYSTEM_PROMPT,
-                        data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
-                    ),
-                )
-            ] = TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+            schema_dict[PROMPTS_SECTION_KEY] = _build_prompt_section(
+                include_system_prompt=True,
+                system_prompt_value=system_prompt_suggestion,
+                technical_prompt_value=technical_prompt_suggestion,
             )
 
-        # 5. Technical Instructions (skip for OpenClaw - it manages its own)
-        if server_type != SERVER_TYPE_OPENCLAW:
-            schema_dict[
-                vol.Required(
-                    CONF_TECHNICAL_PROMPT,
-                    default=options.get(
-                        CONF_TECHNICAL_PROMPT,
-                        data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
-                    ),
-                )
-            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
+        provider_schema_items: dict[Any, Any] = {}
 
-        # For OpenClaw, show conversation settings but hide LLM-specific fields
         if server_type == SERVER_TYPE_OPENCLAW:
-            response_mode_value = options.get(
-                CONF_RESPONSE_MODE, options.get(CONF_FOLLOW_UP_MODE, DEFAULT_RESPONSE_MODE)
-            )
-            schema_dict.update(
+            schema_dict[CONVERSATION_SECTION_KEY] = _build_conversation_section(
                 {
                     vol.Required(
                         CONF_CONTROL_HA,
-                        default=options.get(
+                        default=_get_form_value(
+                            current_values,
                             CONF_CONTROL_HA,
-                            data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA),
+                            options.get(
+                                CONF_CONTROL_HA,
+                                data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA),
+                            ),
                         ),
                     ): bool,
-                    vol.Optional(
-                        CONF_OPENCLAW_SESSION_KEY,
-                        default=options.get(
-                            CONF_OPENCLAW_SESSION_KEY,
-                            data.get(CONF_OPENCLAW_SESSION_KEY, DEFAULT_OPENCLAW_SESSION_KEY),
-                        ),
-                    ): str,
                     vol.Required(
                         CONF_RESPONSE_MODE, default=response_mode_value
                     ): SelectSelector(
@@ -1340,160 +2339,273 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     ): TextSelector(TextSelectorConfig(multiline=True)),
                     vol.Optional(
                         CONF_CLEAN_RESPONSES,
-                        default=options.get(
+                        default=_get_form_value(
+                            current_values,
                             CONF_CLEAN_RESPONSES,
-                            data.get(CONF_CLEAN_RESPONSES, DEFAULT_CLEAN_RESPONSES),
-                        ),
-                    ): bool,
-                    vol.Required(
-                        CONF_TIMEOUT,
-                        default=options.get(CONF_TIMEOUT, data.get(CONF_TIMEOUT, 60)),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
-                    vol.Required(
-                        CONF_DEBUG_MODE,
-                        default=options.get(
-                            CONF_DEBUG_MODE,
-                            data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
+                            options.get(
+                                CONF_CLEAN_RESPONSES,
+                                data.get(
+                                    CONF_CLEAN_RESPONSES,
+                                    DEFAULT_CLEAN_RESPONSES,
+                                ),
+                            ),
                         ),
                     ): bool,
                 }
             )
+            provider_schema_items = {
+                vol.Optional(
+                    CONF_OPENCLAW_SESSION_KEY,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_OPENCLAW_SESSION_KEY,
+                        options.get(
+                            CONF_OPENCLAW_SESSION_KEY,
+                            data.get(
+                                CONF_OPENCLAW_SESSION_KEY,
+                                DEFAULT_OPENCLAW_SESSION_KEY,
+                            ),
+                        ),
+                    ),
+                ): str,
+            }
+            advanced_schema_items: dict[Any, Any] = {
+                vol.Required(
+                    CONF_TIMEOUT,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_TIMEOUT,
+                        options.get(
+                            CONF_TIMEOUT,
+                            data.get(CONF_TIMEOUT, 60),
+                        ),
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+                vol.Required(
+                    CONF_DEBUG_MODE,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_DEBUG_MODE,
+                        options.get(
+                            CONF_DEBUG_MODE,
+                            data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
+                        ),
+                    ),
+                ): bool,
+            }
         else:
-            # Other servers - show all fields
-            schema_dict.update(
+            schema_dict[CONVERSATION_SECTION_KEY] = _build_conversation_section(
                 {
-                    # 6. Temperature
                     vol.Required(
+                        CONF_CONTROL_HA,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_CONTROL_HA,
+                            options.get(
+                                CONF_CONTROL_HA,
+                                data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA),
+                            ),
+                        ),
+                    ): bool,
+                    vol.Required(
+                        CONF_RESPONSE_MODE,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_RESPONSE_MODE,
+                            response_mode_value,
+                        ),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": "none", "label": "None"},
+                                {"value": "default", "label": "Smart"},
+                                {"value": "always", "label": "Always"},
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_FOLLOW_UP_PHRASES,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_FOLLOW_UP_PHRASES,
+                            options.get(
+                                CONF_FOLLOW_UP_PHRASES,
+                                data.get(
+                                    CONF_FOLLOW_UP_PHRASES,
+                                    DEFAULT_FOLLOW_UP_PHRASES,
+                                ),
+                            ),
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_END_WORDS,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_END_WORDS,
+                            options.get(
+                                CONF_END_WORDS,
+                                data.get(CONF_END_WORDS, DEFAULT_END_WORDS),
+                            ),
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Required(
+                        CONF_CLEAN_RESPONSES,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_CLEAN_RESPONSES,
+                            options.get(
+                                CONF_CLEAN_RESPONSES,
+                                data.get(
+                                    CONF_CLEAN_RESPONSES,
+                                    DEFAULT_CLEAN_RESPONSES,
+                                ),
+                            ),
+                        ),
+                    ): bool,
+                }
+            )
+            advanced_schema_items = {
+                vol.Required(
+                    CONF_TEMPERATURE,
+                    default=_get_form_value(
+                        current_values,
                         CONF_TEMPERATURE,
-                        default=options.get(
+                        options.get(
                             CONF_TEMPERATURE,
                             data.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),
                         ),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
-                    # 7. Max Response Tokens
-                    vol.Required(
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Required(
+                    CONF_MAX_TOKENS,
+                    default=_get_form_value(
+                        current_values,
                         CONF_MAX_TOKENS,
-                        default=options.get(
+                        options.get(
                             CONF_MAX_TOKENS,
                             data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
                         ),
-                    ): vol.Coerce(int),
-                }
-            )
-
-            # Add Ollama-specific fields in correct position (after Max Tokens)
-            if server_type == SERVER_TYPE_OLLAMA:
-                schema_dict[
-                    vol.Optional(
-                        CONF_OLLAMA_NUM_CTX,
-                        default=options.get(
-                            CONF_OLLAMA_NUM_CTX,
-                            data.get(CONF_OLLAMA_NUM_CTX, DEFAULT_OLLAMA_NUM_CTX),
-                        ),
-                    )
-                ] = vol.Coerce(int)
-                schema_dict[
-                    vol.Optional(
-                        CONF_OLLAMA_KEEP_ALIVE,
-                        default=options.get(
-                            CONF_OLLAMA_KEEP_ALIVE,
-                            data.get(CONF_OLLAMA_KEEP_ALIVE, DEFAULT_OLLAMA_KEEP_ALIVE),
-                        ),
-                    )
-                ] = str
-
-            # Continue with remaining fields
-            schema_dict.update(
-                {
-                    # 8/10. Max History Messages
-                    vol.Required(
+                    ),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_MAX_HISTORY,
+                    default=_get_form_value(
+                        current_values,
                         CONF_MAX_HISTORY,
-                        default=options.get(
+                        options.get(
                             CONF_MAX_HISTORY,
                             data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY),
                         ),
-                    ): vol.Coerce(int),
-                    # 9/11. Control Home Assistant
-                    vol.Required(
-                        CONF_CONTROL_HA,
-                        default=options.get(
-                            CONF_CONTROL_HA,
-                            data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA),
-                        ),
-                    ): bool,
-                    # 10/12. Max Tool Iterations
-                    vol.Required(
-                        CONF_MAX_ITERATIONS,
-                        default=options.get(
-                            CONF_MAX_ITERATIONS,
-                            data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS),
-                        ),
-                    ): vol.Coerce(int),
-                    # 11/13. Response Mode
-                    vol.Required(
-                        CONF_RESPONSE_MODE, default=response_mode_value
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[
-                                {"value": "none", "label": "None"},
-                                {"value": "default", "label": "Smart"},
-                                {"value": "always", "label": "Always"},
-                            ],
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
                     ),
-                    # 12/14. Follow-up Phrases
-                    vol.Optional(
-                        CONF_FOLLOW_UP_PHRASES,
-                        default=options.get(
-                            CONF_FOLLOW_UP_PHRASES,
-                            data.get(CONF_FOLLOW_UP_PHRASES, DEFAULT_FOLLOW_UP_PHRASES),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_MAX_ITERATIONS,
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MAX_ITERATIONS,
+                        options.get(
+                            CONF_MAX_ITERATIONS,
+                            data.get(
+                                CONF_MAX_ITERATIONS,
+                                DEFAULT_MAX_ITERATIONS,
+                            ),
                         ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    # 13/15. End Conversation Words
-                    vol.Optional(
-                        CONF_END_WORDS,
-                        default=options.get(
-                            CONF_END_WORDS, data.get(CONF_END_WORDS, DEFAULT_END_WORDS)
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    # 14/16. Clean Responses
-                    vol.Required(
-                        CONF_CLEAN_RESPONSES,
-                        default=options.get(
-                            CONF_CLEAN_RESPONSES,
-                            data.get(CONF_CLEAN_RESPONSES, DEFAULT_CLEAN_RESPONSES),
-                        ),
-                    ): bool,
-                    # 15/17. Response Time Out
-                    vol.Required(
+                    ),
+                ): vol.Coerce(int),
+                vol.Required(
+                    CONF_TIMEOUT,
+                    default=_get_form_value(
+                        current_values,
                         CONF_TIMEOUT,
-                        default=options.get(
-                            CONF_TIMEOUT, data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+                        options.get(
+                            CONF_TIMEOUT,
+                            data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
-                    # 16/18. Debug Mode
-                    vol.Required(
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+                vol.Required(
+                    CONF_DEBUG_MODE,
+                    default=_get_form_value(
+                        current_values,
                         CONF_DEBUG_MODE,
-                        default=options.get(
+                        options.get(
                             CONF_DEBUG_MODE,
                             data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
                         ),
-                    ): bool,
+                    ),
+                ): bool,
+            }
+            if server_type == SERVER_TYPE_OLLAMA:
+                provider_schema_items = {
+                    vol.Optional(
+                        CONF_OLLAMA_NUM_CTX,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_OLLAMA_NUM_CTX,
+                            options.get(
+                                CONF_OLLAMA_NUM_CTX,
+                                data.get(
+                                    CONF_OLLAMA_NUM_CTX,
+                                    DEFAULT_OLLAMA_NUM_CTX,
+                                ),
+                            ),
+                        ),
+                    ): vol.Coerce(int),
+                    vol.Optional(
+                        CONF_OLLAMA_KEEP_ALIVE,
+                        default=_get_form_value(
+                            current_values,
+                            CONF_OLLAMA_KEEP_ALIVE,
+                            options.get(
+                                CONF_OLLAMA_KEEP_ALIVE,
+                                data.get(
+                                    CONF_OLLAMA_KEEP_ALIVE,
+                                    DEFAULT_OLLAMA_KEEP_ALIVE,
+                                ),
+                            ),
+                        ),
+                    ): str,
                 }
-            )
 
-        # Create the schema from the built dictionary
+        if provider_schema_items:
+            schema_dict[PROVIDER_SECTION_KEY] = _build_provider_section(
+                provider_schema_items
+            )
+        schema_dict[TOOLS_SECTION_KEY] = _build_profile_tools_section(
+            current_values,
+            built_in_specs,
+            options,
+            data,
+        )
+        schema_dict[ADVANCED_SECTION_KEY] = _build_advanced_section(
+            advanced_schema_items
+        )
+
         options_schema = vol.Schema(schema_dict)
 
         # Set description based on server type
         if server_type == SERVER_TYPE_OPENCLAW:
             description_placeholders = {
-                "server_info": "OpenClaw's model and system prompt are configured on the OpenClaw server. Use the technical instructions below to configure how it uses MCP tools to control Home Assistant."
+                "server_info": (
+                    "OpenClaw manages the model and system prompt on the gateway. "
+                    "Use the connection, conversation, provider, and advanced "
+                    "sections here to control how this Home Assistant profile "
+                    "connects and follows up. The Tools section can still disable "
+                    "specific shared MCP tool families for this profile."
+                )
             }
         else:
             description_placeholders = {
-                "server_info": "Configure this conversation profile. These settings only affect this profile."
+                "server_info": (
+                    "Configure this conversation profile. These settings only affect "
+                    "this profile. The prompt fields are prefilled with the current "
+                    "effective prompts so you can review, copy, or edit them directly. "
+                    "If you leave a prompt unchanged, the integration keeps using the "
+                    "built-in version from code. "
+                    "The Tools section can disable specific shared MCP tool families "
+                    "for smaller models."
+                )
             }
 
         return self.async_show_form(
@@ -1506,8 +2618,20 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
     async def async_step_mcp_server(self, user_input=None):
         """Configure shared MCP server settings (affects all profiles)."""
         errors: dict[str, str] = {}
+        current_values = user_input or {}
+        built_in_specs = await _async_load_builtin_tool_toggle_specs(self.hass)
 
         if user_input is not None:
+            user_input = _flatten_section_values(
+                user_input,
+                CONTEXT_SECTION_KEY,
+                DISCOVERY_SECTION_KEY,
+                MEMORY_SECTION_KEY,
+                TOOLS_SECTION_KEY,
+            )
+            user_input = _normalize_shared_tool_inputs(user_input, built_in_specs)
+            current_values = user_input
+
             # Validate allowed IPs
             allowed_ips_str = user_input.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
             is_valid, error_msg = validate_allowed_ips(allowed_ips_str)
@@ -1573,64 +2697,262 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             sys_options = self.config_entry.options
             sys_data = self.config_entry.data
 
+        shared_defaults = {
+            CONF_SEARCH_PROVIDER: _get_form_value(
+                current_values,
+                CONF_SEARCH_PROVIDER,
+                self._get_search_provider_default(sys_options, sys_data),
+            ),
+            CONF_ENABLE_WEB_SEARCH: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEB_SEARCH,
+                _infer_web_search_enabled(
+                    sys_options.get(
+                        CONF_ENABLE_WEB_SEARCH,
+                        sys_data.get(CONF_ENABLE_WEB_SEARCH),
+                    ),
+                    self._get_search_provider_default(sys_options, sys_data),
+                    sys_options.get(
+                        CONF_ENABLE_CUSTOM_TOOLS,
+                        sys_data.get(CONF_ENABLE_CUSTOM_TOOLS, False),
+                    ),
+                ),
+            ),
+            CONF_BRAVE_API_KEY: _get_form_value(
+                current_values,
+                CONF_BRAVE_API_KEY,
+                sys_options.get(
+                    CONF_BRAVE_API_KEY,
+                    sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
+                ),
+            ),
+            CONF_INCLUDE_CURRENT_USER: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER,
+                sys_options.get(
+                    CONF_INCLUDE_CURRENT_USER,
+                    sys_data.get(
+                        CONF_INCLUDE_CURRENT_USER,
+                        DEFAULT_INCLUDE_CURRENT_USER,
+                    ),
+                ),
+            ),
+            CONF_INCLUDE_HOME_LOCATION: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION,
+                sys_options.get(
+                    CONF_INCLUDE_HOME_LOCATION,
+                    sys_data.get(
+                        CONF_INCLUDE_HOME_LOCATION,
+                        DEFAULT_INCLUDE_HOME_LOCATION,
+                    ),
+                ),
+            ),
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                sys_options.get(
+                    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    sys_data.get(
+                        CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+                    ),
+                ),
+            ),
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS: _get_form_value(
+                current_values,
+                CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                sys_options.get(
+                    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    sys_data.get(
+                        CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                        DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_GAP_FILLING: _get_form_value(
+                current_values,
+                CONF_ENABLE_GAP_FILLING,
+                sys_options.get(
+                    CONF_ENABLE_GAP_FILLING,
+                    sys_data.get(CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING),
+                ),
+            ),
+            CONF_ENABLE_ASSIST_BRIDGE: _get_form_value(
+                current_values,
+                CONF_ENABLE_ASSIST_BRIDGE,
+                sys_options.get(
+                    CONF_ENABLE_ASSIST_BRIDGE,
+                    sys_data.get(
+                        CONF_ENABLE_ASSIST_BRIDGE, DEFAULT_ENABLE_ASSIST_BRIDGE
+                    ),
+                ),
+            ),
+            CONF_ENABLE_RESPONSE_SERVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+                        DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_WEATHER_FORECAST_TOOL: _get_form_value(
+                current_values,
+                CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                sys_options.get(
+                    CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                    sys_data.get(
+                        CONF_ENABLE_WEATHER_FORECAST_TOOL,
+                        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_RECORDER_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_RECORDER_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_RECORDER_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_RECORDER_TOOLS,
+                        DEFAULT_ENABLE_RECORDER_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_MEMORY_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_MEMORY_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_MEMORY_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_MEMORY_TOOLS,
+                        DEFAULT_ENABLE_MEMORY_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_DEVICE_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_DEVICE_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_DEVICE_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_DEVICE_TOOLS, DEFAULT_ENABLE_DEVICE_TOOLS
+                    ),
+                ),
+            ),
+            CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT: _get_form_value(
+                current_values,
+                CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                sys_options.get(
+                    CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    sys_data.get(
+                        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                        DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+                    ),
+                ),
+            ),
+            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: _get_form_value(
+                current_values,
+                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                sys_options.get(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    sys_data.get(
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    ),
+                ),
+            ),
+            CONF_MEMORY_DEFAULT_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_DEFAULT_TTL_DAYS,
+                sys_options.get(
+                    CONF_MEMORY_DEFAULT_TTL_DAYS,
+                    sys_data.get(
+                        CONF_MEMORY_DEFAULT_TTL_DAYS,
+                        DEFAULT_MEMORY_DEFAULT_TTL_DAYS,
+                    ),
+                ),
+            ),
+            CONF_MEMORY_MAX_TTL_DAYS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_TTL_DAYS,
+                sys_options.get(
+                    CONF_MEMORY_MAX_TTL_DAYS,
+                    sys_data.get(
+                        CONF_MEMORY_MAX_TTL_DAYS,
+                        DEFAULT_MEMORY_MAX_TTL_DAYS,
+                    ),
+                ),
+            ),
+            CONF_MEMORY_MAX_ITEMS: _get_form_value(
+                current_values,
+                CONF_MEMORY_MAX_ITEMS,
+                sys_options.get(
+                    CONF_MEMORY_MAX_ITEMS,
+                    sys_data.get(
+                        CONF_MEMORY_MAX_ITEMS,
+                        DEFAULT_MEMORY_MAX_ITEMS,
+                    ),
+                ),
+            ),
+            CONF_MAX_ENTITIES_PER_DISCOVERY: _get_form_value(
+                current_values,
+                CONF_MAX_ENTITIES_PER_DISCOVERY,
+                sys_options.get(
+                    CONF_MAX_ENTITIES_PER_DISCOVERY,
+                    sys_data.get(
+                        CONF_MAX_ENTITIES_PER_DISCOVERY,
+                        DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+                    ),
+                ),
+            ),
+        }
+        for spec in built_in_specs:
+            shared_defaults[spec.shared_setting_key] = _get_form_value(
+                current_values,
+                spec.shared_setting_key,
+                get_builtin_shared_setting_value(
+                    spec,
+                    lambda key, default=None: sys_options.get(
+                        key, sys_data.get(key, default)
+                    ),
+                ),
+            )
+
         # Build schema for MCP server settings
         mcp_schema = vol.Schema(
             {
                 vol.Required(
                     CONF_MCP_PORT,
-                    default=sys_options.get(
-                        CONF_MCP_PORT, sys_data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT)
+                    default=_get_form_value(
+                        current_values,
+                        CONF_MCP_PORT,
+                        sys_options.get(
+                            CONF_MCP_PORT,
+                            sys_data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT),
+                        ),
                     ),
                 ): vol.Coerce(int),
-                vol.Required(
-                    CONF_SEARCH_PROVIDER,
-                    default=self._get_search_provider_default(sys_options, sys_data),
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {"value": "none", "label": "Disabled"},
-                            {"value": "duckduckgo", "label": "DuckDuckGo"},
-                            {
-                                "value": "brave",
-                                "label": "Brave Search (requires API key)",
-                            },
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Optional(
-                    CONF_BRAVE_API_KEY,
-                    default=sys_options.get(
-                        CONF_BRAVE_API_KEY,
-                        sys_data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY),
-                    ),
-                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 vol.Optional(
                     CONF_ALLOWED_IPS,
-                    default=sys_options.get(
+                    default=_get_form_value(
+                        current_values,
                         CONF_ALLOWED_IPS,
-                        sys_data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS),
+                        sys_options.get(
+                            CONF_ALLOWED_IPS,
+                            sys_data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS),
+                        ),
                     ),
                 ): str,
-                vol.Optional(
-                    CONF_ENABLE_GAP_FILLING,
-                    default=sys_options.get(
-                        CONF_ENABLE_GAP_FILLING,
-                        sys_data.get(
-                            CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
-                        ),
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_MAX_ENTITIES_PER_DISCOVERY,
-                    default=sys_options.get(
-                        CONF_MAX_ENTITIES_PER_DISCOVERY,
-                        sys_data.get(
-                            CONF_MAX_ENTITIES_PER_DISCOVERY,
-                            DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
-                        ),
-                    ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
+                CONTEXT_SECTION_KEY: _build_shared_context_section(shared_defaults),
+                DISCOVERY_SECTION_KEY: _build_shared_discovery_section(shared_defaults),
+                MEMORY_SECTION_KEY: _build_shared_memory_section(shared_defaults),
+                TOOLS_SECTION_KEY: _build_shared_tools_section(
+                    shared_defaults,
+                    built_in_specs,
+                ),
             }
         )
 
@@ -1639,7 +2961,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             data_schema=mcp_schema,
             errors=errors,
             description_placeholders={
-                "warning": "⚠️ These settings are shared across ALL MCP Assist profiles. Restart Home Assistant after making changes."
+                "warning": (
+                    "⚠️ These settings are shared across ALL MCP Assist profiles and "
+                    "external MCP clients. Individual profiles can still opt into a "
+                    "smaller subset in their own settings."
+                )
             },
         )
 

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "response_service",
+  "name": "Response Service Reads",
+  "description": "Built-in Home Assistant response-service and calendar-event read tools.",
+  "version": "1.0.0",
+  "entrypoint": "tool:ResponseServicePackageTool",
+  "prompt_append_file": "prompt.md",
+  "capabilities": [
+    "Calls Home Assistant services that return structured data."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "get_calendar_events",
+      "list_response_services",
+      "call_service_with_response"
+    ],
+    "shared_setting_key": "enable_response_service_tools",
+    "profile_setting_key": "profile_enable_response_service_tools",
+    "shared_default": true,
+    "profile_default": true,
+    "shared_label": "Response Service Reads",
+    "shared_description": "Expose Home Assistant services that return structured data, such as calendar and forecast reads.",
+    "profile_disable_label": "Disable Response Service Reads",
+    "profile_disable_description": "Prevents this profile from using Home Assistant services that return structured data, such as calendar and forecast reads."
+  }
+}

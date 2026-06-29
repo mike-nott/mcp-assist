@@ -24,6 +24,8 @@ CONF_MCP_PORT = "mcp_port"
 CONF_AUTO_START = "auto_start"
 CONF_SYSTEM_PROMPT = "system_prompt"
 CONF_TECHNICAL_PROMPT = "technical_prompt"
+CONF_SYSTEM_PROMPT_MODE = "system_prompt_mode"
+CONF_TECHNICAL_PROMPT_MODE = "technical_prompt_mode"
 CONF_CONTROL_HA = "control_home_assistant"
 CONF_RESPONSE_MODE = "response_mode"
 CONF_FOLLOW_UP_MODE = "follow_up_mode"  # Keep for backward compatibility
@@ -33,10 +35,39 @@ CONF_MAX_HISTORY = "max_history"
 CONF_MAX_ITERATIONS = "max_iterations"
 CONF_DEBUG_MODE = "debug_mode"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
+CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS = "enable_external_custom_tools"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
+CONF_INCLUDE_CURRENT_USER = "include_current_user"
+CONF_INCLUDE_HOME_LOCATION = "include_home_location"
+CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS = "include_current_user_in_tool_calls"
+CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS = "include_home_location_in_tool_calls"
 CONF_SEARCH_PROVIDER = "search_provider"
+CONF_ENABLE_WEB_SEARCH = "enable_web_search"
 CONF_ENABLE_GAP_FILLING = "enable_gap_filling"
+CONF_ENABLE_ASSIST_BRIDGE = "enable_assist_bridge"
+CONF_ENABLE_RESPONSE_SERVICE_TOOLS = "enable_response_service_tools"
+CONF_ENABLE_WEATHER_FORECAST_TOOL = "enable_weather_forecast_tool"
+CONF_ENABLE_RECORDER_TOOLS = "enable_recorder_tools"
+CONF_ENABLE_MEMORY_TOOLS = "enable_memory_tools"
+CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
+CONF_ENABLE_UNIT_CONVERSION_TOOLS = "enable_unit_conversion_tools"
+CONF_ENABLE_DEVICE_TOOLS = "enable_device_tools"
+CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT = "enable_music_assistant_support"
+CONF_MEMORY_DEFAULT_TTL_DAYS = "memory_default_ttl_days"
+CONF_MEMORY_MAX_TTL_DAYS = "memory_max_ttl_days"
+CONF_MEMORY_MAX_ITEMS = "memory_max_items"
+CONF_PROFILE_ENABLE_WEB_SEARCH = "profile_enable_web_search"
+CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS = "profile_enable_external_custom_tools"
+CONF_PROFILE_ENABLE_ASSIST_BRIDGE = "profile_enable_assist_bridge"
+CONF_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = "profile_enable_response_service_tools"
+CONF_PROFILE_ENABLE_WEATHER_FORECAST_TOOL = "profile_enable_weather_forecast_tool"
+CONF_PROFILE_ENABLE_RECORDER_TOOLS = "profile_enable_recorder_tools"
+CONF_PROFILE_ENABLE_MEMORY_TOOLS = "profile_enable_memory_tools"
+CONF_PROFILE_ENABLE_CALCULATOR_TOOLS = "profile_enable_calculator_tools"
+CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS = "profile_enable_unit_conversion_tools"
+CONF_PROFILE_ENABLE_DEVICE_TOOLS = "profile_enable_device_tools"
+CONF_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT = "profile_enable_music_assistant_support"
 CONF_OLLAMA_KEEP_ALIVE = "ollama_keep_alive"
 CONF_OLLAMA_NUM_CTX = "ollama_num_ctx"
 CONF_FOLLOW_UP_PHRASES = "follow_up_phrases"
@@ -71,7 +102,14 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 
 # No hardcoded model lists - models are fetched dynamically from provider APIs
 DEFAULT_MODEL_NAME = "model"
-DEFAULT_SYSTEM_PROMPT = "You are a helpful Home Assistant voice assistant. Respond naturally and conversationally to user requests."
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful Home Assistant voice assistant. Respond naturally and "
+    "conversationally to user requests."
+)
+PROMPT_MODE_DEFAULT = "default"
+PROMPT_MODE_CUSTOM = "custom"
+DEFAULT_SYSTEM_PROMPT_MODE = PROMPT_MODE_DEFAULT
+DEFAULT_TECHNICAL_PROMPT_MODE = PROMPT_MODE_DEFAULT
 DEFAULT_CONTROL_HA = True
 DEFAULT_RESPONSE_MODE = "default"
 DEFAULT_FOLLOW_UP_MODE = "default"  # Keep for backward compatibility
@@ -81,16 +119,237 @@ DEFAULT_MAX_HISTORY = 10
 DEFAULT_MAX_ITERATIONS = 10
 DEFAULT_DEBUG_MODE = False
 DEFAULT_ENABLE_CUSTOM_TOOLS = False
+DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS = False
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_ALLOWED_IPS = ""
+DEFAULT_INCLUDE_CURRENT_USER = True
+DEFAULT_INCLUDE_HOME_LOCATION = True
+DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS = False
+DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS = False
 DEFAULT_SEARCH_PROVIDER = "none"
+DEFAULT_ENABLE_WEB_SEARCH = False
 DEFAULT_ENABLE_GAP_FILLING = True
+DEFAULT_ENABLE_ASSIST_BRIDGE = False
+DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS = True
+DEFAULT_ENABLE_WEATHER_FORECAST_TOOL = True
+DEFAULT_ENABLE_RECORDER_TOOLS = True
+DEFAULT_ENABLE_MEMORY_TOOLS = False
+DEFAULT_ENABLE_CALCULATOR_TOOLS = False
+DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS = False
+DEFAULT_ENABLE_DEVICE_TOOLS = True
+DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT = False
+DEFAULT_MEMORY_DEFAULT_TTL_DAYS = 30
+DEFAULT_MEMORY_MAX_TTL_DAYS = 365
+DEFAULT_MEMORY_MAX_ITEMS = 500
+DEFAULT_PROFILE_ENABLE_WEB_SEARCH = True
+DEFAULT_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS = True
+DEFAULT_PROFILE_ENABLE_ASSIST_BRIDGE = True
+DEFAULT_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS = True
+DEFAULT_PROFILE_ENABLE_WEATHER_FORECAST_TOOL = True
+DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS = True
+DEFAULT_PROFILE_ENABLE_MEMORY_TOOLS = True
+DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS = True
+DEFAULT_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS = True
+DEFAULT_PROFILE_ENABLE_DEVICE_TOOLS = True
+DEFAULT_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT = True
 DEFAULT_OLLAMA_KEEP_ALIVE = "5m"  # 5 minutes
 DEFAULT_OLLAMA_NUM_CTX = 0  # 0 = use model default
-DEFAULT_FOLLOW_UP_PHRASES = "anything else, what else, would you, do you, should i, can i, which, how can, what about, is there"
-DEFAULT_END_WORDS = "stop, cancel, no, nope, thanks, thank you, bye, goodbye, done, never mind, nevermind, forget it, that's all, that's it"
+DEFAULT_FOLLOW_UP_PHRASES = (
+    "anything else, what else, would you, do you, should i, can i, which, "
+    "how can, what about, is there"
+)
+DEFAULT_END_WORDS = (
+    "stop, cancel, no, nope, thanks, thank you, bye, goodbye, done, never mind, "
+    "nevermind, forget it, that's all, that's it"
+)
 DEFAULT_CLEAN_RESPONSES = False
 DEFAULT_TIMEOUT = 30
+
+CUSTOM_TOOLS_DIRECTORY = "mcp-assist-tools"
+CUSTOM_TOOL_SHARED_DIRECTORY = "__shared__"
+CUSTOM_TOOL_SETTINGS_DIRECTORY = "mcp-assist-tool-settings"
+CUSTOM_TOOL_SCHEMA_VERSION = 1
+CUSTOM_TOOL_MANIFEST_FILENAME = "mcp_tool.json"
+SERVICE_RELOAD_EXTERNAL_CUSTOM_TOOLS = "reload_external_custom_tools"
+
+TOOL_FAMILY_DEVICE = "device"
+TOOL_FAMILY_EXTERNAL_CUSTOM = "external_custom"
+TOOL_FAMILY_ASSIST_BRIDGE = "assist_bridge"
+TOOL_FAMILY_RESPONSE_SERVICE = "response_service"
+TOOL_FAMILY_WEATHER_FORECAST = "weather_forecast"
+TOOL_FAMILY_RECORDER = "recorder"
+TOOL_FAMILY_MEMORY = "memory"
+TOOL_FAMILY_CALCULATOR = "calculator"
+TOOL_FAMILY_UNIT_CONVERSION = "unit_conversion"
+TOOL_FAMILY_MUSIC_ASSISTANT = "music_assistant"
+TOOL_FAMILY_WEB_SEARCH = "web_search"
+
+OPTIONAL_TOOL_FAMILY_TOOL_NAMES = {
+    TOOL_FAMILY_DEVICE: frozenset({"discover_devices", "get_device_details"}),
+    TOOL_FAMILY_ASSIST_BRIDGE: frozenset(
+        {
+            "list_assist_tools",
+            "call_assist_tool",
+            "get_assist_prompt",
+            "get_assist_context_snapshot",
+        }
+    ),
+    TOOL_FAMILY_RESPONSE_SERVICE: frozenset(
+        {
+            "get_calendar_events",
+            "list_response_services",
+            "call_service_with_response",
+        }
+    ),
+    TOOL_FAMILY_WEATHER_FORECAST: frozenset({"get_weather_forecast"}),
+    TOOL_FAMILY_RECORDER: frozenset(
+        {
+            "get_entity_history",
+            "get_last_entity_event",
+            "analyze_entity_history",
+            "get_entity_state_at_time",
+        }
+    ),
+    TOOL_FAMILY_MEMORY: frozenset(
+        {
+            "remember_memory",
+            "recall_memories",
+            "forget_memory",
+        }
+    ),
+    TOOL_FAMILY_CALCULATOR: frozenset(
+        {
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+            "sqrt",
+            "power",
+            "round_number",
+            "average",
+            "min_value",
+            "max_value",
+            "evaluate_expression",
+        }
+    ),
+    TOOL_FAMILY_UNIT_CONVERSION: frozenset({"convert_unit"}),
+    TOOL_FAMILY_MUSIC_ASSISTANT: frozenset(
+        {
+            "list_music_assistant_players",
+            "play_music_assistant",
+            "list_music_assistant_instances",
+            "search_music_assistant",
+            "get_music_assistant_library",
+            "get_music_assistant_queue",
+        }
+    ),
+    TOOL_FAMILY_WEB_SEARCH: frozenset({"search", "read_url"}),
+}
+
+OPTIONAL_TOOL_NAME_TO_FAMILY = {
+    tool_name: family
+    for family, tool_names in OPTIONAL_TOOL_FAMILY_TOOL_NAMES.items()
+    for tool_name in tool_names
+}
+
+TOOL_FAMILY_SHARED_SETTINGS = {
+    TOOL_FAMILY_DEVICE: (
+        CONF_ENABLE_DEVICE_TOOLS,
+        DEFAULT_ENABLE_DEVICE_TOOLS,
+    ),
+    TOOL_FAMILY_EXTERNAL_CUSTOM: (
+        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+        DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    ),
+    TOOL_FAMILY_ASSIST_BRIDGE: (
+        CONF_ENABLE_ASSIST_BRIDGE,
+        DEFAULT_ENABLE_ASSIST_BRIDGE,
+    ),
+    TOOL_FAMILY_RESPONSE_SERVICE: (
+        CONF_ENABLE_RESPONSE_SERVICE_TOOLS,
+        DEFAULT_ENABLE_RESPONSE_SERVICE_TOOLS,
+    ),
+    TOOL_FAMILY_RECORDER: (
+        CONF_ENABLE_RECORDER_TOOLS,
+        DEFAULT_ENABLE_RECORDER_TOOLS,
+    ),
+    TOOL_FAMILY_MEMORY: (
+        CONF_ENABLE_MEMORY_TOOLS,
+        DEFAULT_ENABLE_MEMORY_TOOLS,
+    ),
+    TOOL_FAMILY_WEATHER_FORECAST: (
+        CONF_ENABLE_WEATHER_FORECAST_TOOL,
+        DEFAULT_ENABLE_WEATHER_FORECAST_TOOL,
+    ),
+    TOOL_FAMILY_CALCULATOR: (
+        CONF_ENABLE_CALCULATOR_TOOLS,
+        DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    ),
+    TOOL_FAMILY_UNIT_CONVERSION: (
+        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+        DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+    ),
+    TOOL_FAMILY_MUSIC_ASSISTANT: (
+        CONF_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+        DEFAULT_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    ),
+    TOOL_FAMILY_WEB_SEARCH: (
+        CONF_ENABLE_WEB_SEARCH,
+        DEFAULT_ENABLE_WEB_SEARCH,
+    ),
+}
+
+TOOL_FAMILY_PROFILE_SETTINGS = {
+    TOOL_FAMILY_DEVICE: (
+        CONF_PROFILE_ENABLE_DEVICE_TOOLS,
+        DEFAULT_PROFILE_ENABLE_DEVICE_TOOLS,
+    ),
+    TOOL_FAMILY_EXTERNAL_CUSTOM: (
+        CONF_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+        DEFAULT_PROFILE_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    ),
+    TOOL_FAMILY_ASSIST_BRIDGE: (
+        CONF_PROFILE_ENABLE_ASSIST_BRIDGE,
+        DEFAULT_PROFILE_ENABLE_ASSIST_BRIDGE,
+    ),
+    TOOL_FAMILY_RESPONSE_SERVICE: (
+        CONF_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS,
+        DEFAULT_PROFILE_ENABLE_RESPONSE_SERVICE_TOOLS,
+    ),
+    TOOL_FAMILY_WEATHER_FORECAST: (
+        CONF_PROFILE_ENABLE_WEATHER_FORECAST_TOOL,
+        DEFAULT_PROFILE_ENABLE_WEATHER_FORECAST_TOOL,
+    ),
+    TOOL_FAMILY_RECORDER: (
+        CONF_PROFILE_ENABLE_RECORDER_TOOLS,
+        DEFAULT_PROFILE_ENABLE_RECORDER_TOOLS,
+    ),
+    TOOL_FAMILY_MEMORY: (
+        CONF_PROFILE_ENABLE_MEMORY_TOOLS,
+        DEFAULT_PROFILE_ENABLE_MEMORY_TOOLS,
+    ),
+    TOOL_FAMILY_CALCULATOR: (
+        CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
+        DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
+    ),
+    TOOL_FAMILY_UNIT_CONVERSION: (
+        CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
+        DEFAULT_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
+    ),
+    TOOL_FAMILY_MUSIC_ASSISTANT: (
+        CONF_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+        DEFAULT_PROFILE_ENABLE_MUSIC_ASSISTANT_SUPPORT,
+    ),
+    TOOL_FAMILY_WEB_SEARCH: (
+        CONF_PROFILE_ENABLE_WEB_SEARCH,
+        DEFAULT_PROFILE_ENABLE_WEB_SEARCH,
+    ),
+}
+
+
+def get_optional_tool_family(tool_name: str) -> str | None:
+    """Return the optional tool family for a tool name, if any."""
+    return OPTIONAL_TOOL_NAME_TO_FAMILY.get(tool_name)
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"
@@ -103,108 +362,84 @@ CONF_MAX_ENTITIES_PER_DISCOVERY = "max_entities_per_discovery"
 DEFAULT_MAX_ENTITIES_PER_DISCOVERY = 50
 
 RESPONSE_MODE_INSTRUCTIONS = {
-    "none": """## Follow-up Questions
-Do NOT ask follow-up questions. Complete the task and end immediately.
-
-## Ending Conversations
-Always end after completing the task.""",
-    "default": """## Follow-up Questions
-Generate contextually appropriate follow-up questions naturally:
-- After single device actions: Create a natural follow-up asking if the user needs help with anything else (vary phrasing each time)
-- When reporting adjustable status: Spontaneously suggest adjusting it in a natural way
-- For partial completions: Ask if the user wants you to complete the remaining tasks
-Always vary your phrasing - never repeat the same question twice in a conversation.
-
-Do NOT ask generic "anything else?" or "can I help with anything else?" questions without specific context.
-When asking a question, use the set_conversation_state tool to indicate you're expecting a response.
-
-## Ending Conversations
-After completing the task, end the conversation unless a natural follow-up is relevant.""",
-    "always": """## Follow-up Questions
-Generate contextually appropriate follow-up questions naturally:
-- After single device actions: Create a natural follow-up asking if the user needs help with anything else (vary phrasing each time)
-- When reporting adjustable status: Spontaneously suggest adjusting it in a natural way
-- For partial completions: Ask if the user wants you to complete the remaining tasks
-Always vary your phrasing - never repeat the same question twice in a conversation.
-When asking a question, use the set_conversation_state tool to indicate you're expecting a response.
-
-## Ending Conversations
-When user indicates they're done, acknowledge and end naturally.""",
+    "none": (
+        "Follow-up behavior: do not ask follow-up questions. Complete the task and end."
+    ),
+    "default": (
+        "Follow-up behavior: ask a short, specific follow-up only when it is "
+        "genuinely helpful. If you ask one, call set_conversation_state. "
+        "Otherwise end after completing the task."
+    ),
+    "always": (
+        "Follow-up behavior: usually ask a short, specific follow-up after the "
+        "task. If you ask one, call set_conversation_state. End naturally when "
+        "the user indicates they are done."
+    ),
 }
 
-DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home system. You have access to sensors, lights, switches, and other devices throughout the home.
+DEFAULT_TECHNICAL_PROMPT = """You control a Home Assistant smart home through MCP tools.
 
-## CRITICAL RULES
-**Never guess entity IDs. Always make TWO tool calls for device control.** For ANY device-related request, you MUST:
-1. FIRST call discover_entities to find the actual entities
-2. THEN call perform_action (to control) or get_entity_details (to check status) using discovered IDs
-3. **NEVER respond that you performed an action without actually calling perform_action**
-4. This applies EVERY TIME - even for follow-up questions about different entities
+Rules:
+- Never invent entity IDs or claim an action happened unless a tool confirmed it.
+- For Home Assistant tasks, discover the target first.
+- Prefer entity-first control. Use device tools only when physical-device context matters.
+- Floors, labels, and aliases are valid discovery inputs.
+- Call get_index() only when you need a broad system overview.
 
-**Common mistake:** Calling only discover_entities and then claiming you performed an action. This is WRONG. You must call perform_action to actually execute the action.
+Core workflow:
+1. discover_entities(...) for most requests.
+2. perform_action(...) for changes.
+3. get_entity_details(...) when exact state or attributes matter.
+4. run_script(...) for scripts with return data.
+5. run_automation(...) for manual automation triggering.
+6. Discover calendar or todo entities first, then use perform_action(...) for supported writes.
 
-## Available Tools
-- **discover_entities**: find devices by name/area/floor/label/domain/device_class/state (ALWAYS use first)
-- **perform_action**: control devices using discovered entity IDs
-- **get_entity_details**: check states using discovered entity IDs, including area/floor/label context
-- **get_entity_history**: get historical state changes for an entity (answers "when did X happen?")
-- **list_areas/list_domains**: list available areas with floor/label context and device types
-- **run_script**: execute scripts that return data (e.g., camera analysis, calculations)
-- **run_automation**: trigger automations manually
-- **set_conversation_state**: indicate if expecting user response
-- **search**: search the web for current information
-- **read_url**: read and extract content from web pages
-- **IMPORTANT**: call_service is not available - use perform_action instead
-
-## Device Control Workflow
-**CRITICAL:** For ANY device control request, you MUST make TWO separate tool calls:
-
-Example - "Turn on the kitchen light":
-  1. discover_entities(domain="light", area="Kitchen")  # Find the light entity
-  2. perform_action(domain="light", action="turn_on", target={{"entity_id": "light.kitchen"}})  # Actually turn it on
-
-Example - "Set living room temperature to 22":
-  1. discover_entities(domain="climate", area="Living Room")  # Find the thermostat
-  2. perform_action(domain="climate", action="set_temperature", target={{"entity_id": "climate.living_room"}}, data={{"temperature": 22}})  # Set the temperature
-
-**Never skip the perform_action step.** Discovering an entity does not control it - you must call perform_action to execute the action.
-
-## Scripts (use run_script tool)
-Scripts can perform complex operations and return data. **CRITICAL:** Always discover scripts first to get the correct entity ID.
-- Script IDs use underscores (e.g., "script.stovsug_kjokken"), NOT spaces
-- Script IDs must include the "script." domain prefix
-- If script name has spaces in UI, the entity ID will use underscores instead
-
-Example workflow:
-  1. discover_entities(domain="script", name_contains="camera")
-  2. run_script(script_id="script.llm_camera_analysis", variables={{"camera_entities": "camera.living_room", "prompt": "Is anyone there?"}})
-
-## Automations (use run_automation tool)
-Trigger automations manually. Check the index for available automations.
-
-Example:
-  run_automation(automation_id="alert_letterbox")
-
-## Discovery Strategy
-Use the index below to see what device_classes and domains exist, then query accordingly.
-Floors and labels are first-class Home Assistant concepts. Check the index and area list to see available floor and label names, then use discover_entities with floor or label filters when relevant (for example, "upstairs" is usually a floor, not an area).
-Areas, floors, entities, and sometimes devices may also have aliases. Treat aliases as valid user-facing names during discovery.
-
-For ANY device request:
-1. Check the index to understand what's available
-2. Use discover_entities with appropriate filters (device_class, area, floor, label, domain, name_contains, state)
-3. If no results, try broader search
-
-## Response Rules
-- Short, concise replies in plain text only
-- Use Friendly Names (e.g., "Living Room Light"), never entity IDs
-- Use natural language for states ("on" → "turned on", "home" → "at home")
+Responses:
+- Keep replies short and plain text.
+- Use friendly names, not raw entity IDs.
+- For time answers, prefer relative time plus local absolute time when available.
+- When listing multiple items, group by area when possible, otherwise use a stable order.
 
 {response_mode}
 
-## Index
-{index}
-
+{current_user_context}
 Current area: {current_area}
+{home_location_context}
 Current time: {time}
 Current date: {date}"""
+
+DEVICE_TECHNICAL_INSTRUCTIONS = """
+Device tools are enabled.
+- Use discover_devices / get_device_details when the user means a physical device or you need related entities on the same device.
+- Prefer discover_entities for most direct control.
+"""
+
+MEMORY_TECHNICAL_INSTRUCTIONS = """
+Memory tools are enabled.
+- Use remember_memory only when the user explicitly asks you to remember something.
+- Use recall_memories for stored facts or preferences.
+- Use forget_memory when the user asks to remove or update stored memory.
+"""
+
+ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS = """
+Assist bridge tools are enabled.
+- Use list_assist_tools / call_assist_tool only as fallback or debugging.
+- Prefer MCP Assist discovery and control tools first.
+"""
+
+CALCULATOR_TECHNICAL_INSTRUCTIONS = """
+Calculator tools are enabled.
+- Use calculator tools for exact arithmetic and compound expressions instead of mental math.
+"""
+
+UNIT_CONVERSION_TECHNICAL_INSTRUCTIONS = """
+Unit conversion tools are enabled.
+- Use convert_unit for temperatures, measurements, data sizes, rates, and other exact unit conversions.
+"""
+
+MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS = """
+Music Assistant support is enabled.
+- Prefer Music Assistant tools for playback, target discovery, search, library, and queue questions.
+- Only target Music Assistant players, not arbitrary media_player entities.
+- If no target is given and the current area is known, use area="{current_area}".
+"""

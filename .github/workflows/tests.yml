@@ -1,0 +1,77 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements_test.txt
+
+      - name: Ruff
+        run: ruff check custom_components tests
+
+      - name: Compile Python
+        run: python -m compileall -q custom_components tests
+
+      - name: Validate JSON
+        run: |
+          python -m json.tool custom_components/mcp_assist/strings.json >/dev/null
+          python -m json.tool custom_components/mcp_assist/translations/en.json >/dev/null
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements_test.txt
+
+      - name: Collect tests
+        run: pytest --collect-only -q tests
+
+      - name: Run full pytest suite
+        run: pytest -ra --junitxml=test-results/pytest.xml tests
+
+      - name: Upload pytest results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-results
+          path: test-results/pytest.xml
+          if-no-files-found: error

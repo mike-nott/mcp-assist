@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "read_url",
+  "name": "Read URL",
+  "description": "Built-in URL content reader for web search follow-up flows.",
+  "version": "1.1.0",
+  "entrypoint": "tool:ReadUrlPackageTool",
+  "prompt_append_file": "prompt.md",
+  "capabilities": [
+    "Fetches and extracts page text from a URL so the assistant can inspect a specific search result."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "read_url"
+    ],
+    "shared_setting_key": "enable_read_url_tool",
+    "profile_setting_key": "profile_enable_read_url_tool",
+    "shared_default": false,
+    "profile_default": true,
+    "shared_label": "Read URL",
+    "profile_disable_label": "Disable Read URL",
+    "shared_description": "Expose URL reading so the assistant can inspect specific web pages.",
+    "profile_disable_description": "Prevents this profile from opening and extracting page content from URLs.",
+    "legacy_shared_setting_keys": [
+      "enable_web_search"
+    ],
+    "legacy_profile_setting_keys": [
+      "profile_enable_web_search"
+    ]
+  }
+}

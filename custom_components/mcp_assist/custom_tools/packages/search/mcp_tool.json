@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "search",
+  "name": "Search",
+  "description": "Built-in web search using the configured shared provider.",
+  "version": "1.1.0",
+  "entrypoint": "tool:SearchPackageTool",
+  "prompt_append_file": "prompt.md",
+  "capabilities": [
+    "Searches the web with the configured provider while preserving the standard MCP Assist search tool surface."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "search"
+    ],
+    "shared_setting_key": "enable_search_tool",
+    "profile_setting_key": "profile_enable_search_tool",
+    "shared_default": false,
+    "profile_default": true,
+    "shared_label": "Search",
+    "profile_disable_label": "Disable Search",
+    "shared_description": "Expose web search using the configured shared provider.",
+    "profile_disable_description": "Prevents this profile from using the built-in web search helper.",
+    "legacy_shared_setting_keys": [
+      "enable_web_search"
+    ],
+    "legacy_profile_setting_keys": [
+      "profile_enable_web_search"
+    ],
+    "requires_search_provider": true
+  }
+}

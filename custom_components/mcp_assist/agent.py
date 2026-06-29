@@ -1,9 +1,11 @@
 """LM Studio MCP conversation agent."""
 
 import asyncio
+from contextvars import ContextVar, Token
 import json
 import logging
 import re
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Literal
 
@@ -23,11 +25,19 @@ from homeassistant.helpers import (
     intent,
     area_registry as ar,
     device_registry as dr,
-    entity_registry as er,
     llm,
 )
 from homeassistant.util import dt as dt_util
 
+from .custom_tools.builtin_catalog import (
+    BuiltInToolToggleSpec,
+    is_builtin_package_enabled_for_profile,
+)
+from .provider_runtime import (
+    build_provider_auth_headers,
+    resolve_provider_runtime_config,
+)
+from .localization import get_language_instruction
 from .const import (
     DOMAIN,
     CONF_PROFILE_NAME,
@@ -36,39 +46,45 @@ from .const import (
     CONF_MCP_PORT,
     CONF_SYSTEM_PROMPT,
     CONF_TECHNICAL_PROMPT,
+    CONF_SYSTEM_PROMPT_MODE,
+    CONF_TECHNICAL_PROMPT_MODE,
     CONF_DEBUG_MODE,
     CONF_MAX_ITERATIONS,
     CONF_MAX_TOKENS,
     CONF_TEMPERATURE,
     CONF_FOLLOW_UP_MODE,
     CONF_RESPONSE_MODE,
+    CONF_MAX_HISTORY,
     CONF_SERVER_TYPE,
     CONF_API_KEY,
     CONF_CONTROL_HA,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
     CONF_SEARCH_PROVIDER,
-    CONF_BRAVE_API_KEY,
-    CONF_ALLOWED_IPS,
-    CONF_ENABLE_GAP_FILLING,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_INCLUDE_CURRENT_USER,
+    CONF_INCLUDE_HOME_LOCATION,
+    CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
+    CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_FOLLOW_UP_PHRASES,
     CONF_END_WORDS,
     CONF_CLEAN_RESPONSES,
     CONF_TIMEOUT,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
+    PROMPT_MODE_DEFAULT,
+    PROMPT_MODE_CUSTOM,
     DEFAULT_DEBUG_MODE,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
-    DEFAULT_FOLLOW_UP_MODE,
     DEFAULT_RESPONSE_MODE,
+    DEFAULT_MAX_HISTORY,
     DEFAULT_MCP_PORT,
-    DEFAULT_SEARCH_PROVIDER,
-    DEFAULT_BRAVE_API_KEY,
-    DEFAULT_ALLOWED_IPS,
-    DEFAULT_ENABLE_GAP_FILLING,
     DEFAULT_SERVER_TYPE,
     DEFAULT_API_KEY,
     DEFAULT_CONTROL_HA,
@@ -78,7 +94,17 @@ from .const import (
     DEFAULT_END_WORDS,
     DEFAULT_CLEAN_RESPONSES,
     DEFAULT_TIMEOUT,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_INCLUDE_CURRENT_USER,
+    DEFAULT_INCLUDE_HOME_LOCATION,
+    DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+    DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+    DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
     RESPONSE_MODE_INSTRUCTIONS,
+    DEVICE_TECHNICAL_INSTRUCTIONS,
+    MEMORY_TECHNICAL_INSTRUCTIONS,
+    ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS,
+    MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS,
     SERVER_TYPE_LMSTUDIO,
     SERVER_TYPE_LLAMACPP,
     SERVER_TYPE_OLLAMA,
@@ -92,12 +118,25 @@ from .const import (
     GEMINI_BASE_URL,
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
+    TOOL_FAMILY_EXTERNAL_CUSTOM,
+    TOOL_FAMILY_PROFILE_SETTINGS,
+    TOOL_FAMILY_SHARED_SETTINGS,
+    get_optional_tool_family,
     CONF_OPENCLAW_SESSION_KEY,
     DEFAULT_OPENCLAW_SESSION_KEY,
 )
 from .conversation_history import ConversationHistory
 
 _LOGGER = logging.getLogger(__name__)
+
+# Tool schemas are invalidated by settings and custom-tool signatures; this TTL is
+# just a safety refresh, not the primary change detector.
+MCP_TOOL_CACHE_TTL_SECONDS = 300.0
+MAX_TOOL_RESULT_CHARS = 8000
+MAX_TOOL_RESULT_LINES = 120
+_REQUEST_USER_INPUT: ContextVar[ConversationInput | None] = ContextVar(
+    "mcp_assist_request_user_input", default=None
+)
 
 
 class MCPAssistConversationEntity(ConversationEntity):
@@ -111,6 +150,9 @@ class MCPAssistConversationEntity(ConversationEntity):
         self.entry = entry
         self.history = ConversationHistory()
         self._current_chat_log = None  # ChatLog for debug view tracking
+        self._cached_llm_tools: list[dict[str, Any]] | None = None
+        self._cached_llm_tools_key: tuple[Any, ...] | None = None
+        self._cached_llm_tools_fetched_at = 0.0
 
         # Entity attributes
         profile_name = entry.data.get("profile_name", "MCP Assist")
@@ -178,7 +220,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         if self.debug_mode:
             _LOGGER.debug(f"🔍 Server Type: {self.server_type}")
             _LOGGER.debug(f"🔍 Base URL: {self.base_url_dynamic}")
-            _LOGGER.debug(f"🔍 Debug mode: ON")
+            _LOGGER.debug("🔍 Debug mode: ON")
             _LOGGER.debug(f"🔍 Max iterations: {self.max_iterations}")
 
         _LOGGER.info(
@@ -209,22 +251,111 @@ class MCPAssistConversationEntity(ConversationEntity):
         # Return default
         return default
 
+    def _get_profile_setting(self, key: str, default: Any) -> Any:
+        """Get a profile-specific setting from this conversation profile."""
+        value = self.entry.options.get(key, self.entry.data.get(key))
+        if value is not None:
+            return value
+        return default
+
+    def _is_optional_tool_family_enabled(self, family: str) -> bool:
+        """Return whether an optional tool family is enabled for this profile."""
+        if family == "unit_conversion":
+            shared_enabled = self._get_shared_setting(
+                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                None,
+            )
+            if shared_enabled is None:
+                shared_enabled = self._get_shared_setting(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                )
+
+            profile_enabled = self._get_profile_setting(
+                CONF_PROFILE_ENABLE_UNIT_CONVERSION_TOOLS,
+                None,
+            )
+            if profile_enabled is None:
+                profile_enabled = self._get_profile_setting(
+                    CONF_PROFILE_ENABLE_CALCULATOR_TOOLS,
+                    DEFAULT_PROFILE_ENABLE_CALCULATOR_TOOLS,
+                )
+
+            return bool(shared_enabled and profile_enabled)
+
+        shared_key, shared_default = TOOL_FAMILY_SHARED_SETTINGS[family]
+        profile_key, profile_default = TOOL_FAMILY_PROFILE_SETTINGS[family]
+        return bool(
+            self._get_shared_setting(shared_key, shared_default)
+            and self._get_profile_setting(profile_key, profile_default)
+        )
+
+    def _get_builtin_toggle_specs(self) -> tuple[BuiltInToolToggleSpec, ...]:
+        """Return built-in packaged-tool metadata from the shared custom tool loader."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return ()
+
+        getter = getattr(custom_tools, "get_builtin_toggle_specs", None)
+        if not callable(getter):
+            return ()
+
+        try:
+            return tuple(getter() or ())
+        except Exception as err:
+            _LOGGER.debug("Unable to read built-in packaged tool specs: %s", err)
+            return ()
+
+    def _get_builtin_toggle_spec(
+        self,
+        tool_name: str,
+    ) -> BuiltInToolToggleSpec | None:
+        """Return built-in packaged-tool metadata for a tool name, if any."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is not None:
+            getter = getattr(custom_tools, "get_builtin_toggle_spec", None)
+            if callable(getter):
+                try:
+                    return getter(tool_name)
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Unable to read built-in packaged tool metadata for %s: %s",
+                        tool_name,
+                        err,
+                    )
+
+        return None
+
+    def _is_builtin_package_enabled(
+        self,
+        spec: BuiltInToolToggleSpec,
+    ) -> bool:
+        """Return whether a built-in packaged tool is enabled for this profile."""
+        return is_builtin_package_enabled_for_profile(
+            spec,
+            self._get_shared_setting,
+            self._get_profile_setting,
+            search_provider=self.search_provider,
+        )
+
+    def _is_tool_enabled_for_profile(self, tool_name: str) -> bool:
+        """Return whether a tool should be visible to this profile."""
+        built_in_spec = self._get_builtin_toggle_spec(tool_name)
+        if built_in_spec is not None:
+            return self._is_builtin_package_enabled(built_in_spec)
+
+        family = get_optional_tool_family(tool_name)
+        if family is not None:
+            return self._is_optional_tool_family_enabled(family)
+        if self._is_external_custom_tool(tool_name):
+            return self.external_custom_tools_enabled
+        return True
+
     # Dynamic configuration properties - read from entry.options/data each time
     @property
     def base_url_dynamic(self) -> str:
         """Get base URL (dynamic for local servers)."""
-        if self.server_type in [
-            SERVER_TYPE_OPENAI,
-            SERVER_TYPE_GEMINI,
-            SERVER_TYPE_ANTHROPIC,
-            SERVER_TYPE_OPENROUTER,
-        ]:
-            return self.base_url  # Static cloud URLs
-        else:
-            # LM Studio, Ollama, llamacpp, OpenClaw, vLLM - read dynamically
-            return self.entry.options.get(
-                CONF_LMSTUDIO_URL, self.entry.data.get(CONF_LMSTUDIO_URL, "")
-            ).rstrip("/")
+        return resolve_provider_runtime_config(self.entry).base_url
 
     @property
     def api_key(self) -> str:
@@ -266,6 +397,13 @@ class MCPAssistConversationEntity(ConversationEntity):
         return self.entry.options.get(
             CONF_MAX_ITERATIONS,
             self.entry.data.get(CONF_MAX_ITERATIONS, DEFAULT_MAX_ITERATIONS),
+        )
+
+    @property
+    def max_history(self) -> int:
+        """Get max history messages/turns (dynamic)."""
+        return self.entry.options.get(
+            CONF_MAX_HISTORY, self.entry.data.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY)
         )
 
     @property
@@ -325,6 +463,436 @@ class MCPAssistConversationEntity(ConversationEntity):
             return "brave"
 
         return "none"
+
+    @property
+    def music_assistant_support_enabled(self) -> bool:
+        """Get effective Music Assistant support setting for this profile."""
+        return self._is_optional_tool_family_enabled("music_assistant")
+
+    @property
+    def assist_bridge_enabled(self) -> bool:
+        """Get effective Assist bridge setting for this profile."""
+        return self._is_optional_tool_family_enabled("assist_bridge")
+
+    @property
+    def external_custom_tools_enabled(self) -> bool:
+        """Get effective external custom tool setting for this profile."""
+        return self._is_optional_tool_family_enabled(TOOL_FAMILY_EXTERNAL_CUSTOM)
+
+    @property
+    def memory_tools_enabled(self) -> bool:
+        """Get effective persisted memory tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("memory")
+
+    @property
+    def device_tools_enabled(self) -> bool:
+        """Get effective device tool setting for this profile."""
+        return self._is_optional_tool_family_enabled("device")
+
+    @property
+    def web_search_tools_enabled(self) -> bool:
+        """Get effective web-search tool setting for this profile."""
+        specs = self._get_builtin_toggle_specs()
+        if specs:
+            return any(
+                self._is_builtin_package_enabled(spec)
+                for spec in specs
+                if spec.package_id in {"search", "read_url"}
+            )
+        return self._is_optional_tool_family_enabled("web_search")
+
+    def _get_shared_custom_tools_loader(self) -> Any | None:
+        """Return the shared custom tool loader, if available."""
+        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+        return getattr(server, "custom_tools", None) if server else None
+
+    def _is_external_custom_tool(self, tool_name: str) -> bool:
+        """Return whether a tool name comes from an external custom tool package."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return False
+
+        checker = getattr(custom_tools, "is_external_custom_tool", None)
+        if not callable(checker):
+            return False
+
+        try:
+            return bool(checker(tool_name))
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to classify external custom tool %s: %s", tool_name, err
+            )
+            return False
+
+    def _get_builtin_tool_instructions(self) -> str:
+        """Return prompt additions from loaded built-in packaged tools."""
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return ""
+
+        getter = getattr(custom_tools, "get_builtin_prompt_instructions", None)
+        if not callable(getter):
+            return ""
+
+        try:
+            return str(getter() or "").strip()
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read built-in packaged tool prompt instructions: %s",
+                err,
+            )
+            return ""
+
+    def _build_disabled_tool_family_instructions(self) -> str:
+        """Build prompt instructions for disabled optional tool families."""
+        lines: list[str] = []
+
+        if not self.device_tools_enabled:
+            lines.append(
+                "- Device tools are disabled. Do not call discover_devices or get_device_details. Use discover_entities and get_entity_details instead."
+            )
+
+        if not self.assist_bridge_enabled:
+            lines.append(
+                "- Native Assist bridge tools are disabled. Do not call list_assist_tools, call_assist_tool, get_assist_prompt, or get_assist_context_snapshot."
+            )
+
+        if not self.memory_tools_enabled:
+            lines.append(
+                "- Memory tools are disabled. Do not call remember_memory, recall_memories, or forget_memory."
+            )
+
+        if not self.external_custom_tools_enabled:
+            lines.append(
+                "- External custom tools are disabled. Do not call tools provided by user-defined packages."
+            )
+
+        for spec in self._get_builtin_toggle_specs():
+            if self._is_builtin_package_enabled(spec):
+                continue
+            lines.append(
+                f"- {spec.package_name} is disabled for this profile. Do not call {', '.join(spec.tool_names)}."
+            )
+
+        if not lines:
+            return ""
+
+        return "## Disabled Optional Tool Families\n" + "\n".join(lines)
+
+    def _build_optional_technical_instructions(self, current_area: str) -> str:
+        """Build optional prompt sections for enabled capability families."""
+        sections: list[str] = []
+
+        if self.device_tools_enabled:
+            sections.append(DEVICE_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.memory_tools_enabled:
+            sections.append(MEMORY_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.assist_bridge_enabled:
+            sections.append(ASSIST_BRIDGE_TECHNICAL_INSTRUCTIONS.strip())
+
+        if self.music_assistant_support_enabled:
+            sections.append(
+                MUSIC_ASSISTANT_TECHNICAL_INSTRUCTIONS.replace(
+                    "{current_area}", current_area
+                ).strip()
+            )
+
+        built_in_tool_instructions = self._get_builtin_tool_instructions()
+        if built_in_tool_instructions:
+            sections.append(built_in_tool_instructions)
+
+        if self.external_custom_tools_enabled:
+            external_custom_tool_instructions = (
+                self._get_external_custom_tool_instructions()
+            )
+            if external_custom_tool_instructions:
+                sections.append(external_custom_tool_instructions)
+
+        return "\n\n".join(section for section in sections if section)
+
+    def _get_external_custom_tool_instructions(self) -> str:
+        """Return prompt additions from loaded external custom tool packages."""
+        if not self.external_custom_tools_enabled:
+            return ""
+
+        custom_tools = self._get_shared_custom_tools_loader()
+        if custom_tools is None:
+            return ""
+
+        try:
+            return str(custom_tools.get_external_prompt_instructions() or "").strip()
+        except Exception as err:
+            _LOGGER.debug(
+                "Unable to read external custom tool prompt instructions: %s", err
+            )
+            return ""
+
+    @staticmethod
+    def _compact_text(text: str, *, max_len: int = 160) -> str:
+        """Compact instructional text for lower token usage."""
+        normalized = " ".join(str(text).split()).strip()
+        if not normalized:
+            return ""
+
+        for separator in (". ", "\n", "; "):
+            if separator in normalized:
+                normalized = normalized.split(separator, 1)[0].strip()
+                break
+
+        if len(normalized) <= max_len:
+            return normalized
+
+        truncated = normalized[: max_len - 1].rstrip()
+        last_space = truncated.rfind(" ")
+        if last_space > 40:
+            truncated = truncated[:last_space]
+        return truncated.rstrip(" ,;:.") + "."
+
+    def _compact_schema_for_llm(self, schema: Any, *, keep_description: bool = False) -> Any:
+        """Strip nonessential JSON-schema verbosity before sending tools to the LLM."""
+        if isinstance(schema, list):
+            compacted_list = [
+                self._compact_schema_for_llm(item, keep_description=keep_description)
+                for item in schema
+            ]
+            return [item for item in compacted_list if item not in (None, {}, [])]
+
+        if not isinstance(schema, dict):
+            return schema
+
+        compacted: dict[str, Any] = {}
+
+        for key, value in schema.items():
+            if key in {"$schema", "title", "default", "examples", "example"}:
+                continue
+
+            if key == "description":
+                if keep_description:
+                    compact_description = self._compact_text(str(value), max_len=120)
+                    if compact_description:
+                        compacted[key] = compact_description
+                continue
+
+            if key == "properties":
+                properties: dict[str, Any] = {}
+                for prop_name, prop_schema in value.items():
+                    compact_prop = self._compact_schema_for_llm(prop_schema)
+                    if compact_prop:
+                        properties[prop_name] = compact_prop
+                if properties:
+                    compacted[key] = properties
+                continue
+
+            if key == "required":
+                if value:
+                    compacted[key] = value
+                continue
+
+            if key == "additionalProperties":
+                continue
+
+            compact_value = self._compact_schema_for_llm(
+                value, keep_description=keep_description
+            )
+            if compact_value not in (None, {}, []):
+                compacted[key] = compact_value
+
+        return compacted
+
+    def _convert_mcp_tools_to_llm_tools(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert MCP tools to a compact OpenAI-style tool schema."""
+        openai_tools = []
+
+        for tool in tools:
+            parameters = self._compact_schema_for_llm(
+                tool.get("inputSchema", {}), keep_description=False
+            )
+            if not parameters:
+                parameters = {"type": "object", "properties": {}}
+            elif parameters.get("type") == "object" and "properties" not in parameters:
+                parameters["properties"] = {}
+
+            llm_description = self._compact_text(
+                str(tool.get("llmDescription") or tool.get("llm_description") or ""),
+                max_len=120,
+            )
+            base_description = self._compact_text(
+                llm_description or tool.get("description", ""),
+                max_len=140,
+            )
+            description_parts = [base_description.rstrip(" .")]
+            routing_summary = self._build_tool_routing_summary(tool.get("routingHints"))
+            if routing_summary:
+                description_parts.append(routing_summary)
+
+            openai_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": self._compact_text(
+                            " | ".join(part for part in description_parts if part),
+                            max_len=220,
+                        ),
+                        "parameters": parameters,
+                    },
+                }
+            )
+
+        return openai_tools
+
+    def _build_tool_routing_summary(self, routing_hints: Any) -> str:
+        """Build a compact description suffix from optional routing hints."""
+        if not isinstance(routing_hints, dict):
+            return ""
+
+        preferred_when = str(routing_hints.get("preferred_when") or "").strip()
+        if preferred_when:
+            compact_preferred = self._compact_text(preferred_when, max_len=90)
+            if compact_preferred:
+                return f"Use for: {compact_preferred}"
+
+        example_queries = routing_hints.get("example_queries")
+        if isinstance(example_queries, list):
+            cleaned_examples = [
+                str(item).strip()
+                for item in example_queries
+                if str(item).strip()
+            ][:1]
+            if cleaned_examples:
+                compact_example = self._compact_text(cleaned_examples[0], max_len=80)
+                if compact_example:
+                    return f"Example: {compact_example}"
+
+        keywords = routing_hints.get("keywords")
+        if isinstance(keywords, list):
+            cleaned_keywords = [
+                str(item).strip()
+                for item in keywords
+                if str(item).strip()
+            ][:3]
+            if cleaned_keywords:
+                return f"Keywords: {', '.join(cleaned_keywords)}"
+
+        return ""
+
+    def _build_mcp_tool_cache_key(self) -> tuple[Any, ...]:
+        """Build a cache key for the current profile-visible MCP tool surface."""
+        return (
+            self.mcp_port,
+            self.search_provider,
+            self.assist_bridge_enabled,
+            self.memory_tools_enabled,
+            self.external_custom_tools_enabled,
+            self.device_tools_enabled,
+            self.music_assistant_support_enabled,
+            self.web_search_tools_enabled,
+            tuple(
+                (
+                    spec.package_id,
+                    self._is_builtin_package_enabled(spec),
+                )
+                for spec in self._get_builtin_toggle_specs()
+            ),
+            self._get_external_custom_tool_cache_signature(),
+        )
+
+    def _get_external_custom_tool_cache_signature(self) -> tuple[Any, ...]:
+        """Return a cache signature for loaded built-in/external packaged tools."""
+        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+        custom_tools = getattr(server, "custom_tools", None) if server else None
+        if custom_tools is None:
+            return ()
+
+        get_cache_signature = getattr(custom_tools, "get_cache_signature", None)
+        if callable(get_cache_signature):
+            try:
+                raw_signature = get_cache_signature()
+                if isinstance(raw_signature, tuple):
+                    return raw_signature
+                return (raw_signature,)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Unable to read external custom tool cache signature: %s", err
+                )
+
+        get_builtin_prompt_instructions = getattr(
+            custom_tools, "get_builtin_prompt_instructions", None
+        )
+        if callable(get_builtin_prompt_instructions):
+            try:
+                return (str(get_builtin_prompt_instructions() or "").strip(),)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Unable to read built-in packaged tool prompt instructions: %s",
+                    err,
+                )
+
+        get_external_prompt_instructions = getattr(
+            custom_tools, "get_external_prompt_instructions", None
+        )
+        if callable(get_external_prompt_instructions):
+            try:
+                return (str(get_external_prompt_instructions() or "").strip(),)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Unable to read external custom tool prompt instructions: %s", err
+                )
+
+        return ()
+
+    def _compact_tool_result_for_llm(self, tool_name: str, content: Any) -> str:
+        """Keep tool results useful while avoiding oversized follow-up payloads."""
+        text = "" if content is None else str(content)
+        text = text.replace("\r\n", "\n").strip()
+        if not text:
+            return ""
+
+        original_length = len(text)
+        original_lines = text.count("\n") + 1
+
+        if original_length <= MAX_TOOL_RESULT_CHARS and original_lines <= MAX_TOOL_RESULT_LINES:
+            return text
+
+        lines = text.splitlines()
+        truncated_lines = lines[:MAX_TOOL_RESULT_LINES]
+        compacted = "\n".join(truncated_lines).strip()
+
+        if len(compacted) > MAX_TOOL_RESULT_CHARS:
+            compacted = compacted[:MAX_TOOL_RESULT_CHARS].rstrip()
+            last_break = max(compacted.rfind("\n"), compacted.rfind(" "))
+            if last_break > int(MAX_TOOL_RESULT_CHARS * 0.7):
+                compacted = compacted[:last_break].rstrip()
+
+        omitted_lines = max(0, original_lines - len(truncated_lines))
+        omitted_chars = max(0, original_length - len(compacted))
+        hint = (
+            "Use narrower filters, paging, or a more specific follow-up tool call if you need the omitted detail."
+        )
+        if tool_name in {"discover_entities", "discover_devices"}:
+            hint = (
+                "Use limit/offset paging or narrower filters if you need more of the result set."
+            )
+        elif tool_name in {"get_entity_details", "get_device_details", "get_index"}:
+            hint = (
+                "Call again with a narrower target if you need more of this structured detail."
+            )
+
+        summary_parts: list[str] = []
+        if omitted_lines:
+            summary_parts.append(f"{omitted_lines} more lines")
+        if omitted_chars:
+            summary_parts.append(f"{omitted_chars} more chars")
+        summary = ", ".join(summary_parts) or "additional content omitted"
+
+        return (
+            f"{compacted}\n\n"
+            f"[Tool result truncated for model context: {summary}. {hint}]"
+        )
 
     @property
     def attribution(self) -> str:
@@ -663,6 +1231,9 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         # Store ChatLog for tool execution methods to access
         self._current_chat_log = chat_log_instance
+        user_input_token: Token[ConversationInput | None] = _REQUEST_USER_INPUT.set(
+            user_input
+        )
         conversation_id = chat_log_instance.conversation_id
 
         try:
@@ -671,6 +1242,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             )
         finally:
             # Clean up
+            _REQUEST_USER_INPUT.reset(user_input_token)
             self._current_chat_log = None
 
     async def _async_handle_message_inner(
@@ -753,7 +1325,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         _LOGGER.info(f"📡 Sending to OpenClaw (session: {self.session_key})...")
         response_text = await client.send_message(user_input.text, self.session_key)
         _LOGGER.info(
-            f"✅ OpenClaw response received, length: %d", len(response_text)
+            "✅ OpenClaw response received, length: %d", len(response_text)
         )
 
         return await self._build_response_result(
@@ -992,53 +1564,248 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.warning("Error getting current area: %s", e)
             return "Unknown"
 
+    def _get_home_location(self) -> str:
+        """Return a compact home-location summary for prompt context."""
+        if not self._get_shared_setting(
+            CONF_INCLUDE_HOME_LOCATION, DEFAULT_INCLUDE_HOME_LOCATION
+        ):
+            return ""
+
+        location_name = str(
+            getattr(self.hass.config, "location_name", "") or ""
+        ).strip()
+        latitude = getattr(self.hass.config, "latitude", None)
+        longitude = getattr(self.hass.config, "longitude", None)
+
+        coordinates = ""
+        try:
+            if latitude is not None and longitude is not None:
+                coordinates = f"{float(latitude):.4f}, {float(longitude):.4f}"
+        except (TypeError, ValueError):
+            coordinates = ""
+
+        if location_name and coordinates:
+            return f"{location_name} ({coordinates})"
+        if location_name:
+            return location_name
+        return coordinates
+
+    async def _get_current_user_name(self, user_input: ConversationInput) -> str:
+        """Return the current Home Assistant user name for prompt context."""
+        if not self._get_shared_setting(
+            CONF_INCLUDE_CURRENT_USER, DEFAULT_INCLUDE_CURRENT_USER
+        ):
+            return ""
+
+        try:
+            user_id = getattr(getattr(user_input, "context", None), "user_id", None)
+            if not user_id:
+                return ""
+
+            user = await self.hass.auth.async_get_user(user_id)
+            if not user:
+                return ""
+
+            return str(getattr(user, "name", "") or "").strip()
+        except Exception as err:
+            _LOGGER.debug("Unable to resolve current HA user: %s", err)
+            return ""
+
+    async def _get_current_user_context(
+        self, user_input: ConversationInput | None
+    ) -> dict[str, str]:
+        """Return current HA user metadata for MCP tool call context."""
+        if not self._get_shared_setting(
+            CONF_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+            DEFAULT_INCLUDE_CURRENT_USER_IN_TOOL_CALLS,
+        ):
+            return {}
+
+        user_id = str(
+            getattr(getattr(user_input, "context", None), "user_id", None) or ""
+        ).strip()
+        if not user_id:
+            return {}
+
+        context = {"user_id": user_id}
+        try:
+            user = await self.hass.auth.async_get_user(user_id)
+            user_name = str(getattr(user, "name", "") or "").strip() if user else ""
+            if user_name:
+                context["user_name"] = user_name
+        except Exception as err:
+            _LOGGER.debug("Unable to resolve current HA user for tool context: %s", err)
+        return context
+
+    def _get_home_location_context(self) -> dict[str, Any]:
+        """Return home-location metadata for MCP tool call context."""
+        if not self._get_shared_setting(
+            CONF_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+            DEFAULT_INCLUDE_HOME_LOCATION_IN_TOOL_CALLS,
+        ):
+            return {}
+
+        context: dict[str, Any] = {}
+
+        location_name = str(
+            getattr(self.hass.config, "location_name", "") or ""
+        ).strip()
+        if location_name:
+            context["home_location"] = location_name
+            context["home_location_name"] = location_name
+
+        latitude = getattr(self.hass.config, "latitude", None)
+        longitude = getattr(self.hass.config, "longitude", None)
+        try:
+            if latitude is not None and longitude is not None:
+                context["home_latitude"] = float(latitude)
+                context["home_longitude"] = float(longitude)
+        except (TypeError, ValueError):
+            pass
+        return context
+
+    async def _build_mcp_tool_call_context(
+        self, user_input: ConversationInput | None = None
+    ) -> dict[str, Any]:
+        """Build privacy-gated MCP tool call context for the active profile."""
+        context: dict[str, Any] = {
+            "profile_entry_id": self.entry.entry_id,
+            "profile_name": self.profile_name,
+        }
+        context.update(await self._get_current_user_context(user_input))
+        context.update(self._get_home_location_context())
+        return context
+
+    def _get_default_system_prompt(self) -> str:
+        """Get the built-in localized default system prompt."""
+        return (
+            get_language_instruction(self.hass.config.language)
+            or DEFAULT_SYSTEM_PROMPT
+        )
+
+    def _resolve_prompt_setting(
+        self, *, prompt_key: str, mode_key: str, default_prompt: str
+    ) -> str:
+        """Resolve a prompt using Default/Custom mode with backward compatibility."""
+        options = self.entry.options
+        data = self.entry.data
+
+        explicit_mode = options.get(mode_key, data.get(mode_key))
+        stored_prompt = options.get(prompt_key, data.get(prompt_key))
+
+        if explicit_mode == PROMPT_MODE_CUSTOM:
+            return "" if stored_prompt is None else str(stored_prompt)
+
+        if explicit_mode == PROMPT_MODE_DEFAULT:
+            return default_prompt
+
+        if stored_prompt in (None, "", default_prompt):
+            return default_prompt
+
+        return str(stored_prompt)
+
     async def _build_system_prompt_with_context(
         self, user_input: ConversationInput
     ) -> str:
-        """Build system prompt with Smart Entity Index."""
+        """Build the compact system prompt used for model calls."""
         try:
-            # Get base prompts (check options first, then data, then defaults)
-            system_prompt = self.entry.options.get(
-                CONF_SYSTEM_PROMPT,
-                self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
-            )
-            technical_prompt = self.entry.options.get(
-                CONF_TECHNICAL_PROMPT,
-                self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
-            )
-
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
-            technical_prompt = technical_prompt.replace("{time}", current_time)
-            technical_prompt = technical_prompt.replace("{date}", current_date)
-
-            # Get current area from satellite (if available)
-            current_area = await self._get_current_area(user_input)
-            technical_prompt = technical_prompt.replace("{current_area}", current_area)
-
-            # Inject mode-specific instructions
-            mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
-                self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"]
-            )
-            technical_prompt = technical_prompt.replace(
-                "{response_mode}", mode_instructions
-            )
-
-            # Get Smart Entity Index from IndexManager
-            index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
-            if index_manager:
-                index = await index_manager.get_index()
-                index_json = json.dumps(index, indent=2)
+            now = dt_util.now()
+            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_OPENCLAW:
+                system_prompt = ""
             else:
-                index_json = "{}"
-                _LOGGER.warning("IndexManager not available, using empty index")
+                system_prompt = self._resolve_prompt_setting(
+                    prompt_key=CONF_SYSTEM_PROMPT,
+                    mode_key=CONF_SYSTEM_PROMPT_MODE,
+                    default_prompt=self._get_default_system_prompt(),
+                )
+            technical_prompt = self._resolve_prompt_setting(
+                prompt_key=CONF_TECHNICAL_PROMPT,
+                    mode_key=CONF_TECHNICAL_PROMPT_MODE,
+                    default_prompt=DEFAULT_TECHNICAL_PROMPT,
+            )
 
-            # Replace {index} placeholder
-            technical_prompt = technical_prompt.replace("{index}", index_json)
+            current_area = "Unknown"
+            needs_current_area = "{current_area}" in technical_prompt or (
+                self.music_assistant_support_enabled
+            )
+            if needs_current_area:
+                current_area = await self._get_current_area(user_input)
+            if "{current_area}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{current_area}", current_area
+                )
 
-            # Combine: system prompt + technical prompt
-            return f"{system_prompt}\n\n{technical_prompt}"
+            if "{time}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{time}", now.strftime("%H:%M:%S")
+                )
+
+            if "{date}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{date}", now.strftime("%Y-%m-%d")
+                )
+
+            if (
+                "{current_user}" in technical_prompt
+                or "{current_user_context}" in technical_prompt
+            ):
+                current_user = await self._get_current_user_name(user_input)
+                if "{current_user}" in technical_prompt:
+                    technical_prompt = technical_prompt.replace(
+                        "{current_user}", current_user
+                    )
+                if "{current_user_context}" in technical_prompt:
+                    technical_prompt = technical_prompt.replace(
+                        "{current_user_context}",
+                        f"Current user: {current_user}" if current_user else "",
+                    )
+
+            if (
+                "{home_location}" in technical_prompt
+                or "{home_location_context}" in technical_prompt
+            ):
+                home_location = self._get_home_location()
+                if "{home_location}" in technical_prompt:
+                    technical_prompt = technical_prompt.replace(
+                        "{home_location}", home_location
+                    )
+                if "{home_location_context}" in technical_prompt:
+                    technical_prompt = technical_prompt.replace(
+                        "{home_location_context}",
+                        f"Home location: {home_location}" if home_location else "",
+                    )
+
+            if "{response_mode}" in technical_prompt:
+                mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
+                    self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"]
+                )
+                technical_prompt = technical_prompt.replace(
+                    "{response_mode}", mode_instructions
+                )
+
+            if "{index}" in technical_prompt:
+                index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
+                if index_manager:
+                    index = await index_manager.get_index()
+                    index_json = json.dumps(index, separators=(",", ":"))
+                else:
+                    index_json = "{}"
+                    _LOGGER.warning("IndexManager not available, using empty index")
+                technical_prompt = technical_prompt.replace("{index}", index_json)
+
+            technical_prompt = re.sub(r"\n{3,}", "\n\n", technical_prompt).strip()
+
+            optional_instructions = self._build_optional_technical_instructions(
+                current_area
+            )
+            if optional_instructions:
+                technical_prompt = (
+                    f"{technical_prompt.rstrip()}\n\n{optional_instructions}"
+                )
+
+            if system_prompt:
+                return f"{system_prompt}\n\n{technical_prompt}"
+            return technical_prompt
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
@@ -1076,28 +1843,70 @@ class MCPAssistConversationEntity(ConversationEntity):
     def _build_system_prompt(self) -> str:
         """Build system prompt (legacy sync version - note: cannot include index without async)."""
         try:
-            # Get prompts (check options first, then data, then defaults)
-            system_prompt = self.entry.options.get(
-                CONF_SYSTEM_PROMPT,
-                self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
+            now = dt_util.now()
+            if self.entry.data.get(CONF_SERVER_TYPE) == SERVER_TYPE_OPENCLAW:
+                system_prompt = ""
+            else:
+                system_prompt = self._resolve_prompt_setting(
+                    prompt_key=CONF_SYSTEM_PROMPT,
+                    mode_key=CONF_SYSTEM_PROMPT_MODE,
+                    default_prompt=self._get_default_system_prompt(),
+                )
+            technical_prompt = self._resolve_prompt_setting(
+                prompt_key=CONF_TECHNICAL_PROMPT,
+                mode_key=CONF_TECHNICAL_PROMPT_MODE,
+                default_prompt=DEFAULT_TECHNICAL_PROMPT,
             )
-            technical_prompt = self.entry.options.get(
-                CONF_TECHNICAL_PROMPT,
-                self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
+
+            if "{time}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{time}", now.strftime("%H:%M:%S")
+                )
+            if "{date}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{date}", now.strftime("%Y-%m-%d")
+                )
+            if "{current_area}" in technical_prompt:
+                technical_prompt = technical_prompt.replace("{current_area}", "Unknown")
+            if "{current_user}" in technical_prompt:
+                technical_prompt = technical_prompt.replace("{current_user}", "")
+            if "{current_user_context}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{current_user_context}", ""
+                )
+            if "{home_location}" in technical_prompt:
+                technical_prompt = technical_prompt.replace(
+                    "{home_location}", self._get_home_location()
+                )
+            if "{home_location_context}" in technical_prompt:
+                home_location = self._get_home_location()
+                technical_prompt = technical_prompt.replace(
+                    "{home_location_context}",
+                    f"Home location: {home_location}" if home_location else "",
+                )
+            if "{index}" in technical_prompt:
+                technical_prompt = technical_prompt.replace("{index}", "{}")
+            if "{response_mode}" in technical_prompt:
+                mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
+                    self.follow_up_mode, RESPONSE_MODE_INSTRUCTIONS["default"]
+                )
+                technical_prompt = technical_prompt.replace(
+                    "{response_mode}", mode_instructions
+                )
+
+            technical_prompt = re.sub(r"\n{3,}", "\n\n", technical_prompt).strip()
+
+            optional_instructions = self._build_optional_technical_instructions(
+                "Unknown"
             )
+            if optional_instructions:
+                technical_prompt = (
+                    f"{technical_prompt.rstrip()}\n\n{optional_instructions}"
+                )
 
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
-
-            # Replace placeholders in technical prompt
-            technical_prompt = technical_prompt.replace("{time}", current_time)
-            technical_prompt = technical_prompt.replace("{date}", current_date)
-            technical_prompt = technical_prompt.replace("{current_area}", "Unknown")
-            technical_prompt = technical_prompt.replace("{index}", "{}")
-
-            # Combine prompts
-            return f"{system_prompt}\n\n{technical_prompt}"
+            if system_prompt:
+                return f"{system_prompt}\n\n{technical_prompt}"
+            return technical_prompt
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
@@ -1110,18 +1919,21 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Build message list for LM Studio."""
         messages = [{"role": "system", "content": system_prompt}]
 
-        # Add conversation history (last 5 turns)
-        for turn in history[-5:]:
-            messages.append({"role": "user", "content": turn["user"]})
-            messages.append({"role": "assistant", "content": turn["assistant"]})
+        # OpenClaw manages its own session history on the gateway.
+        if self.server_type != SERVER_TYPE_OPENCLAW:
+            history_limit = max(0, self.max_history)
+            if history_limit > 0:
+                for turn in history[-history_limit:]:
+                    messages.append({"role": "user", "content": turn["user"]})
+                    messages.append({"role": "assistant", "content": turn["assistant"]})
 
         # Add current user message
         messages.append({"role": "user", "content": user_text})
 
         return messages
 
-    async def _get_mcp_tools(self) -> Optional[List[Dict[str, Any]]]:
-        """Fetch available tools from MCP server."""
+    async def _fetch_mcp_tools_from_server(self) -> Optional[List[Dict[str, Any]]]:
+        """Fetch and convert available tools from the MCP server."""
         try:
             mcp_url = f"http://localhost:{self.mcp_port}"
 
@@ -1143,23 +1955,16 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                     data = await response.json()
                     if "result" in data and "tools" in data["result"]:
-                        tools = data["result"]["tools"]
-                        _LOGGER.info("Retrieved %d MCP tools", len(tools))
+                        tools = self._filter_mcp_tools_for_profile(
+                            data["result"]["tools"]
+                        )
+                        _LOGGER.info(
+                            "Retrieved %d MCP tools after profile filtering",
+                            len(tools),
+                        )
 
-                        # Convert to OpenAI format for LM Studio
-                        openai_tools = []
                         tool_names = []
                         for tool in tools:
-                            openai_tools.append(
-                                {
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool["name"],
-                                        "description": tool["description"],
-                                        "parameters": tool.get("inputSchema", {}),
-                                    },
-                                }
-                            )
                             tool_names.append(tool["name"])
 
                         _LOGGER.info("MCP tools available: %s", ", ".join(tool_names))
@@ -1168,28 +1973,94 @@ class MCPAssistConversationEntity(ConversationEntity):
                         else:
                             _LOGGER.warning("⚠️ perform_action tool NOT found!")
 
-                        return openai_tools
+                        return self._convert_mcp_tools_to_llm_tools(tools)
                     return None
 
         except Exception as err:
             _LOGGER.error("Failed to get MCP tools: %s", err)
             return None
 
+    async def _get_mcp_tools(self) -> Optional[List[Dict[str, Any]]]:
+        """Return available LLM-facing MCP tools, using a short-lived cache."""
+        cache_key = self._build_mcp_tool_cache_key()
+        now = time.monotonic()
+
+        if (
+            self._cached_llm_tools is not None
+            and self._cached_llm_tools_key == cache_key
+            and (now - self._cached_llm_tools_fetched_at) < MCP_TOOL_CACHE_TTL_SECONDS
+        ):
+            _LOGGER.debug("Using cached MCP tool schema for profile")
+            return list(self._cached_llm_tools)
+
+        tools = await self._fetch_mcp_tools_from_server()
+        if tools is not None:
+            self._cached_llm_tools = list(tools)
+            self._cached_llm_tools_key = cache_key
+            self._cached_llm_tools_fetched_at = now
+            return list(tools)
+
+        if self._cached_llm_tools is not None and self._cached_llm_tools_key == cache_key:
+            _LOGGER.warning("Using stale cached MCP tools after refresh failure")
+            return list(self._cached_llm_tools)
+
+        return None
+
+    def _filter_mcp_tools_for_profile(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Filter shared MCP tools down to the subset enabled for this profile."""
+        filtered_tools = [
+            tool
+            for tool in tools
+            if self._is_tool_enabled_for_profile(tool.get("name", ""))
+        ]
+
+        filtered_names = [tool.get("name", "") for tool in filtered_tools]
+        _LOGGER.info("Profile-visible MCP tools: %s", ", ".join(filtered_names))
+        return filtered_tools
+
     async def _call_mcp_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        user_input: ConversationInput | None = None,
     ) -> Dict[str, Any]:
         """Execute a single MCP tool and return the result."""
         _LOGGER.info(f"🔧 Executing MCP tool: {tool_name} with args: {arguments}")
+
+        if not self._is_tool_enabled_for_profile(tool_name):
+            return {
+                "isError": True,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Tool '{tool_name}' is disabled for this profile. "
+                            "Use this profile's enabled tools instead."
+                        ),
+                    }
+                ],
+            }
 
         try:
             mcp_url = f"http://localhost:{self.mcp_port}"
 
             # Create JSON-RPC request for tool execution
             request_id = f"tool_{uuid.uuid4().hex[:8]}"
+            tool_user_input = (
+                user_input if user_input is not None else _REQUEST_USER_INPUT.get()
+            )
             payload = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "context": await self._build_mcp_tool_call_context(
+                        tool_user_input
+                    ),
+                },
                 "id": request_id,
             }
 
@@ -1208,31 +2079,111 @@ class MCPAssistConversationEntity(ConversationEntity):
                     data = await response.json()
                     _LOGGER.debug(f"MCP response: {json.dumps(data, indent=2)}")
 
-                    if "result" in data and "content" in data["result"]:
-                        # Extract the text content from the MCP response
-                        content = data["result"]["content"]
-                        if isinstance(content, list) and len(content) > 0:
-                            text_result = content[0].get("text", "")
-                            if self.debug_mode:
-                                _LOGGER.info(
-                                    f"🔍 MCP tool '{tool_name}' returned {len(text_result)} chars"
-                                )
-                                _LOGGER.info(
-                                    f"🔍 Full result (repr): {repr(text_result)}"
-                                )
-                                # Also log each line separately for readability
-                                for i, line in enumerate(text_result.split("\n")):
-                                    _LOGGER.info(f"  Line {i}: {line}")
-                            return {"result": text_result}
-                        return {"result": str(content)}
-                    elif "error" in data:
+                    if "result" in data:
+                        return self._normalize_mcp_tool_response(data["result"])
+                    if "error" in data:
                         return {"error": data["error"]}
-                    else:
-                        return {"result": str(data.get("result", ""))}
+                    return {"result": str(data.get("result", ""))}
 
         except Exception as e:
             _LOGGER.error(f"Error calling MCP tool {tool_name}: {e}")
             return {"error": str(e)}
+
+    def _normalize_mcp_tool_response(self, result: Any) -> Dict[str, Any]:
+        """Normalize an MCP JSON-RPC tool result into one predictable shape."""
+        if isinstance(result, dict):
+            if any(
+                key in result
+                for key in ("content", "structuredContent", "isError", "_meta")
+            ):
+                return result
+            return {"result": result}
+        return {"result": result}
+
+    def _format_tool_result_for_llm(self, tool_name: str, result: Dict[str, Any]) -> str:
+        """Serialize a tool result for follow-up LLM turns without losing structure."""
+        if "error" in result:
+            error_data = result["error"]
+            if isinstance(error_data, dict):
+                error_message = error_data.get("message", str(error_data))
+            else:
+                error_message = str(error_data)
+            return self._compact_tool_result_for_llm(
+                tool_name,
+                f"ERROR: {error_message}",
+            )
+
+        simple_text = self._extract_simple_text_result(result)
+        if simple_text is not None:
+            return self._compact_tool_result_for_llm(tool_name, simple_text)
+
+        if "result" in result and not any(
+            key in result for key in ("content", "structuredContent", "isError", "_meta")
+        ):
+            raw_result = result["result"]
+            if isinstance(raw_result, str):
+                return self._compact_tool_result_for_llm(tool_name, raw_result)
+            return self._compact_tool_result_for_llm(
+                tool_name,
+                json.dumps(
+                    self._sanitize_tool_result_for_llm(raw_result),
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
+
+        return self._compact_tool_result_for_llm(
+            tool_name,
+            json.dumps(
+                self._sanitize_tool_result_for_llm(result),
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+
+    def _extract_simple_text_result(self, result: Dict[str, Any]) -> str | None:
+        """Return plain text when the MCP result is a single text block."""
+        content = result.get("content")
+        if (
+            isinstance(content, list)
+            and len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get("type") == "text"
+            and "structuredContent" not in result
+            and "_meta" not in result
+        ):
+            return str(content[0].get("text") or "")
+        return None
+
+    def _sanitize_tool_result_for_llm(self, value: Any) -> Any:
+        """Sanitize structured tool results so binary/image payloads stay compact."""
+        if isinstance(value, dict):
+            if value.get("type") == "image":
+                data_field = value.get("data")
+                omitted_bytes = 0
+                if isinstance(data_field, str):
+                    omitted_bytes = int(len(data_field) * 0.75)
+                return {
+                    "type": "image",
+                    "mimeType": value.get("mimeType"),
+                    "data": f"[binary image omitted: ~{omitted_bytes} bytes]",
+                }
+
+            sanitized: dict[str, Any] = {}
+            for key, item in value.items():
+                if key in {"data", "blob", "b64_json"} and isinstance(item, str):
+                    sanitized[key] = f"[omitted {len(item)} chars]"
+                    continue
+                sanitized[key] = self._sanitize_tool_result_for_llm(item)
+            return sanitized
+
+        if isinstance(value, list):
+            return [self._sanitize_tool_result_for_llm(item) for item in value]
+
+        if isinstance(value, str) and len(value) > 2000:
+            return self._compact_tool_result_for_llm("structured_result", value)
+
+        return value
 
     def _strip_thinking_tags(self, text: str) -> tuple[str, str]:
         """Strip thinking/reasoning tags from model output.
@@ -1308,6 +2259,12 @@ class MCPAssistConversationEntity(ConversationEntity):
         text = text.replace("…", "...")  # U+2026 HORIZONTAL ELLIPSIS
         text = text.replace("•", "-")  # U+2022 BULLET
 
+        # Normalize stray spaces before punctuation so spoken/displayed text
+        # does not come out as "it , the weather entity is available."
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"([(\[{])\s+", r"\1", text)
+        text = re.sub(r"\s+([)\]}])", r"\1", text)
+
         # ONLY apply aggressive cleaning if clean_responses enabled
         if not self.clean_responses:
             return text
@@ -1363,120 +2320,86 @@ class MCPAssistConversationEntity(ConversationEntity):
         return text
 
     async def _trigger_tts(self, text: str):
-        """Send text to TTS for immediate feedback."""
-        if not text or len(text) < 3:  # Skip very short fragments
-            return
+        """Streaming interim TTS is intentionally disabled.
 
-        _LOGGER.info(f"🔊 TTS: {text[:50]}...")
+        Home Assistant already handles speaking the final response, and the old
+        hardcoded media_player target was both environment-specific and added
+        avoidable work during each request.
+        """
+        del text
+        return
 
-        # Use HA's TTS service for immediate feedback
+    async def _execute_single_tool_call(
+        self, tool_call: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a single tool call and return an OpenAI/Ollama tool message."""
+        tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
+        function = tool_call.get("function", {})
+        tool_name = function.get("name")
+        arguments_str = function.get("arguments")
+
+        _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
+
         try:
-            # Get the default TTS service
-            await self.hass.services.async_call(
-                "tts",
-                "speak",
-                {
-                    "message": self._clean_text_for_tts(text),
-                    "entity_id": "media_player.default",  # Adjust to your setup
-                    "cache": True,  # Cache for faster response
-                },
-                blocking=False,  # Don't wait for TTS to complete
-            )
+            arguments = self._parse_tool_arguments(arguments_str)
+
+            # Execute the tool
+            result = await self._call_mcp_tool(tool_name, arguments)
+
+            # Format result for LLM consumption
+            content = self._format_tool_result_for_llm(tool_name, result)
+
+            if tool_name == "set_conversation_state" and content:
+                if "conversation_state:true" in content.lower():
+                    self._expecting_response = True
+                    _LOGGER.debug(
+                        "🔄 Conversation will continue - expecting response"
+                    )
+                elif "conversation_state:false" in content.lower():
+                    self._expecting_response = False
+                    _LOGGER.debug(
+                        "🔄 Conversation will close - not expecting response"
+                    )
+
+            if self.server_type == SERVER_TYPE_OLLAMA:
+                return {
+                    "role": "tool",
+                    "tool_name": tool_name,
+                    "content": content if content is not None else "",
+                }
+
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": content if content is not None else "",
+            }
+
         except Exception as e:
-            _LOGGER.debug(f"TTS not available or failed: {e}")
-            # Don't fail the whole request if TTS fails
+            _LOGGER.error(f"Error executing tool {tool_name}: {e}")
+            error_content = json.dumps({"error": str(e)})
+            if self.server_type == SERVER_TYPE_OLLAMA:
+                return {
+                    "role": "tool",
+                    "tool_name": tool_name,
+                    "content": error_content,
+                }
+
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": error_content,
+            }
 
     async def _execute_tool_calls(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Execute a list of tool calls and return results in OpenAI format."""
-        results = []
+        if not tool_calls:
+            return []
 
-        for tool_call in tool_calls:
-            tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
-            function = tool_call.get("function", {})
-            tool_name = function.get("name")
-            arguments_str = function.get("arguments")
-
-            _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
-
-            try:
-                arguments = self._parse_tool_arguments(arguments_str)
-
-                # Execute the tool
-                result = await self._call_mcp_tool(tool_name, arguments)
-
-                # Format result for OpenAI
-                if "error" in result:
-                    # Extract error message as plain text so LLM actually reads it
-                    error_data = result["error"]
-                    if isinstance(error_data, dict):
-                        error_msg = error_data.get("message", str(error_data))
-                    else:
-                        error_msg = str(error_data)
-                    content = f"ERROR: {error_msg}"
-                else:
-                    content = result.get("result", "")
-
-                # Check if this is the conversation state tool
-                if tool_name == "set_conversation_state" and content:
-                    # Parse the expecting_response value from the result
-                    if "conversation_state:true" in content.lower():
-                        self._expecting_response = True
-                        _LOGGER.debug(
-                            "🔄 Conversation will continue - expecting response"
-                        )
-                    elif "conversation_state:false" in content.lower():
-                        self._expecting_response = False
-                        _LOGGER.debug(
-                            "🔄 Conversation will close - not expecting response"
-                        )
-
-                # Format result based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama doesn't use tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "content": content if content is not None else "",
-                        }
-                    )
-                else:
-                    # OpenAI format with tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": content if content is not None else "",
-                        }
-                    )
-
-                _LOGGER.info(f"✅ Tool {tool_name} executed successfully")
-
-            except Exception as e:
-                _LOGGER.error(f"Error executing tool {tool_name}: {e}")
-                # Format error result based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama doesn't use tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
-                else:
-                    # OpenAI format with tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
-
-        return results
+        return list(await asyncio.gather(
+            *(self._execute_single_tool_call(tool_call) for tool_call in tool_calls)
+        ))
 
     async def _test_streaming_basic(self) -> bool:
         """Test basic streaming without tools to isolate connection issues."""
@@ -1530,29 +2453,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
     def _get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers based on server type."""
-        if self.server_type == SERVER_TYPE_OPENAI:
-            # OpenAI uses Bearer token
-            # For custom OpenAI-compatible URLs, only send auth if key looks valid
-            if self.api_key and len(self.api_key) > 5 and not self.api_key.lower() in ["none", "null", "fake", "na", "n/a"]:
-                return {"Authorization": f"Bearer {self.api_key}"}
-            else:
-                return {}  # No auth for custom services that don't require it
-        elif self.server_type == SERVER_TYPE_GEMINI:
-            # Gemini OpenAI-compatible endpoint uses Bearer token like OpenAI
-            return {"Authorization": f"Bearer {self.api_key}"}
-        elif self.server_type == SERVER_TYPE_ANTHROPIC:
-            # Anthropic OpenAI-compatible endpoint uses Bearer token
-            return {"Authorization": f"Bearer {self.api_key}"}
-        elif self.server_type == SERVER_TYPE_OPENROUTER:
-            # OpenRouter uses Bearer token with optional HTTP-Referer header
-            return {
-                "Authorization": f"Bearer {self.api_key}",
-                "HTTP-Referer": "https://github.com/mike-nott/mcp-assist",
-                "X-Title": "MCP Assist for Home Assistant",
-            }
-        else:
-            # Local servers (LM Studio, Ollama, llamacpp, vLLM) don't need auth
-            return {}
+        return build_provider_auth_headers(self.server_type, self.api_key)
 
     def _build_openai_payload(
         self,
@@ -1800,7 +2701,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                             try:
                                 error_data = await response.json()
                                 error_text = json.dumps(error_data, indent=2)
-                            except:
+                            except Exception:
                                 error_text = await response.text()
                             # Fallback to non-streaming
                             _LOGGER.error(
@@ -2090,7 +2991,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                         # Parse content as JSON if possible, otherwise use as-is
                         try:
                             tool_result_data = json.loads(result.get("content", "{}"))
-                        except:
+                        except Exception:
                             tool_result_data = {"result": result.get("content", "")}
                         self._record_tool_result_to_chatlog(
                             tool_call_id, tool_name, tool_result_data
@@ -2292,7 +3193,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                                     tool_result_data = json.loads(
                                         result.get("content", "{}")
                                     )
-                                except:
+                                except Exception:
                                     tool_result_data = {
                                         "result": result.get("content", "")
                                     }

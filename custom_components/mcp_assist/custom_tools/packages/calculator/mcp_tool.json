@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "calculator",
+  "name": "Calculator",
+  "description": "Built-in arithmetic and expression-evaluation tools.",
+  "version": "1.1.0",
+  "entrypoint": "tool:CalculatorPackageTool",
+  "prompt_append_file": "prompt.md",
+  "capabilities": [
+    "Performs arithmetic and evaluates math expressions."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "add",
+      "subtract",
+      "multiply",
+      "divide",
+      "sqrt",
+      "power",
+      "round_number",
+      "average",
+      "min_value",
+      "max_value",
+      "evaluate_expression"
+    ],
+    "shared_setting_key": "enable_calculator_tools",
+    "profile_setting_key": "profile_enable_calculator_tools",
+    "shared_default": false,
+    "profile_default": true,
+    "shared_label": "Calculator",
+    "shared_description": "Expose exact arithmetic and expression-evaluation helpers.",
+    "profile_disable_label": "Disable Calculator",
+    "profile_disable_description": "Prevents this profile from using arithmetic and expression-evaluation tools."
+  }
+}

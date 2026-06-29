@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "music_assistant",
+  "name": "Music Assistant",
+  "description": "Built-in Music Assistant search, queue, library, and playback tools.",
+  "version": "1.0.0",
+  "entrypoint": "tool:MusicAssistantPackageTool",
+  "capabilities": [
+    "Searches, browses, and controls Home Assistant Music Assistant instances and players."
+  ],
+  "built_in_toggle": {
+    "tool_names": [
+      "list_music_assistant_players",
+      "play_music_assistant",
+      "list_music_assistant_instances",
+      "search_music_assistant",
+      "get_music_assistant_library",
+      "get_music_assistant_queue"
+    ],
+    "shared_setting_key": "enable_music_assistant_support",
+    "profile_setting_key": "profile_enable_music_assistant_support",
+    "shared_default": false,
+    "profile_default": true,
+    "shared_label": "Music Assistant",
+    "shared_description": "Expose Music Assistant search, queue, library, and playback tools.",
+    "profile_disable_label": "Disable Music Assistant",
+    "profile_disable_description": "Prevents this profile from using Music Assistant search, queue, library, and playback tools."
+  }
+}

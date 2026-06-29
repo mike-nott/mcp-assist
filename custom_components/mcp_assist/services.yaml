@@ -1,0 +1,3 @@
+reload_external_custom_tools:
+  name: Reload external custom tools
+  description: Reload external tool packages from the Home Assistant config directory and return diagnostics.
