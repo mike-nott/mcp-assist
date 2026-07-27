@@ -1,7 +1,7 @@
 """DuckDuckGo Search custom tool for MCP Assist."""
 import logging
 from typing import Dict, Any, List
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class DuckDuckGoSearchTool:
         """Synchronous search wrapper for thread pool execution."""
         try:
             raw_results = DDGS().text(
-                keywords=query,
+                query=query,
                 max_results=count,
                 region="us-en",
                 safesearch="moderate",
