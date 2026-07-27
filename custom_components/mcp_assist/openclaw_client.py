@@ -19,7 +19,7 @@ from homeassistant.helpers.storage import Store
 _LOGGER = logging.getLogger(__name__)
 
 # Protocol constants
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 CLIENT_ID = "gateway-client"
 CLIENT_DISPLAY_NAME = "Home Assistant MCP Assist"
 CLIENT_VERSION = "1.0.0"
