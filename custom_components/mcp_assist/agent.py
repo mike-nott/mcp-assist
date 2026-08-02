@@ -862,19 +862,11 @@ class MCPAssistConversationEntity(ConversationEntity):
         if not model or model == "model":  # unset placeholder
             model = DEFAULT_HERMES_MODEL
 
+        # Only the user message: Hermes layers its own persona/prompts, and
+        # TTS formatting is handled downstream by clean_responses
         payload = {
             "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "This is a voice assistant request. Respond in natural "
-                        "spoken language. Keep it brief (1-3 sentences). No "
-                        "markdown, bullet points, lists, or emojis."
-                    ),
-                },
-                {"role": "user", "content": text},
-            ],
+            "messages": [{"role": "user", "content": text}],
             "stream": stream,
         }
         # Note: no "tools" — Hermes executes tools server-side and silently

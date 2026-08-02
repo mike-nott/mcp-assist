@@ -492,12 +492,9 @@ class OpenClawClient:
         request_id = str(uuid.uuid4())
         idempotency_key = str(uuid.uuid4())
 
-        # Prefix with voice instruction so OpenClaw formats for speech
-        voice_message = (
-            "[This is a voice assistant request. Respond in natural spoken language. "
-            "Keep it brief (1-3 sentences). No markdown, bullet points, lists, or emojis.]\n\n"
-            + text
-        )
+        # The message is sent unmodified: the OpenClaw agent's own prompts
+        # (soul/agent/memory) govern style, and TTS formatting is handled
+        # downstream by the clean_responses option
 
         # Register the response future before sending so a fast acknowledgment
         # processed during the send await cannot be dropped.
@@ -510,7 +507,7 @@ class OpenClawClient:
                 "id": request_id,
                 "method": "agent",
                 "params": {
-                    "message": voice_message,
+                    "message": text,
                     "sessionKey": session_key,
                     "idempotencyKey": idempotency_key,
                 },
