@@ -17,6 +17,8 @@ The index includes:
 import asyncio
 import logging
 import re
+from collections.abc import Callable
+from contextlib import suppress
 from typing import Any, Dict, List, Optional, Set
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -52,12 +54,23 @@ class IndexManager:
         self._index: Optional[Dict[str, Any]] = None
         self._last_updated: Optional[datetime] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        self._unsub_listeners: List[Callable[[], None]] = []
         self._refresh_debounce_seconds = 60
         self._gap_filling_in_progress = False  # Re-entrancy guard for gap-filling
         self._first_index_generated = False  # Skip gap-filling on first index (startup)
+        # Serializes generation so concurrent lazy get_index() calls and the
+        # debounced refresh don't run duplicate (paid) index builds.
+        self._generate_lock = asyncio.Lock()
+        # Coalesce flag: registry events set this instead of cancelling an
+        # in-flight generation, so sustained churn can't starve the index.
+        self._refresh_pending = False
 
     async def start(self) -> None:
         """Start index manager and set up event listeners."""
+        if self._unsub_listeners:
+            _LOGGER.debug("Smart Index Manager already started")
+            return
+
         _LOGGER.info("Starting Smart Index Manager")
 
         @callback
@@ -77,30 +90,68 @@ class IndexManager:
             registry_events.append(lr.EVENT_LABEL_REGISTRY_UPDATED)
 
         for event_type in registry_events:
-            self.hass.bus.async_listen(event_type, registry_changed)
+            self._unsub_listeners.append(
+                self.hass.bus.async_listen(event_type, registry_changed)
+            )
 
         _LOGGER.info("✅ Smart Index Manager started successfully")
         _LOGGER.debug("Index will be generated lazily on first request")
 
-    def _schedule_refresh(self) -> None:
-        """Schedule index refresh with debouncing."""
-        # Cancel pending refresh if exists
+    async def async_stop(self) -> None:
+        """Stop index manager listeners and pending refresh work."""
+        _LOGGER.info("Stopping Smart Index Manager")
+
+        for unsubscribe in self._unsub_listeners:
+            with suppress(Exception):
+                unsubscribe()
+        self._unsub_listeners.clear()
+
         if self._refresh_task and not self._refresh_task.done():
             self._refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._refresh_task
+        self._refresh_task = None
 
-        # Schedule new refresh after debounce period
-        self._refresh_task = asyncio.create_task(self._delayed_refresh())
+    def _schedule_refresh(self) -> None:
+        """Request a debounced index refresh, coalescing rapid registry events.
 
-    async def _delayed_refresh(self) -> None:
-        """Refresh index after debounce delay."""
+        Sets a pending flag and starts the debounce loop if it isn't already
+        running. A change that arrives while a refresh is in flight is recorded
+        and handled after it completes, rather than cancelling it mid-generation
+        (which, under sustained churn, would starve the index of updates).
+        """
+        self._refresh_pending = True
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = asyncio.create_task(self._debounced_refresh_loop())
+
+    async def _debounced_refresh_loop(self) -> None:
+        """Refresh once the registry has been quiet for the debounce window.
+
+        A change that arrives *during the wait* restarts the quiet window, so
+        a burst of registry events (common for one HA change) coalesces into a
+        single rebuild rather than refreshing mid-burst. A change that arrives
+        *during generation* is recorded and handled by the next loop iteration,
+        so an in-flight refresh is never interrupted.
+        """
         try:
-            await asyncio.sleep(self._refresh_debounce_seconds)
-            await self.refresh_index()
+            while self._refresh_pending:
+                self._refresh_pending = False
+                await asyncio.sleep(self._refresh_debounce_seconds)
+                if self._refresh_pending:
+                    # More changes landed during the wait — reset the window.
+                    continue
+                await self.refresh_index()
         except asyncio.CancelledError:
-            _LOGGER.debug("Index refresh cancelled (newer change detected)")
+            _LOGGER.debug("Index refresh loop cancelled")
+            raise
 
     async def refresh_index(self) -> None:
-        """Generate fresh index from current system state."""
+        """Generate a fresh index from current system state."""
+        async with self._generate_lock:
+            await self._generate_and_store_index()
+
+    async def _generate_and_store_index(self) -> None:
+        """Build the index and store it. Caller holds the generate lock."""
         start_time = datetime.now()
         _LOGGER.info("Generating system structure index...")
 
@@ -127,7 +178,10 @@ class IndexManager:
     async def get_index(self) -> Dict[str, Any]:
         """Get the current index, generating if needed."""
         if self._index is None:
-            await self.refresh_index()
+            async with self._generate_lock:
+                # Re-check under the lock: another caller may have generated it.
+                if self._index is None:
+                    await self._generate_and_store_index()
 
         return self._index or {}
 
@@ -780,23 +834,25 @@ Focus on meaningful categories that would help discover relevant entities for us
             Exception: If LLM call fails or response cannot be parsed
         """
         from homeassistant.components import conversation
-        from .const import DOMAIN
+        from .const import DOMAIN, SYSTEM_ENTRY_UNIQUE_ID
 
-        # Get any conversation agent entry (they all share the same LLM config)
-        entries = [entry for entry in self.hass.config_entries.async_entries(DOMAIN)]
-        if not entries:
-            raise ValueError("No MCP Assist config entries found")
+        # Find the first profile entry with a live agent (skip the system
+        # settings entry, which has no agent)
+        domain_data = self.hass.data.get(DOMAIN, {})
+        entry = None
+        agent = None
+        for candidate in self.hass.config_entries.async_entries(DOMAIN):
+            if candidate.unique_id == SYSTEM_ENTRY_UNIQUE_ID:
+                continue
+            agent_data = domain_data.get(candidate.entry_id) or {}
+            candidate_agent = agent_data.get("agent")
+            if candidate_agent:
+                entry = candidate
+                agent = candidate_agent
+                break
 
-        entry = entries[0]
-
-        # Get the agent
-        agent_data = self.hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if not agent_data:
-            raise ValueError("No agent found for LLM inference")
-
-        agent = agent_data.get("agent")
-        if not agent:
-            raise ValueError("Agent not available for LLM inference")
+        if entry is None or agent is None:
+            raise ValueError("No profile agent found for LLM inference")
 
         # Create a minimal conversation input with all required fields
         conversation_input = conversation.ConversationInput(

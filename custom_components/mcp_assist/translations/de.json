@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Server-URL",
           "api_key": "API-Schluessel",
-          "mcp_port": "MCP-Server-Port"
+          "mcp_port": "MCP-Server-Port",
+          "hermes_url": "Hermes-Server-URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "timeout": "Antwort-Timeout",
           "debug_mode": "Debug-Modus",
           "ollama_keep_alive": "Ollama am Leben halten",
-          "ollama_num_ctx": "Ollama Kontextfenster"
+          "ollama_num_ctx": "Ollama Kontextfenster",
+          "openclaw_session_key": "Sitzungsschlüssel / Sitzungs-ID",
+          "hermes_session_key": "Speicher-Sitzungsschlüssel"
+        },
+        "data_description": {
+          "openclaw_session_key": "Zu verwendende OpenClaw-Sitzung: ein kurzer Schlüssel wie 'main' oder eine vollständige Sitzungs-ID wie 'agent:main:main'.",
+          "hermes_session_key": "Stabiler Schlüssel, der das Langzeitgedächtnis von Hermes für dieses Profil abgrenzt."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "timeout": "Antwort-Timeout",
           "debug_mode": "Debug-Modus",
           "ollama_keep_alive": "Ollama am Leben halten",
-          "ollama_num_ctx": "Ollama Kontextfenster"
+          "ollama_num_ctx": "Ollama Kontextfenster",
+          "openclaw_session_key": "Sitzungsschlüssel / Sitzungs-ID",
+          "hermes_url": "Hermes-Server-URL",
+          "hermes_session_key": "Speicher-Sitzungsschlüssel"
+        },
+        "data_description": {
+          "openclaw_session_key": "Zu verwendende OpenClaw-Sitzung: ein kurzer Schlüssel wie 'main' oder eine vollständige Sitzungs-ID wie 'agent:main:main'.",
+          "hermes_session_key": "Stabiler Schlüssel, der das Langzeitgedächtnis von Hermes für dieses Profil abgrenzt."
         }
       },
       "mcp_server": {

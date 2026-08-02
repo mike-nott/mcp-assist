@@ -579,12 +579,64 @@ DOMAIN_REGISTRY = {
     "weather": {
         "type": TYPE_READ_ONLY,
         "priority": PRIORITY_SPECIALIZED,
-        "services": ["get_forecast", "get_forecasts"],
+        "services": ["get_forecasts"],
         "parameters": {
-            "get_forecast": {"required": ["type"]},
             "get_forecasts": {"required": ["type"]},
         },
         "description": "Weather information and forecasts",
+    },
+    "calendar": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_SPECIALIZED,
+        "services": ["create_event", "get_events"],
+        "parameters": {
+            "create_event": {
+                "required": ["summary"],
+                "optional": [
+                    "start_date_time",
+                    "end_date_time",
+                    "start_date",
+                    "end_date",
+                    "description",
+                    "location",
+                ],
+            },
+            "get_events": {
+                "required": ["start_date_time"],
+                "optional": ["end_date_time", "duration"],
+            },
+        },
+        "description": "Read calendar events and create new calendar events",
+    },
+    "todo": {
+        "type": TYPE_CONTROLLABLE,
+        "priority": PRIORITY_SPECIALIZED,
+        "services": [
+            "add_item",
+            "update_item",
+            "remove_item",
+            "remove_completed_items",
+            "get_items",
+        ],
+        "parameters": {
+            "add_item": {
+                "required": ["item"],
+                "optional": ["due_date", "due_datetime", "description"],
+            },
+            "update_item": {
+                "required": ["item"],
+                "optional": [
+                    "rename",
+                    "status",
+                    "due_date",
+                    "due_datetime",
+                    "description",
+                ],
+            },
+            "remove_item": {"required": ["item"]},
+            "get_items": {"optional": ["status"]},
+        },
+        "description": "Manage to-do lists and query their items",
     },
     "sun": {
         "type": TYPE_READ_ONLY,
@@ -644,36 +696,78 @@ DOMAIN_REGISTRY = {
     },
 }
 
-# Common action aliases that map to standard services
+# Domain-specific action aliases, resolved before the generic aliases below so
+# that e.g. media_player "stop" maps to media_stop instead of turn_off.
+DOMAIN_ACTION_ALIASES = {
+    "media_player": {
+        "stop": "media_stop",
+        "play": "media_play",
+        "pause": "media_pause",
+        "next": "media_next_track",
+        "previous": "media_previous_track",
+        "mute": "volume_mute",
+    },
+    "cover": {
+        "open": "open_cover",
+        "close": "close_cover",
+        "raise": "open_cover",
+        "lift": "open_cover",
+        "lower": "close_cover",
+        "drop": "close_cover",
+        "stop": "stop_cover",
+    },
+    "valve": {
+        "open": "open_valve",
+        "close": "close_valve",
+        "stop": "stop_valve",
+    },
+    "lock": {
+        "secure": "lock",
+        "unsecure": "unlock",
+    },
+    "vacuum": {
+        "clean": "start",
+        "dock": "return_to_base",
+        "home": "return_to_base",
+    },
+    "lawn_mower": {
+        "start": "start_mowing",
+        "home": "dock",
+    },
+    "timer": {
+        "stop": "cancel",
+    },
+    "climate": {
+        "heat": "set_hvac_mode",
+        "cool": "set_hvac_mode",
+    },
+    "calendar": {
+        "create": "create_event",
+        "add": "create_event",
+        "new": "create_event",
+        "schedule": "create_event",
+    },
+    "todo": {
+        "create": "add_item",
+        "add": "add_item",
+        "new": "add_item",
+        "delete": "remove_item",
+        "remove": "remove_item",
+        "clear_completed": "remove_completed_items",
+        "remove_completed": "remove_completed_items",
+        "cleanup": "remove_completed_items",
+    },
+}
+
+# Generic aliases applied to any domain, but only when the mapped service is
+# actually available for that domain.
 ACTION_ALIASES = {
-    # Common aliases for turn_on/turn_off
     "activate": "turn_on",
     "deactivate": "turn_off",
     "enable": "turn_on",
     "disable": "turn_off",
     "start": "turn_on",
     "stop": "turn_off",
-    # Lock-specific aliases
-    "secure": "lock",
-    "unsecure": "unlock",
-    # Cover-specific aliases
-    "open": "open_cover",
-    "close": "close_cover",
-    "raise": "open_cover",
-    "lower": "close_cover",
-    # Media player aliases
-    "play": "media_play",
-    "pause": "media_pause",
-    "next": "media_next_track",
-    "previous": "media_previous_track",
-    "mute": "volume_mute",
-    # Climate aliases
-    "heat": "set_hvac_mode",
-    "cool": "set_hvac_mode",
-    # Vacuum aliases
-    "clean": "start",
-    "dock": "return_to_base",
-    "home": "return_to_base",
 }
 
 
@@ -720,29 +814,20 @@ def map_action_to_service(domain: str, action: str) -> str:
     """
     # First check if it's already a valid service name
     domain_info = get_domain_info(domain)
-    if domain_info and action in domain_info.get("services", []):
+    services = domain_info.get("services", []) if domain_info else []
+    if action in services:
         return action
 
-    # Check common aliases
-    if action in ACTION_ALIASES:
-        return ACTION_ALIASES[action]
+    # Domain-specific aliases take precedence over the generic table
+    domain_alias = DOMAIN_ACTION_ALIASES.get(domain, {}).get(action)
+    if domain_alias and domain_alias in services:
+        return domain_alias
 
-    # Domain-specific mappings
-    if domain == "cover":
-        if action in ["raise", "lift"]:
-            return "open_cover"
-        elif action in ["lower", "drop"]:
-            return "close_cover"
-    elif domain == "lock":
-        if action == "secure":
-            return "lock"
-        elif action == "unsecure":
-            return "unlock"
-    elif domain == "vacuum":
-        if action == "clean":
-            return "start"
-        elif action in ["dock", "home"]:
-            return "return_to_base"
+    # Generic aliases only apply when the mapped service exists for the domain;
+    # unknown domains keep the generic mapping as a best-effort fallback.
+    generic_alias = ACTION_ALIASES.get(action)
+    if generic_alias and (generic_alias in services or not domain_info):
+        return generic_alias
 
     # Default: return the action as-is
     return action
@@ -775,19 +860,19 @@ def validate_domain_action(domain: str, action: str) -> Tuple[bool, str]:
             f"Domain '{domain}' not supported. Use 'list_domains' to see available domains.",
         )
 
-    # Check if domain is read-only
-    if domain_info["type"] == TYPE_READ_ONLY:
-        return False, domain_info.get(
-            "error_message",
-            f"Domain '{domain}' is read-only. Use 'get_entity_details' to read values.",
-        )
-
     # Map the action to a service name
     service = map_action_to_service(domain, action)
 
     # Check if service is valid for this domain
     if service in domain_info.get("services", []):
         return True, service
+
+    # Read-only domains only allow the services listed above (if any)
+    if domain_info["type"] == TYPE_READ_ONLY:
+        return False, domain_info.get(
+            "error_message",
+            f"Domain '{domain}' is read-only. Use 'get_entity_details' to read values.",
+        )
 
     # Provide helpful error with available services
     available_services = domain_info.get("services", [])

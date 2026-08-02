@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Server-URL",
           "api_key": "API-nyckel",
-          "mcp_port": "MCP-serverport"
+          "mcp_port": "MCP-serverport",
+          "hermes_url": "Hermes server-URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Felsokningslage",
           "ollama_keep_alive": "Hall Ollama aktiv",
           "ollama_num_ctx": "Ollama kontextfonster",
-          "clean_responses": "Rensa svar för röstutmatning"
+          "clean_responses": "Rensa svar för röstutmatning",
+          "openclaw_session_key": "Sessionsnyckel / session-ID",
+          "hermes_session_key": "Sessionsnyckel för minne"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw-session som ska användas: en kort nyckel som 'main' eller ett fullständigt session-ID som 'agent:main:main'.",
+          "hermes_session_key": "Stabil nyckel som avgränsar Hermes långtidsminne för denna profil."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Felsokningslage",
           "ollama_keep_alive": "Hall Ollama aktiv",
           "ollama_num_ctx": "Ollama kontextfonster",
-          "clean_responses": "Rensa svar för röstutmatning"
+          "clean_responses": "Rensa svar för röstutmatning",
+          "openclaw_session_key": "Sessionsnyckel / session-ID",
+          "hermes_url": "Hermes server-URL",
+          "hermes_session_key": "Sessionsnyckel för minne"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw-session som ska användas: en kort nyckel som 'main' eller ett fullständigt session-ID som 'agent:main:main'.",
+          "hermes_session_key": "Stabil nyckel som avgränsar Hermes långtidsminne för denna profil."
         }
       },
       "mcp_server": {

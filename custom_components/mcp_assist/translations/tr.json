@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Sunucu URL'si",
           "api_key": "API Anahtari",
-          "mcp_port": "MCP Sunucu Portu"
+          "mcp_port": "MCP Sunucu Portu",
+          "hermes_url": "Hermes Sunucu URL'si"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Hata Ayiklama Modu",
           "ollama_keep_alive": "Ollama'yi Aktif Tut",
           "ollama_num_ctx": "Ollama Baglam Penceresi",
-          "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle"
+          "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle",
+          "openclaw_session_key": "Oturum Anahtarı / Oturum ID'si",
+          "hermes_session_key": "Bellek Oturum Anahtarı"
+        },
+        "data_description": {
+          "openclaw_session_key": "Kullanılacak OpenClaw oturumu: 'main' gibi kısa bir anahtar veya 'agent:main:main' gibi tam bir oturum ID'si.",
+          "hermes_session_key": "Bu profil için Hermes uzun süreli belleğini sınırlayan sabit anahtar."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Hata Ayiklama Modu",
           "ollama_keep_alive": "Ollama'yi Aktif Tut",
           "ollama_num_ctx": "Ollama Baglam Penceresi",
-          "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle"
+          "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle",
+          "openclaw_session_key": "Oturum Anahtarı / Oturum ID'si",
+          "hermes_url": "Hermes Sunucu URL'si",
+          "hermes_session_key": "Bellek Oturum Anahtarı"
+        },
+        "data_description": {
+          "openclaw_session_key": "Kullanılacak OpenClaw oturumu: 'main' gibi kısa bir anahtar veya 'agent:main:main' gibi tam bir oturum ID'si.",
+          "hermes_session_key": "Bu profil için Hermes uzun süreli belleğini sınırlayan sabit anahtar."
         }
       },
       "mcp_server": {

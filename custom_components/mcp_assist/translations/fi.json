@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Palvelimen URL",
           "api_key": "API-avain",
-          "mcp_port": "MCP-palvelinportti"
+          "mcp_port": "MCP-palvelinportti",
+          "hermes_url": "Hermes-palvelimen URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Virheenkorjaustila",
           "ollama_keep_alive": "Pida Ollama aktiivisena",
           "ollama_num_ctx": "Ollaman konteksti-ikkuna",
-          "clean_responses": "Puhdista vastaukset äänilähtöä varten"
+          "clean_responses": "Puhdista vastaukset äänilähtöä varten",
+          "openclaw_session_key": "Istuntoavain / istunnon ID",
+          "hermes_session_key": "Muistin istuntoavain"
+        },
+        "data_description": {
+          "openclaw_session_key": "Käytettävä OpenClaw-istunto: lyhyt avain kuten 'main' tai täydellinen istunnon ID kuten 'agent:main:main'.",
+          "hermes_session_key": "Pysyvä avain, joka rajaa Hermesin pitkäaikaismuistin tälle profiilille."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Virheenkorjaustila",
           "ollama_keep_alive": "Pida Ollama aktiivisena",
           "ollama_num_ctx": "Ollaman konteksti-ikkuna",
-          "clean_responses": "Puhdista vastaukset äänilähtöä varten"
+          "clean_responses": "Puhdista vastaukset äänilähtöä varten",
+          "openclaw_session_key": "Istuntoavain / istunnon ID",
+          "hermes_url": "Hermes-palvelimen URL",
+          "hermes_session_key": "Muistin istuntoavain"
+        },
+        "data_description": {
+          "openclaw_session_key": "Käytettävä OpenClaw-istunto: lyhyt avain kuten 'main' tai täydellinen istunnon ID kuten 'agent:main:main'.",
+          "hermes_session_key": "Pysyvä avain, joka rajaa Hermesin pitkäaikaismuistin tälle profiilille."
         }
       },
       "mcp_server": {

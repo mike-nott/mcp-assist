@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Server-URL",
           "api_key": "API-noegle",
-          "mcp_port": "MCP-serverport"
+          "mcp_port": "MCP-serverport",
+          "hermes_url": "Hermes server-URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Fejlsoegningstilstand",
           "ollama_keep_alive": "Hold Ollama aktiv",
           "ollama_num_ctx": "Ollama kontekstvindue",
-          "clean_responses": "Rens svar til stemmeoutput"
+          "clean_responses": "Rens svar til stemmeoutput",
+          "openclaw_session_key": "Sessionsnøgle / sessions-ID",
+          "hermes_session_key": "Sessionsnøgle til hukommelse"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw-session der skal bruges: en kort nøgle som 'main' eller et fuldt sessions-ID som 'agent:main:main'.",
+          "hermes_session_key": "Stabil nøgle der afgrænser Hermes' langtidshukommelse for denne profil."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Fejlsoegningstilstand",
           "ollama_keep_alive": "Hold Ollama aktiv",
           "ollama_num_ctx": "Ollama kontekstvindue",
-          "clean_responses": "Rens svar til stemmeoutput"
+          "clean_responses": "Rens svar til stemmeoutput",
+          "openclaw_session_key": "Sessionsnøgle / sessions-ID",
+          "hermes_url": "Hermes server-URL",
+          "hermes_session_key": "Sessionsnøgle til hukommelse"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw-session der skal bruges: en kort nøgle som 'main' eller et fuldt sessions-ID som 'agent:main:main'.",
+          "hermes_session_key": "Stabil nøgle der afgrænser Hermes' langtidshukommelse for denne profil."
         }
       },
       "mcp_server": {

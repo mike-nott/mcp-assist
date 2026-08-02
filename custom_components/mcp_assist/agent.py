@@ -88,16 +88,31 @@ from .const import (
     SERVER_TYPE_OPENROUTER,
     SERVER_TYPE_OPENCLAW,
     SERVER_TYPE_VLLM,
+    SERVER_TYPE_HERMES,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
     CONF_OPENCLAW_SESSION_KEY,
     DEFAULT_OPENCLAW_SESSION_KEY,
+    CONF_HERMES_URL,
+    CONF_HERMES_SESSION_KEY,
+    DEFAULT_HERMES_URL,
+    DEFAULT_HERMES_SESSION_KEY,
+    DEFAULT_HERMES_MODEL,
+    MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class HermesSessionError(Exception):
+    """Hermes rejected the stored session id (expired or invalid)."""
+
+
+class HermesBusyError(Exception):
+    """Hermes hit its concurrent-run cap (HTTP 429)."""
 
 
 class MCPAssistConversationEntity(ConversationEntity):
@@ -168,9 +183,20 @@ class MCPAssistConversationEntity(ConversationEntity):
             self.base_url = ANTHROPIC_BASE_URL
         elif self.server_type == SERVER_TYPE_OPENROUTER:
             self.base_url = OPENROUTER_BASE_URL
+        elif self.server_type == SERVER_TYPE_HERMES:
+            self.base_url = self.entry.options.get(
+                CONF_HERMES_URL,
+                self.entry.data.get(CONF_HERMES_URL, DEFAULT_HERMES_URL),
+            ).rstrip("/")
+            _LOGGER.info("🌐 AGENT: Using Hermes Agent URL: %s", self.base_url)
         else:
             # LM Studio or Ollama - URL can change, so make it a property below
             pass
+
+        # HA conversation_id -> X-Hermes-Session-Id. Hermes echoes the
+        # effective session id on every response (it can rotate on context
+        # compression), so it must be captured and replayed each turn.
+        self._hermes_session_ids: Dict[str, str] = {}
 
         # All other config values are now dynamic properties (see @property methods below)
 
@@ -611,6 +637,29 @@ class MCPAssistConversationEntity(ConversationEntity):
             normalized.append(normalized_call)
         return normalized
 
+    @staticmethod
+    def _normalize_stream_tool_call_index(
+        raw_index: Any,
+        stream_index_offset: int | None,
+    ) -> tuple[int, int]:
+        """Normalize streamed tool-call indexes that start above zero."""
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            index = 0
+
+        if stream_index_offset is None:
+            stream_index_offset = index
+
+        return max(0, index - stream_index_offset), stream_index_offset
+
+    @staticmethod
+    def _compact_streamed_tool_calls(
+        tool_calls: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Drop empty streamed tool-call placeholders before execution."""
+        return [tool_call for tool_call in tool_calls if tool_call]
+
     def _format_tool_calls_for_ollama(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -683,6 +732,11 @@ class MCPAssistConversationEntity(ConversationEntity):
             # OpenClaw: bypass entire LLM/MCP pipeline — server handles everything
             if self.server_type == SERVER_TYPE_OPENCLAW:
                 return await self._handle_openclaw_message(user_input, conversation_id)
+
+            # Hermes Agent: same bypass — it runs its own agent loop with
+            # server-side tools and holds conversation state itself
+            if self.server_type == SERVER_TYPE_HERMES:
+                return await self._handle_hermes_message(user_input, conversation_id)
 
             # Get conversation history
             history = self.history.get_history(conversation_id)
@@ -759,6 +813,210 @@ class MCPAssistConversationEntity(ConversationEntity):
         return await self._build_response_result(
             response_text, user_input, conversation_id
         )
+
+    @property
+    def hermes_session_key(self) -> str:
+        """Hermes long-term-memory session key (X-Hermes-Session-Key)."""
+        return self.entry.options.get(
+            CONF_HERMES_SESSION_KEY,
+            self.entry.data.get(
+                CONF_HERMES_SESSION_KEY, DEFAULT_HERMES_SESSION_KEY
+            ),
+        )
+
+    async def _handle_hermes_message(
+        self, user_input: ConversationInput, conversation_id: str
+    ) -> ConversationResult:
+        """Handle a message via the Hermes Agent API server."""
+        _LOGGER.info(
+            f"📡 Sending to Hermes Agent (session key: {self.hermes_session_key})..."
+        )
+        response_text = await self._call_hermes(user_input.text, conversation_id)
+        _LOGGER.info(f"✅ Hermes response received, length: %d", len(response_text))
+
+        return await self._build_response_result(
+            response_text, user_input, conversation_id
+        )
+
+    def _build_hermes_request(
+        self, text: str, conversation_id: str, stream: bool
+    ) -> tuple[str, Dict[str, str], Dict[str, Any]]:
+        """Build URL, headers, and payload for a Hermes chat-completions call."""
+        url = f"{self.base_url}/v1/chat/completions"
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Hermes-Session-Key": self.hermes_session_key,
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        # Replay the transcript session id if we have one for this HA
+        # conversation; Hermes then loads its own history server-side and we
+        # send only the newest user message
+        session_id = self._hermes_session_ids.get(conversation_id)
+        if session_id:
+            headers["X-Hermes-Session-Id"] = session_id
+
+        model = self.model_name
+        if not model or model == "model":  # unset placeholder
+            model = DEFAULT_HERMES_MODEL
+
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "This is a voice assistant request. Respond in natural "
+                        "spoken language. Keep it brief (1-3 sentences). No "
+                        "markdown, bullet points, lists, or emojis."
+                    ),
+                },
+                {"role": "user", "content": text},
+            ],
+            "stream": stream,
+        }
+        # Note: no "tools" — Hermes executes tools server-side and silently
+        # ignores client tool definitions
+        return url, headers, payload
+
+    def _store_hermes_session_id(
+        self, conversation_id: str, response_headers: Any
+    ) -> None:
+        """Capture the echoed (possibly rotated) session id for the next turn."""
+        echoed = response_headers.get("X-Hermes-Session-Id")
+        if echoed:
+            self._hermes_session_ids[conversation_id] = echoed
+
+    async def _call_hermes(
+        self, text: str, conversation_id: str, _retried: bool = False
+    ) -> str:
+        """Call Hermes with streaming, falling back to plain HTTP on failure."""
+        try:
+            return await self._call_hermes_streaming(text, conversation_id)
+        except HermesSessionError:
+            # Stored session id rejected (expired/evicted) — drop it and
+            # retry once with a fresh session
+            if not _retried:
+                _LOGGER.warning(
+                    "⚠️ Hermes rejected stored session id, retrying fresh"
+                )
+                self._hermes_session_ids.pop(conversation_id, None)
+                return await self._call_hermes(text, conversation_id, _retried=True)
+            raise
+        except HermesBusyError:
+            raise
+        except Exception as err:
+            _LOGGER.warning(
+                "⚠️ Hermes streaming failed (%s), falling back to HTTP", err
+            )
+            return await self._call_hermes_http(text, conversation_id)
+
+    async def _call_hermes_streaming(
+        self, text: str, conversation_id: str
+    ) -> str:
+        """Streaming Hermes call (preferred: 30s keepalives prevent idle drops)."""
+        url, headers, payload = self._build_hermes_request(
+            text, conversation_id, stream=True
+        )
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status != 200:
+                    await self._raise_hermes_error(resp)
+
+                self._store_hermes_session_id(conversation_id, resp.headers)
+
+                response_text = ""
+                finish_reason = None
+                async for raw_line in resp.content:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data: "):
+                        # event:/keepalive comment lines
+                        continue
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = data.get("choices")
+                    if not choices:
+                        # hermes.tool.progress event payload (no "choices")
+                        if self.debug_mode and data.get("tool"):
+                            _LOGGER.info(
+                                "⚡ Hermes running tool: %s (%s)",
+                                data.get("tool"),
+                                data.get("status", "running"),
+                            )
+                        continue
+
+                    delta = choices[0].get("delta", {})
+                    chunk = delta.get("content")
+                    if chunk:
+                        response_text += chunk
+                    if choices[0].get("finish_reason"):
+                        finish_reason = choices[0]["finish_reason"]
+
+                # Failures arrive as finish_reason on a 200 stream, not status
+                if finish_reason == "error":
+                    raise RuntimeError(
+                        "Hermes agent reported an error mid-response"
+                        + (f": {response_text[:200]}" if response_text else "")
+                    )
+                if finish_reason == "length":
+                    _LOGGER.warning("⚠️ Hermes response truncated (length limit)")
+
+                return response_text
+
+    async def _call_hermes_http(self, text: str, conversation_id: str) -> str:
+        """Non-streaming Hermes fallback."""
+        url, headers, payload = self._build_hermes_request(
+            text, conversation_id, stream=False
+        )
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status != 200:
+                    await self._raise_hermes_error(resp)
+
+                self._store_hermes_session_id(conversation_id, resp.headers)
+
+                data = await resp.json()
+                choices = data.get("choices") or []
+                message = choices[0].get("message", {}) if choices else {}
+                content = message.get("content", "")
+
+                if choices and choices[0].get("finish_reason") == "error":
+                    raise RuntimeError(
+                        "Hermes agent reported an error"
+                        + (f": {content[:200]}" if content else "")
+                    )
+                return content
+
+    async def _raise_hermes_error(self, resp: Any) -> None:
+        """Map a non-200 Hermes response to the right exception."""
+        try:
+            body = await resp.json()
+            message = body.get("error", {}).get("message", "")
+        except Exception:
+            message = (await resp.text())[:200]
+
+        if self.debug_mode:
+            _LOGGER.info("📡 Hermes error %s: %s", resp.status, message)
+
+        if resp.status == 429:
+            raise HermesBusyError(
+                "Hermes agent is busy handling other requests, try again shortly"
+            )
+        if resp.status == 400 and "session" in message.lower():
+            raise HermesSessionError(message)
+        raise RuntimeError(f"Hermes request failed ({resp.status}): {message}")
 
     async def _build_response_result(
         self,
@@ -1150,13 +1408,20 @@ class MCPAssistConversationEntity(ConversationEntity):
                         openai_tools = []
                         tool_names = []
                         for tool in tools:
+                            # OpenAI rejects object schemas without "properties"
+                            schema = tool.get("inputSchema") or {
+                                "type": "object",
+                                "properties": {},
+                            }
+                            if schema.get("type") == "object" and "properties" not in schema:
+                                schema = {**schema, "properties": {}}
                             openai_tools.append(
                                 {
                                     "type": "function",
                                     "function": {
                                         "name": tool["name"],
                                         "description": tool["description"],
-                                        "parameters": tool.get("inputSchema", {}),
+                                        "parameters": schema,
                                     },
                                 }
                             )
@@ -1554,6 +1819,32 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Local servers (LM Studio, Ollama, llamacpp, vLLM) don't need auth
             return {}
 
+    def _uses_official_openai_api(self) -> bool:
+        """True when talking to api.openai.com (not a compatible third party)."""
+        return self.server_type == SERVER_TYPE_OPENAI and self.base_url.rstrip(
+            "/"
+        ) == OPENAI_BASE_URL.rstrip("/")
+
+    def _is_openai_reasoning_model(self) -> bool:
+        """Reasoning models reject temperature and require max_completion_tokens.
+
+        Applies to the entire GPT-5 series (including the current 5.6 lineup)
+        and the o-series. There is no API property for this; name prefix is
+        the practical test.
+        """
+        if not self._uses_official_openai_api():
+            return False
+        model = self.model_name.split("/")[-1]
+        return model.startswith("gpt-5") or bool(re.match(r"^o\d", model))
+
+    def _skip_sampling_params(self) -> bool:
+        """Providers whose current models reject sampling params.
+
+        Gemini deprecated temperature/top_p/top_k from gemini-3.6 onward
+        ("will return an error in future model generations").
+        """
+        return self.server_type == SERVER_TYPE_GEMINI
+
     def _build_openai_payload(
         self,
         messages: List[Dict[str, Any]],
@@ -1563,16 +1854,22 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Build OpenAI-compatible payload for LM Studio, OpenAI, Gemini, Anthropic, OpenClaw, vLLM."""
         payload = {"model": self.model_name, "messages": messages, "stream": stream}
 
-        # Temperature (skip for GPT-5+/o1 models)
-        if not (
-            self.model_name.startswith("gpt-5") or self.model_name.startswith("o1")
-        ):
+        skip_sampling = self._skip_sampling_params()
+        reasoning = self._is_openai_reasoning_model()
+
+        if not skip_sampling and not reasoning:
             payload["temperature"] = self.temperature
 
-        # Token limits
+        # Token limits. Official OpenAI deprecated max_tokens API-wide in
+        # favor of max_completion_tokens; reasoning models (all of GPT-5.x,
+        # o-series) reject max_tokens outright. Reasoning tokens count against
+        # the budget, so a low voice-tuned limit yields empty replies — floor it.
         if self.max_tokens > 0:
-            if self.model_name.startswith("gpt-5") or self.model_name.startswith("o1"):
-                payload["max_completion_tokens"] = self.max_tokens
+            if self._uses_official_openai_api():
+                budget = self.max_tokens
+                if reasoning:
+                    budget = max(budget, MIN_REASONING_COMPLETION_TOKENS)
+                payload["max_completion_tokens"] = budget
             else:
                 payload["max_tokens"] = self.max_tokens
 
@@ -1765,6 +2062,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             has_tool_calls = False
             current_tool_calls = []
+            stream_tool_index_offset = None
             current_thought_signature = None  # Track Gemini 3 thought signatures
 
             try:
@@ -1890,10 +2188,29 @@ class MCPAssistConversationEntity(ConversationEntity):
                                 if "tool_calls" in delta:
                                     has_tool_calls = True
                                     for tc in delta["tool_calls"]:
-                                        idx = tc.get("index", 0)
+                                        if "index" in tc:
+                                            idx, stream_tool_index_offset = (
+                                                self._normalize_stream_tool_call_index(
+                                                    tc["index"],
+                                                    stream_tool_index_offset,
+                                                )
+                                            )
+                                        elif "id" in tc or "name" in tc.get(
+                                            "function", {}
+                                        ):
+                                            # Index-less fragment starting a new call.
+                                            # Ollama streams complete parallel calls
+                                            # with no index; keying them all to slot 0
+                                            # made later calls overwrite earlier ones
+                                            idx = len(current_tool_calls)
+                                        else:
+                                            # Index-less argument-only fragment
+                                            # continues the call currently streaming
+                                            idx = max(0, len(current_tool_calls) - 1)
 
-                                        # Initialize tool call if new
-                                        if idx >= len(current_tool_calls):
+                                        # Initialize tool call if new; gap-fill so a
+                                        # sparse index can't raise IndexError
+                                        while idx >= len(current_tool_calls):
                                             current_tool_calls.append({})
 
                                         if "id" in tc:
@@ -2028,6 +2345,8 @@ class MCPAssistConversationEntity(ConversationEntity):
             if sentence_buffer.strip():
                 await self._trigger_tts(sentence_buffer.strip())
                 sentence_buffer = ""
+
+            current_tool_calls = self._compact_streamed_tool_calls(current_tool_calls)
 
             # If we got tool calls, execute them
             if has_tool_calls and current_tool_calls:

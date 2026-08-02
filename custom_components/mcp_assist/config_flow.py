@@ -67,6 +67,7 @@ from .const import (
     SERVER_TYPE_ANTHROPIC,
     SERVER_TYPE_OPENROUTER,
     SERVER_TYPE_OPENCLAW,
+    SERVER_TYPE_HERMES,
     SERVER_TYPE_VLLM,
     DEFAULT_SERVER_TYPE,
     DEFAULT_LMSTUDIO_URL,
@@ -81,6 +82,11 @@ from .const import (
     DEFAULT_OPENCLAW_PORT,
     DEFAULT_OPENCLAW_USE_SSL,
     DEFAULT_OPENCLAW_SESSION_KEY,
+    CONF_HERMES_URL,
+    CONF_HERMES_SESSION_KEY,
+    DEFAULT_HERMES_URL,
+    DEFAULT_HERMES_SESSION_KEY,
+    DEFAULT_HERMES_MODEL,
     DEFAULT_VLLM_URL,
     DEFAULT_MCP_PORT,
     DEFAULT_MODEL_NAME,
@@ -108,6 +114,7 @@ from .const import (
     DEFAULT_API_KEY,
     OPENAI_BASE_URL,
     GEMINI_BASE_URL,
+    ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
 )
 
@@ -281,6 +288,74 @@ async def fetch_models_from_openrouter(hass: HomeAssistant, api_key: str) -> lis
         return []
 
 
+async def fetch_models_from_anthropic(hass: HomeAssistant, api_key: str) -> list[str]:
+    """Fetch available models from Anthropic API."""
+    _LOGGER.info("🌐 FETCH: Starting Anthropic model fetch")
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            _LOGGER.info("📡 FETCH: Requesting Anthropic models")
+            async with session.get(
+                f"{ANTHROPIC_BASE_URL}/v1/models", headers=headers
+            ) as resp:
+                _LOGGER.info("📥 FETCH: Anthropic response status %d", resp.status)
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    _LOGGER.warning(
+                        "⚠️ FETCH: Anthropic API error %d: %s",
+                        resp.status,
+                        error_text[:200],
+                    )
+                    return []
+
+                data = await resp.json()
+                # Anthropic returns models in OpenAI-style format: {"data": [{"id": ...}]}
+                all_models = [m.get("id", "") for m in data.get("data", [])]
+                # Filter out empty strings and sort
+                models = [m for m in all_models if m]
+                sorted_models = sorted(models, reverse=True) if models else []
+                _LOGGER.info("✨ FETCH: Found %d Anthropic models", len(sorted_models))
+                return sorted_models
+    except Exception as err:
+        _LOGGER.error("💥 FETCH: Anthropic fetch failed: %s", err)
+        return []
+
+
+async def validate_hermes_connection(
+    hass: HomeAssistant, url: str, api_key: str
+) -> str | None:
+    """Test connection to a Hermes Agent server via /v1/capabilities.
+
+    Returns an error key ("invalid_api_key"/"cannot_connect") or None on success.
+    """
+    url = url.rstrip("/")
+    _LOGGER.info("🌐 HERMES: Testing connection to %s/v1/capabilities", url)
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                f"{url}/v1/capabilities", headers=headers
+            ) as resp:
+                _LOGGER.info("📥 HERMES: Capabilities response status %d", resp.status)
+                if resp.status in (401, 403):
+                    return "invalid_api_key"
+                if resp.status != 200:
+                    return "cannot_connect"
+                return None
+    except Exception as err:
+        _LOGGER.error("💥 HERMES: Connection test failed: %s", err)
+        return "cannot_connect"
+
+
 def validate_allowed_ips(allowed_ips_str: str) -> tuple[bool, str]:
     """Validate comma-separated list of IP addresses and CIDR ranges.
 
@@ -320,6 +395,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
                     {"value": "anthropic", "label": "Anthropic (Claude)"},
                     {"value": "openrouter", "label": "OpenRouter"},
                     {"value": "openclaw", "label": "OpenClaw"},
+                    {"value": "hermes", "label": "Hermes Agent"},
                     {"value": "vllm", "label": "vLLM"},
                 ],
                 mode=SelectSelectorMode.LIST,
@@ -430,12 +506,25 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Store data and move to next step
-            self.step2_data = user_input
             server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-            if server_type == SERVER_TYPE_OPENCLAW:
-                return await self.async_step_openclaw_pairing()
-            return await self.async_step_model()
+            if server_type == SERVER_TYPE_HERMES:
+                # Hermes Agent - test connection/auth before proceeding
+                hermes_url = user_input.get(CONF_HERMES_URL, DEFAULT_HERMES_URL)
+                api_key = user_input.get(CONF_API_KEY, "")
+                error = await validate_hermes_connection(
+                    self.hass, hermes_url, api_key
+                )
+                if error:
+                    errors["base"] = error
+                else:
+                    self.step2_data = user_input
+                    return await self.async_step_model()
+            else:
+                # Store data and move to next step
+                self.step2_data = user_input
+                if server_type == SERVER_TYPE_OPENCLAW:
+                    return await self.async_step_openclaw_pairing()
+                return await self.async_step_model()
 
         # Get server type from step 1 to build dynamic schema
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
@@ -451,6 +540,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         TextSelectorConfig(type=TextSelectorType.PASSWORD)
                     ),
                     vol.Required(CONF_OPENCLAW_USE_SSL, default=DEFAULT_OPENCLAW_USE_SSL): BooleanSelector(),
+                }
+            )
+        elif server_type == SERVER_TYPE_HERMES:
+            # Hermes Agent - server URL + optional API key
+            server_schema = vol.Schema(
+                {
+                    vol.Required(CONF_HERMES_URL, default=DEFAULT_HERMES_URL): str,
+                    vol.Optional(CONF_API_KEY): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                 }
             )
         elif server_type in [
@@ -567,6 +666,14 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Hermes Agent manages its own prompts - store empty defaults
+            server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+            if server_type == SERVER_TYPE_HERMES:
+                if CONF_SYSTEM_PROMPT not in user_input:
+                    user_input[CONF_SYSTEM_PROMPT] = ""
+                if CONF_TECHNICAL_PROMPT not in user_input:
+                    user_input[CONF_TECHNICAL_PROMPT] = ""
+
             # Store data and move to step 4 (advanced)
             self.step3_data = user_input
             return await self.async_step_advanced()
@@ -583,6 +690,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_TECHNICAL_PROMPT: "",
             }
             return await self.async_step_advanced()
+        elif server_type == SERVER_TYPE_HERMES:
+            # Hermes Agent - OpenAI-style /v1/models with Bearer auth
+            server_url = self.step2_data.get(
+                CONF_HERMES_URL, DEFAULT_HERMES_URL
+            ).rstrip("/")
+            api_key = self.step2_data.get(CONF_API_KEY, "")
+            _LOGGER.debug("Fetching Hermes models from %s", server_url)
+            models = await fetch_models_from_openai(self.hass, api_key, server_url)
+            _LOGGER.debug("Fetched %d Hermes models: %s", len(models), models)
+            # No error on failure - fall back to free-text default model
         elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
@@ -628,9 +745,42 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Show error if fetch failed
             if not models:
                 errors["base"] = "invalid_api_key"
+        elif server_type == SERVER_TYPE_ANTHROPIC:
+            # Anthropic - fetch models from API with authentication
+            api_key = self.step2_data.get(CONF_API_KEY, "")
+            _LOGGER.debug("Fetching Anthropic models with API key")
+            models = await fetch_models_from_anthropic(self.hass, api_key)
+            _LOGGER.debug("Fetched %d Anthropic models: %s", len(models), models)
+            # Show error if fetch failed (free-text model entry still available)
+            if not models:
+                errors["base"] = "invalid_api_key"
 
         # Build dynamic schema based on whether models were fetched
-        if models:
+        if server_type == SERVER_TYPE_HERMES:
+            # Hermes Agent manages its own prompts - only model selection needed
+            if models:
+                model_schema = vol.Schema(
+                    {
+                        vol.Required(
+                            CONF_MODEL_NAME, default=DEFAULT_HERMES_MODEL
+                        ): SelectSelector(
+                            SelectSelectorConfig(
+                                options=models,
+                                mode=SelectSelectorMode.DROPDOWN,
+                                custom_value=True,
+                            )
+                        ),
+                    }
+                )
+            else:
+                model_schema = vol.Schema(
+                    {
+                        vol.Required(
+                            CONF_MODEL_NAME, default=DEFAULT_HERMES_MODEL
+                        ): str,
+                    }
+                )
+        elif models:
             # Show dropdown with available models (custom_value allows free text input)
             _LOGGER.info("Showing model dropdown with %d models", len(models))
             model_schema = vol.Schema(
@@ -696,8 +846,8 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         server_type = self.step1_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
 
         if user_input is not None:
-            # For OpenClaw, set defaults for LLM-specific fields (not shown in UI)
-            if server_type == SERVER_TYPE_OPENCLAW:
+            # For OpenClaw/Hermes, set defaults for LLM-specific fields (not shown in UI)
+            if server_type in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
                 user_input[CONF_TEMPERATURE] = DEFAULT_TEMPERATURE
                 user_input[CONF_MAX_TOKENS] = DEFAULT_MAX_TOKENS
                 user_input[CONF_MAX_HISTORY] = DEFAULT_MAX_HISTORY
@@ -784,6 +934,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         SERVER_TYPE_ANTHROPIC: "Claude",
                         SERVER_TYPE_OPENROUTER: "OpenRouter",
                         SERVER_TYPE_OPENCLAW: "OpenClaw",
+                        SERVER_TYPE_HERMES: "Hermes Agent",
                         SERVER_TYPE_VLLM: "vLLM",
                     }
                     server_display = server_display_map.get(server_type, "LM Studio")
@@ -801,12 +952,18 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         default_temp = 1.0 if server_type == SERVER_TYPE_GEMINI else DEFAULT_TEMPERATURE
 
         # Build schema based on server type
-        if server_type == SERVER_TYPE_OPENCLAW:
-            # OpenClaw - show conversation settings but hide LLM-specific fields
+        if server_type in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
+            # OpenClaw/Hermes - show conversation settings but hide LLM-specific fields
+            if server_type == SERVER_TYPE_HERMES:
+                session_key_conf = CONF_HERMES_SESSION_KEY
+                session_key_default = DEFAULT_HERMES_SESSION_KEY
+            else:
+                session_key_conf = CONF_OPENCLAW_SESSION_KEY
+                session_key_default = DEFAULT_OPENCLAW_SESSION_KEY
             advanced_schema_dict = {
                 vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
                 vol.Optional(
-                    CONF_OPENCLAW_SESSION_KEY, default=DEFAULT_OPENCLAW_SESSION_KEY
+                    session_key_conf, default=session_key_default
                 ): str,
                 vol.Required(
                     CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
@@ -903,6 +1060,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders = {
                 "advanced_info": "OpenClaw manages temperature, token limits, history, and tool iterations internally. Only essential settings are shown."
             }
+        elif server_type == SERVER_TYPE_HERMES:
+            description_placeholders = {
+                "advanced_info": "Hermes Agent manages temperature, token limits, history, and tool iterations internally. Only essential settings are shown."
+            }
         else:
             description_placeholders = {
                 "advanced_info": "Configure temperature, token limits, and other advanced options."
@@ -976,6 +1137,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     SERVER_TYPE_ANTHROPIC: "Claude",
                     SERVER_TYPE_OPENROUTER: "OpenRouter",
                     SERVER_TYPE_OPENCLAW: "OpenClaw",
+                    SERVER_TYPE_HERMES: "Hermes Agent",
                     SERVER_TYPE_VLLM: "vLLM",
                 }
                 server_display = server_display_map.get(server_type, "LM Studio")
@@ -1102,6 +1264,9 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         user_input[CONF_MODEL_NAME] = "main"
                     if CONF_SYSTEM_PROMPT not in user_input:
                         user_input[CONF_SYSTEM_PROMPT] = ""  # OpenClaw manages its own
+                elif server_type == SERVER_TYPE_HERMES:
+                    if CONF_SYSTEM_PROMPT not in user_input:
+                        user_input[CONF_SYSTEM_PROMPT] = ""  # Hermes manages its own
 
                 # Store profile settings and proceed to MCP server settings
                 self.profile_options = user_input
@@ -1125,8 +1290,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             CONF_MODEL_NAME, data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
         )
 
-        # OpenClaw doesn't have /v1/models - skip model fetching
-        if server_type == SERVER_TYPE_OPENCLAW:
+        # OpenClaw/Hermes don't show a model field in options - skip model fetching
+        if server_type in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
             # Don't fetch models, don't show model field
             pass
         elif server_type in [
@@ -1185,6 +1350,20 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                     _LOGGER.error(
                         f"❌ OPTIONS: Failed to fetch OpenRouter models: {err}"
                     )
+        elif server_type == SERVER_TYPE_ANTHROPIC:
+            # Anthropic - fetch from API
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            if api_key:
+                _LOGGER.info("🔍 OPTIONS: Attempting to fetch models from Anthropic")
+                try:
+                    models = await fetch_models_from_anthropic(self.hass, api_key)
+                    _LOGGER.info(
+                        f"✅ OPTIONS: Successfully fetched {len(models)} Anthropic models"
+                    )
+                except Exception as err:
+                    _LOGGER.error(
+                        f"❌ OPTIONS: Failed to fetch Anthropic models: {err}"
+                    )
 
         # Build model selector based on whether models were fetched
         if models:
@@ -1230,6 +1409,17 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 CONF_OPENCLAW_USE_SSL,
                 default=options.get(CONF_OPENCLAW_USE_SSL, data.get(CONF_OPENCLAW_USE_SSL, DEFAULT_OPENCLAW_USE_SSL)),
             )] = BooleanSelector()
+        elif server_type == SERVER_TYPE_HERMES:
+            # Hermes Agent - server URL + optional API key
+            server_url = options.get(
+                CONF_HERMES_URL, data.get(CONF_HERMES_URL, DEFAULT_HERMES_URL)
+            )
+            schema_dict[vol.Required(CONF_HERMES_URL, default=server_url)] = str
+
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            schema_dict[vol.Optional(CONF_API_KEY, default=api_key)] = TextSelector(
+                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            )
         elif server_type in [
             SERVER_TYPE_LMSTUDIO,
             SERVER_TYPE_LLAMACPP,
@@ -1259,15 +1449,15 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 TextSelectorConfig(type=TextSelectorType.PASSWORD)
             )
 
-        # 3. Model Name (skip for OpenClaw - hardcoded to "main")
-        if server_type != SERVER_TYPE_OPENCLAW:
+        # 3. Model Name (skip for OpenClaw - hardcoded to "main" - and Hermes)
+        if server_type not in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
             schema_dict[
                 vol.Required(CONF_MODEL_NAME, default=current_model)
             ] = model_selector
 
         # Continue with remaining common fields
-        # 4. System Prompt (skip for OpenClaw - it manages its own)
-        if server_type != SERVER_TYPE_OPENCLAW:
+        # 4. System Prompt (skip for OpenClaw/Hermes - they manage their own)
+        if server_type not in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
             schema_dict[
                 vol.Required(
                     CONF_SYSTEM_PROMPT,
@@ -1280,8 +1470,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
             )
 
-        # 5. Technical Instructions (skip for OpenClaw - it manages its own)
-        if server_type != SERVER_TYPE_OPENCLAW:
+        # 5. Technical Instructions (skip for OpenClaw/Hermes - they manage their own)
+        if server_type not in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
             schema_dict[
                 vol.Required(
                     CONF_TECHNICAL_PROMPT,
@@ -1292,8 +1482,14 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 )
             ] = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True))
 
-        # For OpenClaw, show conversation settings but hide LLM-specific fields
-        if server_type == SERVER_TYPE_OPENCLAW:
+        # For OpenClaw/Hermes, show conversation settings but hide LLM-specific fields
+        if server_type in (SERVER_TYPE_OPENCLAW, SERVER_TYPE_HERMES):
+            if server_type == SERVER_TYPE_HERMES:
+                session_key_conf = CONF_HERMES_SESSION_KEY
+                session_key_default = DEFAULT_HERMES_SESSION_KEY
+            else:
+                session_key_conf = CONF_OPENCLAW_SESSION_KEY
+                session_key_default = DEFAULT_OPENCLAW_SESSION_KEY
             response_mode_value = options.get(
                 CONF_RESPONSE_MODE, options.get(CONF_FOLLOW_UP_MODE, DEFAULT_RESPONSE_MODE)
             )
@@ -1307,10 +1503,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ): bool,
                     vol.Optional(
-                        CONF_OPENCLAW_SESSION_KEY,
+                        session_key_conf,
                         default=options.get(
-                            CONF_OPENCLAW_SESSION_KEY,
-                            data.get(CONF_OPENCLAW_SESSION_KEY, DEFAULT_OPENCLAW_SESSION_KEY),
+                            session_key_conf,
+                            data.get(session_key_conf, session_key_default),
                         ),
                     ): str,
                     vol.Required(
@@ -1491,6 +1687,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             description_placeholders = {
                 "server_info": "OpenClaw's model and system prompt are configured on the OpenClaw server. Use the technical instructions below to configure how it uses MCP tools to control Home Assistant."
             }
+        elif server_type == SERVER_TYPE_HERMES:
+            description_placeholders = {
+                "server_info": "Hermes Agent's system prompt is configured on the Hermes server. Only conversation settings are shown here."
+            }
         else:
             description_placeholders = {
                 "server_info": "Configure this conversation profile. These settings only affect this profile."
@@ -1548,6 +1748,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         SERVER_TYPE_ANTHROPIC: "Claude",
                         SERVER_TYPE_OPENROUTER: "OpenRouter",
                         SERVER_TYPE_OPENCLAW: "OpenClaw",
+                        SERVER_TYPE_HERMES: "Hermes Agent",
                         SERVER_TYPE_VLLM: "vLLM",
                     }
                     server_display = server_display_map.get(server_type, "LM Studio")

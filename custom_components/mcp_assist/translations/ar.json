@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "عنوان URL للخادم",
           "api_key": "مفتاح API",
-          "mcp_port": "منفذ خادم MCP"
+          "mcp_port": "منفذ خادم MCP",
+          "hermes_url": "عنوان URL لخادم Hermes"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "وضع التصحيح",
           "ollama_keep_alive": "ابق Ollama نشطا",
           "ollama_num_ctx": "نافذة سياق Ollama",
-          "clean_responses": "تنظيف الردود للإخراج الصوتي"
+          "clean_responses": "تنظيف الردود للإخراج الصوتي",
+          "openclaw_session_key": "مفتاح الجلسة / معرّف الجلسة",
+          "hermes_session_key": "مفتاح جلسة الذاكرة"
+        },
+        "data_description": {
+          "openclaw_session_key": "جلسة OpenClaw المراد استخدامها: مفتاح قصير مثل 'main' أو معرّف جلسة كامل مثل 'agent:main:main'.",
+          "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "وضع التصحيح",
           "ollama_keep_alive": "ابق Ollama نشطا",
           "ollama_num_ctx": "نافذة سياق Ollama",
-          "clean_responses": "تنظيف الردود للإخراج الصوتي"
+          "clean_responses": "تنظيف الردود للإخراج الصوتي",
+          "openclaw_session_key": "مفتاح الجلسة / معرّف الجلسة",
+          "hermes_url": "عنوان URL لخادم Hermes",
+          "hermes_session_key": "مفتاح جلسة الذاكرة"
+        },
+        "data_description": {
+          "openclaw_session_key": "جلسة OpenClaw المراد استخدامها: مفتاح قصير مثل 'main' أو معرّف جلسة كامل مثل 'agent:main:main'.",
+          "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي."
         }
       },
       "mcp_server": {

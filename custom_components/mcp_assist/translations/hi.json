@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "सर्वर URL",
           "api_key": "API कुंजी",
-          "mcp_port": "MCP सर्वर पोर्ट"
+          "mcp_port": "MCP सर्वर पोर्ट",
+          "hermes_url": "Hermes सर्वर URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "डीबग मोड",
           "ollama_keep_alive": "Ollama जीवित रखें",
           "ollama_num_ctx": "Ollama संदर्भ विंडो",
-          "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ"
+          "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ",
+          "openclaw_session_key": "सत्र कुंजी / सत्र ID",
+          "hermes_session_key": "मेमोरी सत्र कुंजी"
+        },
+        "data_description": {
+          "openclaw_session_key": "उपयोग करने के लिए OpenClaw सत्र: 'main' जैसी छोटी कुंजी या 'agent:main:main' जैसी पूरी सत्र ID।",
+          "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।"
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "डीबग मोड",
           "ollama_keep_alive": "Ollama जीवित रखें",
           "ollama_num_ctx": "Ollama संदर्भ विंडो",
-          "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ"
+          "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ",
+          "openclaw_session_key": "सत्र कुंजी / सत्र ID",
+          "hermes_url": "Hermes सर्वर URL",
+          "hermes_session_key": "मेमोरी सत्र कुंजी"
+        },
+        "data_description": {
+          "openclaw_session_key": "उपयोग करने के लिए OpenClaw सत्र: 'main' जैसी छोटी कुंजी या 'agent:main:main' जैसी पूरी सत्र ID।",
+          "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।"
         }
       },
       "mcp_server": {

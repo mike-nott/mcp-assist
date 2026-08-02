@@ -4,6 +4,8 @@ import asyncio
 import ipaddress
 import json
 import logging
+import math
+from functools import partial
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 from datetime import timedelta
@@ -11,10 +13,10 @@ from datetime import timedelta
 from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.components.homeassistant import async_should_expose
-from homeassistant.components.recorder import history
+from homeassistant.components.recorder import get_instance, history
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -40,6 +42,49 @@ from .domain_registry import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Sentinel marking values dropped by _strip_non_json_serializable
+_OMIT = object()
+
+
+def _sanitize_log_value(value: Any, max_len: int = 500) -> str:
+    """Make a client-supplied value safe to log.
+
+    Strips newlines/control characters (log-injection) and caps length.
+    """
+    text = str(value)
+    text = "".join(ch for ch in text if ch >= " " or ch == "\t")
+    if len(text) > max_len:
+        text = text[:max_len] + "…"
+    return text
+
+
+def _strip_non_json_serializable(value: Any) -> Any:
+    """Recursively drop values json.dumps cannot encode.
+
+    Entity attributes may hold arbitrary Python objects or non-finite floats
+    (NaN/Infinity), either of which makes json.dumps raise.
+    """
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                key = str(key)
+            item = _strip_non_json_serializable(item)
+            if item is not _OMIT:
+                cleaned[key] = item
+        return cleaned
+    if isinstance(value, (list, tuple, set)):
+        return [
+            item
+            for item in (_strip_non_json_serializable(i) for i in value)
+            if item is not _OMIT
+        ]
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _OMIT
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    return _OMIT
 
 
 class MCPServer:
@@ -285,6 +330,14 @@ class MCPServer:
         client_ip = request.remote
         _LOGGER.info("🏥 Health check from %s", client_ip)
 
+        # Same whitelist as every other route — the health endpoint otherwise
+        # leaks server presence and metadata to unauthorized clients
+        if not self._is_ip_allowed(client_ip):
+            _LOGGER.warning(
+                "🚫 Blocked health check from unauthorized IP: %s", client_ip
+            )
+            return web.Response(status=403, text="Forbidden: IP not authorized")
+
         health_info = {
             "status": "healthy",
             "server": MCP_SERVER_NAME,
@@ -443,6 +496,21 @@ class MCPServer:
                     try:
                         data = json.loads(msg.data)
 
+                        if not isinstance(data, dict):
+                            await ws.send_str(
+                                json.dumps(
+                                    {
+                                        "jsonrpc": "2.0",
+                                        "error": {
+                                            "code": -32600,
+                                            "message": "Invalid Request: expected a JSON-RPC 2.0 object",
+                                        },
+                                        "id": None,
+                                    }
+                                )
+                            )
+                            continue
+
                         # Check if it's a notification (no id field)
                         if "id" not in data:
                             await self.process_mcp_notification(data)
@@ -502,6 +570,22 @@ class MCPServer:
         request_id = None
         try:
             data = await request.json()
+
+            # A JSON-RPC 2.0 request must be an object; arrays/scalars would
+            # otherwise raise AttributeError below and surface as HTTP 500
+            if not isinstance(data, dict):
+                return web.json_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32600,
+                            "message": "Invalid Request: body must be a JSON object",
+                        },
+                        "id": None,
+                    },
+                    status=400,
+                )
+
             request_id = data.get("id")
 
             # Validate JSON-RPC 2.0 format
@@ -964,7 +1048,11 @@ class MCPServer:
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
 
-        _LOGGER.debug("Calling tool: %s with args: %s", tool_name, arguments)
+        _LOGGER.debug(
+            "Calling tool: %s with args: %s",
+            _sanitize_log_value(tool_name, 100),
+            _sanitize_log_value(arguments),
+        )
 
         if tool_name == "discover_entities":
             return await self.tool_discover_entities(arguments)
@@ -991,7 +1079,14 @@ class MCPServer:
             if self.custom_tools and self.custom_tools.is_custom_tool(tool_name):
                 return await self.custom_tools.handle_tool_call(tool_name, arguments)
             else:
-                raise ValueError(f"Unknown tool: {tool_name}")
+                # Per MCP spec an unknown tool is a tool-level error result,
+                # not a protocol error (raising here surfaced as -32603/HTTP 500)
+                return {
+                    "content": [
+                        {"type": "text", "text": f"❌ Unknown tool: {tool_name}"}
+                    ],
+                    "isError": True,
+                }
 
     async def tool_discover_entities(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Discover entities based on criteria with progress notifications."""
@@ -1147,6 +1242,7 @@ class MCPServer:
         entity_ids = args.get("entity_ids", [])
         details = await self.discovery.get_entity_details(entity_ids)
 
+        details = _strip_non_json_serializable(details)
         return {"content": [{"type": "text", "text": json.dumps(details, indent=2)}]}
 
     async def tool_list_areas(self) -> Dict[str, Any]:
@@ -1280,7 +1376,12 @@ class MCPServer:
                 ]
             }
 
-        _LOGGER.info(f"🎯 Performing action: {domain}.{action} on {target}")
+        _LOGGER.info(
+            "🎯 Performing action: %s.%s on %s",
+            _sanitize_log_value(domain, 100),
+            _sanitize_log_value(action, 100),
+            _sanitize_log_value(target, 200),
+        )
 
         # Notify start
         self.publish_progress(
@@ -1308,28 +1409,57 @@ class MCPServer:
             _LOGGER.error(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
 
-        # Reject deprecated color_temp parameter
+        # Deprecated color_temp (mireds) was removed from light.turn_on in HA
+        # 2026.3. Auto-convert instead of rejecting so the LLM doesn't need a
+        # retry round-trip: 100-1000 is a plausible mired value; above that the
+        # model used kelvin under the wrong key.
         if domain == "light" and "color_temp" in data:
-            _LOGGER.warning(
-                f"❌ Rejecting deprecated color_temp parameter: {data.get('color_temp')}"
-            )
-            raise ValueError(
-                "color_temp is deprecated. Use color_temp_kelvin instead. "
-                "Examples: 2700 (warm white), 4000 (neutral white), 6500 (cool white). "
-                "Lower Kelvin values = warmer light, higher Kelvin values = cooler light."
-            )
+            raw_value = data.pop("color_temp")
+            try:
+                numeric = float(raw_value)
+            except (TypeError, ValueError):
+                numeric = None
+
+            if numeric and 100 <= numeric <= 1000:
+                data.setdefault("color_temp_kelvin", round(1_000_000 / numeric))
+                _LOGGER.debug(
+                    "🔍 Converted deprecated color_temp %s mireds to %s K",
+                    raw_value,
+                    data["color_temp_kelvin"],
+                )
+            elif numeric and numeric > 1000:
+                data.setdefault("color_temp_kelvin", round(numeric))
+                _LOGGER.debug(
+                    "🔍 Treated color_temp value %s as kelvin", raw_value
+                )
+            else:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "❌ Error: color_temp is deprecated. Use color_temp_kelvin instead. "
+                            "Examples: 2700 (warm white), 4000 (neutral white), 6500 (cool white). "
+                            "Lower Kelvin values = warmer light, higher Kelvin values = cooler light.",
+                        }
+                    ]
+                }
 
         try:
             # Prepare service data
             service_data = {**resolved_target, **data}
 
+            # Some services (e.g. weather.get_forecasts) only work with
+            # return_response=True; calling them without it makes HA raise
+            supports = self.hass.services.supports_response(domain, service)
+            wants_response = supports is not SupportsResponse.NONE
+
             # Call the Home Assistant service with the validated service name
-            await self.hass.services.async_call(
+            response = await self.hass.services.async_call(
                 domain=domain,
                 service=service,  # Use the mapped service name
                 service_data=service_data,
                 blocking=True,  # Wait for completion
-                return_response=False,
+                return_response=wants_response,
             )
 
             # Wait briefly for state to update
@@ -1347,6 +1477,10 @@ class MCPServer:
             result_text = f"✅ Successfully executed {domain}.{service}"
             if service != action:
                 result_text += f" (mapped from '{action}')"
+
+            if wants_response and response:
+                response = _strip_non_json_serializable(response)
+                result_text += "\n\nResponse:\n" + json.dumps(response, indent=2)
 
             if "entity_id" in resolved_target:
                 entity_ids = resolved_target["entity_id"]
@@ -1386,6 +1520,32 @@ class MCPServer:
             ]
         }
 
+    def _conversation_exposure_error(
+        self, entity_id: str, kind: str
+    ) -> Dict[str, Any] | None:
+        """Return an error result if entity_id is not exposed to conversation.
+
+        Discovery only surfaces exposed entities; without the same gate here a
+        whitelisted MCP client could run non-exposed privileged scripts or
+        automations by guessing their IDs.
+        """
+        if async_should_expose(self.hass, "conversation", entity_id):
+            return None
+
+        _LOGGER.warning(
+            "🚫 Blocked %s run for non-exposed entity: %s", kind, entity_id
+        )
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"❌ Error: {entity_id} is not exposed to the "
+                    "conversation assistant. Expose it in Home Assistant "
+                    "(Settings → Voice assistants → Expose) to allow running it.",
+                }
+            ]
+        }
+
     async def tool_run_script(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a Home Assistant script and return its response variables."""
         script_id = args.get("script_id")
@@ -1396,7 +1556,17 @@ class MCPServer:
         script_name = script_id.replace("script.", "")
         full_script_id = f"script.{script_name}"
 
-        _LOGGER.info(f"📜 Running script: {full_script_id} with variables: {variables}")
+        # Scripts must be exposed to conversation, same as discovery — without
+        # this check any whitelisted MCP client can run privileged scripts
+        exposure_error = self._conversation_exposure_error(full_script_id, "script")
+        if exposure_error:
+            return exposure_error
+
+        _LOGGER.info(
+            "📜 Running script: %s with variables: %s",
+            _sanitize_log_value(full_script_id, 100),
+            _sanitize_log_value(variables),
+        )
 
         # Notify start
         self.publish_progress(
@@ -1461,8 +1631,18 @@ class MCPServer:
         if not automation_id.startswith("automation."):
             automation_id = f"automation.{automation_id}"
 
+        # Automations must be exposed to conversation, same as discovery
+        exposure_error = self._conversation_exposure_error(
+            automation_id, "automation"
+        )
+        if exposure_error:
+            return exposure_error
+
         _LOGGER.info(
-            f"🤖 Triggering automation: {automation_id} with variables: {variables}, skip_conditions: {skip_conditions}"
+            "🤖 Triggering automation: %s with variables: %s, skip_conditions: %s",
+            _sanitize_log_value(automation_id, 100),
+            _sanitize_log_value(variables),
+            skip_conditions,
         )
 
         # Notify start
@@ -1536,16 +1716,20 @@ class MCPServer:
         end_time = dt_util.utcnow()
         start_time = end_time - timedelta(hours=hours)
 
-        # 3. Query history (run in executor to avoid blocking)
+        # 3. Query history on the recorder's own executor. The previous
+        # positional call put True into no_attributes AND descending, so
+        # results were unintentionally newest-first.
         try:
-            states = await self.hass.async_add_executor_job(
-                history.state_changes_during_period,
-                self.hass,
-                start_time,
-                end_time,
-                entity_id,
-                True,  # include_start_time_state
-                True,  # no_attributes (performance)
+            states = await get_instance(self.hass).async_add_executor_job(
+                partial(
+                    history.state_changes_during_period,
+                    self.hass,
+                    start_time,
+                    end_time,
+                    entity_id,
+                    no_attributes=True,  # performance; attributes unused below
+                    include_start_time_state=True,
+                )
             )
             entity_states = states.get(entity_id, [])
         except Exception as e:

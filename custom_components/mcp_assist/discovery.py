@@ -196,10 +196,11 @@ class SmartDiscovery:
                 return True
 
         # Check for common person-related patterns
+        escaped_name = re.escape(name)
         for entity_id in self.hass.states.async_entity_ids():
-            if re.match(rf"input_text\.room_{name}", entity_id):
+            if re.match(rf"input_text\.room_{escaped_name}", entity_id):
                 return True
-            if re.match(rf"sensor\..*{name}.*_ble_area", entity_id):
+            if re.match(rf"sensor\..*{escaped_name}.*_ble_area", entity_id):
                 return True
 
         return False
@@ -481,7 +482,7 @@ class SmartDiscovery:
             # Check against patterns
             matched = False
             for pattern, category, description in EntityPattern.PERSON_PATTERNS:
-                pattern_regex = pattern.replace("{name}", name_lower)
+                pattern_regex = pattern.replace("{name}", re.escape(name_lower))
                 if re.match(pattern_regex, entity_id_lower):
                     entity_info = self._create_entity_info(state_obj, description)
 
@@ -543,7 +544,7 @@ class SmartDiscovery:
             # Check against patterns
             matched = False
             for pattern, category, description in EntityPattern.PET_PATTERNS:
-                pattern_regex = pattern.replace("{name}", name_lower)
+                pattern_regex = pattern.replace("{name}", re.escape(name_lower))
                 if re.match(pattern_regex, entity_id_lower):
                     entity_info = self._create_entity_info(state_obj, description)
 

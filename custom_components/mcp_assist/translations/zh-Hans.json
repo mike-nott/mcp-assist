@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "服务器URL",
           "api_key": "API密钥",
-          "mcp_port": "MCP服务器端口"
+          "mcp_port": "MCP服务器端口",
+          "hermes_url": "Hermes服务器URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "调试模式",
           "ollama_keep_alive": "保持Ollama活跃",
           "ollama_num_ctx": "Ollama上下文窗口",
-          "clean_responses": "清理语音输出响应"
+          "clean_responses": "清理语音输出响应",
+          "openclaw_session_key": "会话密钥 / 会话ID",
+          "hermes_session_key": "记忆会话密钥"
+        },
+        "data_description": {
+          "openclaw_session_key": "要使用的OpenClaw会话:如 'main' 的短密钥,或如 'agent:main:main' 的完整会话ID。",
+          "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。"
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "调试模式",
           "ollama_keep_alive": "保持Ollama活跃",
           "ollama_num_ctx": "Ollama上下文窗口",
-          "clean_responses": "清理语音输出响应"
+          "clean_responses": "清理语音输出响应",
+          "openclaw_session_key": "会话密钥 / 会话ID",
+          "hermes_url": "Hermes服务器URL",
+          "hermes_session_key": "记忆会话密钥"
+        },
+        "data_description": {
+          "openclaw_session_key": "要使用的OpenClaw会话:如 'main' 的短密钥,或如 'agent:main:main' 的完整会话ID。",
+          "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。"
         }
       },
       "mcp_server": {

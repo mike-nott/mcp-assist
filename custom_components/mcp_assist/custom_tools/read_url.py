@@ -1,10 +1,52 @@
 """Read URL custom tool for ha-lmstudio-mcp."""
 import aiohttp
+import asyncio
+import ipaddress
 import logging
-from typing import Dict, Any, List
-from urllib.parse import urlparse
+import socket
+from typing import Dict, Any, List, Optional
+from urllib.parse import urlparse, urljoin
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_REDIRECTS = 5
+
+
+async def _validate_url(url: str) -> Optional[str]:
+    """SSRF guard: validate scheme and reject URLs resolving to non-public IPs.
+
+    Returns an error message string, or None if the URL is safe to fetch.
+
+    Note: we validate at DNS-resolve time only. A malicious server could
+    DNS-rebind between this check and aiohttp's own resolution; pinning the
+    connection to the resolved IP is out of scope for this minimal guard.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ['http', 'https']:
+        return f"❌ Unsupported URL scheme: {parsed.scheme or '(none)'}"
+    if not parsed.netloc or not parsed.hostname:
+        return "❌ Invalid URL format"
+
+    hostname = parsed.hostname
+    try:
+        # Literal IP hostname - check directly without DNS
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        # Resolve via the event loop's executor so we never block the loop
+        loop = asyncio.get_running_loop()
+        try:
+            infos = await loop.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+        except (socket.gaierror, OSError):
+            return f"❌ Could not resolve hostname: {hostname}"
+        addresses = [ipaddress.ip_address(info[4][0]) for info in infos]
+
+    for addr in addresses:
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_multicast or addr.is_reserved or addr.is_unspecified):
+            _LOGGER.debug(f"Blocked URL {url}: resolves to non-public address {addr}")
+            return f"❌ URL not allowed: resolves to a non-public address ({addr})"
+
+    return None
 
 class ReadUrlTool:
     """Tool to read and extract content from URLs."""
@@ -53,24 +95,16 @@ class ReadUrlTool:
 
         _LOGGER.debug(f"Reading URL: {url}")
 
-        # Validate URL
+        # Validate URL (scheme + SSRF guard)
+        error = await _validate_url(url)
+        if error:
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": error
+                }]
+            }
         parsed = urlparse(url)
-        if not parsed.scheme or not parsed.netloc:
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": "❌ Invalid URL format"
-                }]
-            }
-
-        # Ensure HTTPS for security
-        if parsed.scheme not in ['http', 'https']:
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": f"❌ Unsupported URL scheme: {parsed.scheme}"
-                }]
-            }
 
         try:
             headers = {
@@ -78,66 +112,98 @@ class ReadUrlTool:
             }
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                    allow_redirects=True
-                ) as response:
-                    if response.status != 200:
+                # Follow redirects manually (max 5 hops), re-validating each
+                # Location target to prevent redirect-based SSRF
+                for _ in range(MAX_REDIRECTS + 1):
+                    async with session.get(
+                        url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                        allow_redirects=False
+                    ) as response:
+                        if response.status in (301, 302, 303, 307, 308):
+                            location = response.headers.get('Location')
+                            if not location:
+                                return {
+                                    "content": [{
+                                        "type": "text",
+                                        "text": "❌ Redirect response with no Location header"
+                                    }]
+                                }
+                            url = urljoin(url, location)
+                            _LOGGER.debug(f"Following redirect to: {url}")
+                            error = await _validate_url(url)
+                            if error:
+                                return {
+                                    "content": [{
+                                        "type": "text",
+                                        "text": error
+                                    }]
+                                }
+                            parsed = urlparse(url)
+                            continue
+
+                        if response.status != 200:
+                            return {
+                                "content": [{
+                                    "type": "text",
+                                    "text": f"❌ HTTP {response.status}: Failed to fetch URL"
+                                }]
+                            }
+
+                        # Check content type
+                        content_type = response.headers.get('Content-Type', '')
+                        if 'text/html' not in content_type and 'text/plain' not in content_type:
+                            return {
+                                "content": [{
+                                    "type": "text",
+                                    "text": f"❌ Unsupported content type: {content_type}"
+                                }]
+                            }
+
+                        html = await response.text()
+
+                        # Simple text extraction without BeautifulSoup dependency
+                        text = await self._extract_text(html, content_type)
+
+                        # Get title from HTML
+                        title = parsed.netloc
+                        if '<title>' in html and '</title>' in html:
+                            title_start = html.index('<title>') + 7
+                            title_end = html.index('</title>')
+                            title = html[title_start:title_end].strip()
+
+                        # Truncate if needed
+                        truncated = False
+                        if len(text) > self.max_content_length:
+                            text = text[:self.max_content_length] + "..."
+                            truncated = True
+
+                        # Create summary if requested
+                        if summary_only and len(text) > 1000:
+                            # Take first 1000 chars as simple summary
+                            text = text[:1000] + "..."
+
+                        result_text = f"📖 **{title}**\n"
+                        result_text += f"URL: {url}\n"
+                        result_text += f"Length: {len(text)} chars"
+                        if truncated:
+                            result_text += " (truncated)"
+                        result_text += f"\n\n{text}"
+
                         return {
                             "content": [{
                                 "type": "text",
-                                "text": f"❌ HTTP {response.status}: Failed to fetch URL"
+                                "text": result_text
                             }]
                         }
 
-                    # Check content type
-                    content_type = response.headers.get('Content-Type', '')
-                    if 'text/html' not in content_type and 'text/plain' not in content_type:
-                        return {
-                            "content": [{
-                                "type": "text",
-                                "text": f"❌ Unsupported content type: {content_type}"
-                            }]
-                        }
-
-                    html = await response.text()
-
-                    # Simple text extraction without BeautifulSoup dependency
-                    text = await self._extract_text(html, content_type)
-
-                    # Get title from HTML
-                    title = parsed.netloc
-                    if '<title>' in html and '</title>' in html:
-                        title_start = html.index('<title>') + 7
-                        title_end = html.index('</title>')
-                        title = html[title_start:title_end].strip()
-
-                    # Truncate if needed
-                    truncated = False
-                    if len(text) > self.max_content_length:
-                        text = text[:self.max_content_length] + "..."
-                        truncated = True
-
-                    # Create summary if requested
-                    if summary_only and len(text) > 1000:
-                        # Take first 1000 chars as simple summary
-                        text = text[:1000] + "..."
-
-                    result_text = f"📖 **{title}**\n"
-                    result_text += f"URL: {url}\n"
-                    result_text += f"Length: {len(text)} chars"
-                    if truncated:
-                        result_text += " (truncated)"
-                    result_text += f"\n\n{text}"
-
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": result_text
-                        }]
-                    }
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": "❌ Too many redirects"
+                    }]
+                }
 
         except aiohttp.ClientTimeout:
             return {

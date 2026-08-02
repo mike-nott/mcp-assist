@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Server-URL",
           "api_key": "API-sleutel",
-          "mcp_port": "MCP-serverpoort"
+          "mcp_port": "MCP-serverpoort",
+          "hermes_url": "Hermes-server-URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Debugmodus",
           "ollama_keep_alive": "Ollama actief houden",
           "ollama_num_ctx": "Ollama contextvenster",
-          "clean_responses": "Antwoorden opschonen voor spraakuitvoer"
+          "clean_responses": "Antwoorden opschonen voor spraakuitvoer",
+          "openclaw_session_key": "Sessiesleutel / sessie-ID",
+          "hermes_session_key": "Geheugensessiesleutel"
+        },
+        "data_description": {
+          "openclaw_session_key": "Te gebruiken OpenClaw-sessie: een korte sleutel zoals 'main' of een volledige sessie-ID zoals 'agent:main:main'.",
+          "hermes_session_key": "Stabiele sleutel die het langetermijngeheugen van Hermes voor dit profiel afbakent."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Debugmodus",
           "ollama_keep_alive": "Ollama actief houden",
           "ollama_num_ctx": "Ollama contextvenster",
-          "clean_responses": "Antwoorden opschonen voor spraakuitvoer"
+          "clean_responses": "Antwoorden opschonen voor spraakuitvoer",
+          "openclaw_session_key": "Sessiesleutel / sessie-ID",
+          "hermes_url": "Hermes-server-URL",
+          "hermes_session_key": "Geheugensessiesleutel"
+        },
+        "data_description": {
+          "openclaw_session_key": "Te gebruiken OpenClaw-sessie: een korte sleutel zoals 'main' of een volledige sessie-ID zoals 'agent:main:main'.",
+          "hermes_session_key": "Stabiele sleutel die het langetermijngeheugen van Hermes voor dit profiel afbakent."
         }
       },
       "mcp_server": {

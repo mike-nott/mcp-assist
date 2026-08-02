@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "URL ng Server",
           "api_key": "API Key",
-          "mcp_port": "Port ng MCP Server"
+          "mcp_port": "Port ng MCP Server",
+          "hermes_url": "URL ng Hermes Server"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Panatilihing Aktibo ang Ollama",
           "ollama_num_ctx": "Ollama Context Window",
-          "clean_responses": "Linisin ang mga Tugon para sa Voice Output"
+          "clean_responses": "Linisin ang mga Tugon para sa Voice Output",
+          "openclaw_session_key": "Session Key / Session ID",
+          "hermes_session_key": "Session Key ng Memorya"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw session na gagamitin: isang maikling key tulad ng 'main' o isang buong session ID tulad ng 'agent:main:main'.",
+          "hermes_session_key": "Stable na key na tumutukoy sa pangmatagalang memorya ng Hermes para sa profile na ito."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Panatilihing Aktibo ang Ollama",
           "ollama_num_ctx": "Ollama Context Window",
-          "clean_responses": "Linisin ang mga Tugon para sa Voice Output"
+          "clean_responses": "Linisin ang mga Tugon para sa Voice Output",
+          "openclaw_session_key": "Session Key / Session ID",
+          "hermes_url": "URL ng Hermes Server",
+          "hermes_session_key": "Session Key ng Memorya"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw session na gagamitin: isang maikling key tulad ng 'main' o isang buong session ID tulad ng 'agent:main:main'.",
+          "hermes_session_key": "Stable na key na tumutukoy sa pangmatagalang memorya ng Hermes para sa profile na ito."
         }
       },
       "mcp_server": {

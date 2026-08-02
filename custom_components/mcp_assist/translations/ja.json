@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "サーバーURL",
           "api_key": "APIキー",
-          "mcp_port": "MCPサーバーポート"
+          "mcp_port": "MCPサーバーポート",
+          "hermes_url": "HermesサーバーURL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "デバッグモード",
           "ollama_keep_alive": "Ollamaを維持",
           "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
-          "clean_responses": "音声出力用にレスポンスを整形"
+          "clean_responses": "音声出力用にレスポンスを整形",
+          "openclaw_session_key": "セッションキー / セッションID",
+          "hermes_session_key": "メモリセッションキー"
+        },
+        "data_description": {
+          "openclaw_session_key": "使用するOpenClawセッション:'main' のような短いキー、または 'agent:main:main' のような完全なセッションID。",
+          "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。"
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "デバッグモード",
           "ollama_keep_alive": "Ollamaを維持",
           "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
-          "clean_responses": "音声出力用にレスポンスを整形"
+          "clean_responses": "音声出力用にレスポンスを整形",
+          "openclaw_session_key": "セッションキー / セッションID",
+          "hermes_url": "HermesサーバーURL",
+          "hermes_session_key": "メモリセッションキー"
+        },
+        "data_description": {
+          "openclaw_session_key": "使用するOpenClawセッション:'main' のような短いキー、または 'agent:main:main' のような完全なセッションID。",
+          "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。"
         }
       },
       "mcp_server": {

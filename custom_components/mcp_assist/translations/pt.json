@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "URL do servidor",
           "api_key": "Chave API",
-          "mcp_port": "Porta do servidor MCP"
+          "mcp_port": "Porta do servidor MCP",
+          "hermes_url": "URL do servidor Hermes"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Modo de depuracao",
           "ollama_keep_alive": "Manter Ollama ativo",
           "ollama_num_ctx": "Janela de contexto Ollama",
-          "clean_responses": "Limpar respostas para saída de voz"
+          "clean_responses": "Limpar respostas para saída de voz",
+          "openclaw_session_key": "Chave de sessão / ID de sessão",
+          "hermes_session_key": "Chave de sessão de memória"
+        },
+        "data_description": {
+          "openclaw_session_key": "Sessão OpenClaw a utilizar: uma chave curta como 'main' ou um ID de sessão completo como 'agent:main:main'.",
+          "hermes_session_key": "Chave estável que delimita a memória de longo prazo do Hermes para este perfil."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Modo de depuracao",
           "ollama_keep_alive": "Manter Ollama ativo",
           "ollama_num_ctx": "Janela de contexto Ollama",
-          "clean_responses": "Limpar respostas para saída de voz"
+          "clean_responses": "Limpar respostas para saída de voz",
+          "openclaw_session_key": "Chave de sessão / ID de sessão",
+          "hermes_url": "URL do servidor Hermes",
+          "hermes_session_key": "Chave de sessão de memória"
+        },
+        "data_description": {
+          "openclaw_session_key": "Sessão OpenClaw a utilizar: uma chave curta como 'main' ou um ID de sessão completo como 'agent:main:main'.",
+          "hermes_session_key": "Chave estável que delimita a memória de longo prazo do Hermes para este perfil."
         }
       },
       "mcp_server": {

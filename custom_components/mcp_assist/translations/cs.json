@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "URL serveru",
           "api_key": "API klic",
-          "mcp_port": "Port MCP serveru"
+          "mcp_port": "Port MCP serveru",
+          "hermes_url": "URL serveru Hermes"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Rezim ladeni",
           "ollama_keep_alive": "Udrzovat Ollama aktivni",
           "ollama_num_ctx": "Kontextove okno Ollama",
-          "clean_responses": "Čisté odpovědi pro hlasový výstup"
+          "clean_responses": "Čisté odpovědi pro hlasový výstup",
+          "openclaw_session_key": "Klíč relace / ID relace",
+          "hermes_session_key": "Klíč relace paměti"
+        },
+        "data_description": {
+          "openclaw_session_key": "Relace OpenClaw, která se má použít: krátký klíč jako 'main' nebo úplné ID relace jako 'agent:main:main'.",
+          "hermes_session_key": "Stabilní klíč vymezující dlouhodobou paměť Hermes pro tento profil."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Rezim ladeni",
           "ollama_keep_alive": "Udrzovat Ollama aktivni",
           "ollama_num_ctx": "Kontextove okno Ollama",
-          "clean_responses": "Čisté odpovědi pro hlasový výstup"
+          "clean_responses": "Čisté odpovědi pro hlasový výstup",
+          "openclaw_session_key": "Klíč relace / ID relace",
+          "hermes_url": "URL serveru Hermes",
+          "hermes_session_key": "Klíč relace paměti"
+        },
+        "data_description": {
+          "openclaw_session_key": "Relace OpenClaw, která se má použít: krátký klíč jako 'main' nebo úplné ID relace jako 'agent:main:main'.",
+          "hermes_session_key": "Stabilní klíč vymezující dlouhodobou paměť Hermes pro tento profil."
         }
       },
       "mcp_server": {

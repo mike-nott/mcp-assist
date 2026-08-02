@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "URL du serveur",
           "api_key": "Cle API",
-          "mcp_port": "Port du serveur MCP"
+          "mcp_port": "Port du serveur MCP",
+          "hermes_url": "URL du serveur Hermes"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Mode debogage",
           "ollama_keep_alive": "Maintenir Ollama actif",
           "ollama_num_ctx": "Fenetre de contexte Ollama",
-          "clean_responses": "Nettoyer les réponses pour la sortie vocale"
+          "clean_responses": "Nettoyer les réponses pour la sortie vocale",
+          "openclaw_session_key": "Clé de session / ID de session",
+          "hermes_session_key": "Clé de session mémoire"
+        },
+        "data_description": {
+          "openclaw_session_key": "Session OpenClaw à utiliser : une clé courte comme 'main' ou un ID de session complet comme 'agent:main:main'.",
+          "hermes_session_key": "Clé stable délimitant la mémoire à long terme de Hermes pour ce profil."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Mode debogage",
           "ollama_keep_alive": "Maintenir Ollama actif",
           "ollama_num_ctx": "Fenetre de contexte Ollama",
-          "clean_responses": "Nettoyer les réponses pour la sortie vocale"
+          "clean_responses": "Nettoyer les réponses pour la sortie vocale",
+          "openclaw_session_key": "Clé de session / ID de session",
+          "hermes_url": "URL du serveur Hermes",
+          "hermes_session_key": "Clé de session mémoire"
+        },
+        "data_description": {
+          "openclaw_session_key": "Session OpenClaw à utiliser : une clé courte comme 'main' ou un ID de session complet comme 'agent:main:main'.",
+          "hermes_session_key": "Clé stable délimitant la mémoire à long terme de Hermes pour ce profil."
         }
       },
       "mcp_server": {

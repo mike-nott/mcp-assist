@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "Server-URL",
           "api_key": "API-nokkel",
-          "mcp_port": "MCP-serverport"
+          "mcp_port": "MCP-serverport",
+          "hermes_url": "Hermes server-URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Feilsokingsmodus",
           "ollama_keep_alive": "Hold Ollama aktiv",
           "ollama_num_ctx": "Ollama kontekstvindu",
-          "clean_responses": "Rens svar for stemmeoutput"
+          "clean_responses": "Rens svar for stemmeoutput",
+          "openclaw_session_key": "Øktnøkkel / økt-ID",
+          "hermes_session_key": "Øktnøkkel for minne"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw-økt som skal brukes: en kort nøkkel som 'main' eller en full økt-ID som 'agent:main:main'.",
+          "hermes_session_key": "Stabil nøkkel som avgrenser Hermes' langtidsminne for denne profilen."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Feilsokingsmodus",
           "ollama_keep_alive": "Hold Ollama aktiv",
           "ollama_num_ctx": "Ollama kontekstvindu",
-          "clean_responses": "Rens svar for stemmeoutput"
+          "clean_responses": "Rens svar for stemmeoutput",
+          "openclaw_session_key": "Øktnøkkel / økt-ID",
+          "hermes_url": "Hermes server-URL",
+          "hermes_session_key": "Øktnøkkel for minne"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw-økt som skal brukes: en kort nøkkel som 'main' eller en full økt-ID som 'agent:main:main'.",
+          "hermes_session_key": "Stabil nøkkel som avgrenser Hermes' langtidsminne for denne profilen."
         }
       },
       "mcp_server": {

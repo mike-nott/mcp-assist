@@ -151,6 +151,41 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
     return system_entry
 
 
+async def _async_release_mcp_server(hass: HomeAssistant) -> None:
+    """Decrement the shared MCP server refcount, stopping it at zero.
+
+    Serialized with server_init_lock so a concurrent profile setup cannot
+    race the shutdown and hit address-in-use when restarting the server.
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    lock = domain_data.get("server_init_lock")
+    if lock is None or "mcp_refcount" not in domain_data:
+        return
+
+    async with lock:
+        if "mcp_refcount" not in domain_data:
+            return
+
+        domain_data["mcp_refcount"] -= 1
+        refcount = domain_data["mcp_refcount"]
+        _LOGGER.debug("MCP server refcount after release: %d", refcount)
+
+        if refcount <= 0:
+            _LOGGER.info(
+                "Last profile released - stopping shared MCP server and index manager"
+            )
+            mcp_server = domain_data.pop("shared_mcp_server", None)
+            if mcp_server:
+                await mcp_server.stop()
+            index_manager = domain_data.pop("index_manager", None)
+            if index_manager:
+                await index_manager.async_stop()
+            domain_data.pop("mcp_port", None)
+            domain_data.pop("mcp_refcount", None)
+        else:
+            _LOGGER.info("Shared MCP server still in use by %d profile(s)", refcount)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MCP Assist from a config entry."""
     # Skip setup for system entry (it only stores config, doesn't create entities)
@@ -173,6 +208,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if "server_init_lock" not in hass.data[DOMAIN]:
         hass.data[DOMAIN]["server_init_lock"] = asyncio.Lock()
 
+    refcount_acquired = False
     try:
         # Use lock to prevent race condition when multiple profiles load simultaneously
         async with hass.data[DOMAIN]["server_init_lock"]:
@@ -194,6 +230,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 try:
                     await mcp_server.start()
                 except OSError as e:
+                    # Don't strand the started index manager: HA never unloads
+                    # a failed entry, and the retry would create a second one
+                    index_manager = hass.data[DOMAIN].pop("index_manager", None)
+                    if index_manager:
+                        await index_manager.async_stop()
                     if "Address already in use" in str(e):
                         _LOGGER.error(
                             "Port %d is already in use. Either change CONF_MCP_PORT in your "
@@ -215,6 +256,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             # Increment reference count
             hass.data[DOMAIN]["mcp_refcount"] += 1
+            refcount_acquired = True
             _LOGGER.debug("MCP server refcount: %d", hass.data[DOMAIN]["mcp_refcount"])
 
         # Store metadata (per entry)
@@ -281,6 +323,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     except Exception as err:
         _LOGGER.error("Failed to setup MCP Assist profile '%s': %s", profile_name, err)
+
+        # Roll back this entry's footprint. HA never unloads an entry whose
+        # setup raised, so without this every failed setup/retry leaks a
+        # refcount and the port stays bound after the last profile is removed.
+        entry_data = hass.data[DOMAIN].pop(entry.entry_id, None) or {}
+        openclaw_client = entry_data.get("openclaw_client")
+        if openclaw_client:
+            await openclaw_client.disconnect()
+        if refcount_acquired:
+            await _async_release_mcp_server(hass)
+
         raise ConfigEntryNotReady(f"Setup failed: {err}") from err
 
 
@@ -317,23 +370,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Remove entry data
     hass.data[DOMAIN].pop(entry.entry_id, None)
 
-    # Decrement MCP server reference count
-    if "mcp_refcount" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["mcp_refcount"] -= 1
-        refcount = hass.data[DOMAIN]["mcp_refcount"]
-        _LOGGER.debug("MCP server refcount after unload: %d", refcount)
-
-        # Only stop MCP server and index manager when last profile is removed
-        if refcount <= 0:
-            _LOGGER.info("Last profile removed - stopping shared MCP server and index manager")
-            mcp_server = hass.data[DOMAIN].pop("shared_mcp_server", None)
-            if mcp_server:
-                await mcp_server.stop()
-            hass.data[DOMAIN].pop("index_manager", None)
-            hass.data[DOMAIN].pop("mcp_port", None)
-            hass.data[DOMAIN].pop("mcp_refcount", None)
-        else:
-            _LOGGER.info("Shared MCP server still in use by %d profile(s)", refcount)
+    # Decrement MCP server reference count; stops server + index manager at zero
+    await _async_release_mcp_server(hass)
 
     return True
 

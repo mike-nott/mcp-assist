@@ -19,7 +19,8 @@
           "openclaw_host": "Gateway Host",
           "openclaw_port": "Gateway Port",
           "openclaw_token": "Gateway Token",
-          "openclaw_use_ssl": "Use SSL/TLS"
+          "openclaw_use_ssl": "Use SSL/TLS",
+          "hermes_url": "Hermes Server URL"
         }
       },
       "openclaw_pairing": {
@@ -52,7 +53,12 @@
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
-          "openclaw_session_key": "Session Key"
+          "openclaw_session_key": "Session Key / Session ID",
+          "hermes_session_key": "Memory Session Key"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw session to use: a short key like 'main' or a full session ID like 'agent:main:main'.",
+          "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile."
         }
       },
       "mcp_server": {
@@ -114,7 +120,13 @@
           "openclaw_port": "Gateway Port",
           "openclaw_token": "Gateway Token",
           "openclaw_use_ssl": "Use SSL/TLS",
-          "openclaw_session_key": "Session Key"
+          "openclaw_session_key": "Session Key / Session ID",
+          "hermes_url": "Hermes Server URL",
+          "hermes_session_key": "Memory Session Key"
+        },
+        "data_description": {
+          "openclaw_session_key": "OpenClaw session to use: a short key like 'main' or a full session ID like 'agent:main:main'.",
+          "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile."
         }
       },
       "mcp_server": {

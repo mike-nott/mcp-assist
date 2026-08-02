@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "서버 URL",
           "api_key": "API 키",
-          "mcp_port": "MCP 서버 포트"
+          "mcp_port": "MCP 서버 포트",
+          "hermes_url": "Hermes 서버 URL"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "디버그 모드",
           "ollama_keep_alive": "Ollama 활성 유지",
           "ollama_num_ctx": "Ollama 컨텍스트 창",
-          "clean_responses": "음성 출력용 응답 정리"
+          "clean_responses": "음성 출력용 응답 정리",
+          "openclaw_session_key": "세션 키 / 세션 ID",
+          "hermes_session_key": "메모리 세션 키"
+        },
+        "data_description": {
+          "openclaw_session_key": "사용할 OpenClaw 세션: 'main'과 같은 짧은 키 또는 'agent:main:main'과 같은 전체 세션 ID.",
+          "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "디버그 모드",
           "ollama_keep_alive": "Ollama 활성 유지",
           "ollama_num_ctx": "Ollama 컨텍스트 창",
-          "clean_responses": "음성 출력용 응답 정리"
+          "clean_responses": "음성 출력용 응답 정리",
+          "openclaw_session_key": "세션 키 / 세션 ID",
+          "hermes_url": "Hermes 서버 URL",
+          "hermes_session_key": "메모리 세션 키"
+        },
+        "data_description": {
+          "openclaw_session_key": "사용할 OpenClaw 세션: 'main'과 같은 짧은 키 또는 'agent:main:main'과 같은 전체 세션 ID.",
+          "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키."
         }
       },
       "mcp_server": {

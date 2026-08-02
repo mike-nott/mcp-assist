@@ -9,6 +9,7 @@ import ssl
 import time
 import uuid
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
@@ -19,7 +20,7 @@ from homeassistant.helpers.storage import Store
 _LOGGER = logging.getLogger(__name__)
 
 # Protocol constants
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 CLIENT_ID = "gateway-client"
 CLIENT_DISPLAY_NAME = "Home Assistant MCP Assist"
 CLIENT_VERSION = "1.0.0"
@@ -34,6 +35,12 @@ RECONNECT_DELAY = 5
 # Storage
 STORAGE_KEY = "mcp_assist.openclaw_device"
 STORAGE_VERSION = 1
+
+
+def _normalize_locale(locale: str | None) -> str:
+    """Return a compact BCP-47-ish locale for the OpenClaw handshake."""
+    normalized = str(locale or "").strip().replace("_", "-")
+    return normalized or "en-US"
 
 
 # --- Exceptions ---
@@ -159,6 +166,7 @@ class OpenClawClient:
         use_ssl: bool,
         device_auth: OpenClawDeviceAuth,
         timeout: int = 60,
+        locale: str | None = None,
     ) -> None:
         """Initialize OpenClaw client."""
         self._host = host
@@ -167,6 +175,7 @@ class OpenClawClient:
         self._use_ssl = use_ssl
         self._device_auth = device_auth
         self._timeout = timeout
+        self._locale = _normalize_locale(locale)
 
         self._ws = None
         self._connected = False
@@ -174,26 +183,58 @@ class OpenClawClient:
         self._receive_task: Optional[asyncio.Task] = None
         self._pending_requests: Dict[str, asyncio.Future] = {}
         self._agent_runs: Dict[str, "_AgentRun"] = {}
+        # Agent events that arrived before send_message registered the run.
+        self._early_agent_events: Dict[str, list] = {}
         self._event_handlers: Dict[str, list] = {}
+        self._connect_lock = asyncio.Lock()
 
     @property
     def is_connected(self) -> bool:
         """Return whether the client is connected."""
         return self._connected and self._ws is not None
 
-    async def connect(self) -> None:
-        """Connect to the OpenClaw Gateway and complete handshake."""
-        from websockets.asyncio.client import connect
-
-        # Sanitize host — strip protocol prefixes and trailing slashes
+    def _sanitized_host(self) -> str:
+        """Return the host with any protocol prefix and trailing slash removed."""
         host = self._host.strip().rstrip("/")
         for prefix in ("https://", "http://", "wss://", "ws://"):
             if host.lower().startswith(prefix):
-                host = host[len(prefix):]
-                break
+                return host[len(prefix):]
+        return host
+
+    def _build_ws_url(self) -> str:
+        """Build the gateway websocket URL with the token percent-encoded.
+
+        The token is also sent in the Authorization/X-OpenClaw-Token headers,
+        but it is kept in the query string for gateway compatibility. Encoding
+        it avoids a malformed URL (or a silently wrong token) when the token
+        contains characters such as ``&``, ``#``, ``/`` or spaces.
+        """
+        scheme = "wss" if self._use_ssl else "ws"
+        return f"{scheme}://{self._sanitized_host()}:{self._port}/?token={quote(self._token, safe='')}"
+
+    async def connect(self) -> None:
+        """Connect to the OpenClaw Gateway and complete handshake."""
+        async with self._connect_lock:
+            if self.is_connected:
+                return
+            await self._connect_locked()
+
+    async def _connect_locked(self) -> None:
+        """Connect and complete the handshake; caller holds the connect lock."""
+        from websockets.asyncio.client import connect
+
+        # Tear down any previous connection first. A keepalive failure only
+        # flips _connected without closing the socket or cancelling the
+        # receive task, so without this a stale socket and receive loop would
+        # linger past the reconnect. Preserve buffered early events so a
+        # concurrent request still waiting to replay its completion is not
+        # stranded by this teardown.
+        await self._teardown_connection(
+            "Reconnecting to OpenClaw Gateway", clear_early_events=False
+        )
 
         scheme = "wss" if self._use_ssl else "ws"
-        url = f"{scheme}://{host}:{self._port}/?token={self._token}"
+        url = self._build_ws_url()
         headers = {
             "Authorization": f"Bearer {self._token}",
             "X-OpenClaw-Token": self._token,
@@ -233,8 +274,9 @@ class OpenClawClient:
 
         self._connected = True
 
-        # Start background tasks
-        self._receive_task = asyncio.create_task(self._receive_loop())
+        # Start background tasks, binding the receive loop to this socket so a
+        # later reconnect can tell a stale loop apart from the live one.
+        self._receive_task = asyncio.create_task(self._receive_loop(self._ws))
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
 
         _LOGGER.info("✅ Connected to OpenClaw Gateway")
@@ -265,7 +307,7 @@ class OpenClawClient:
                 "mode": CLIENT_MODE,
             },
             "caps": [],
-            "locale": "en-US",
+            "locale": self._locale,
             "userAgent": f"{CLIENT_DISPLAY_NAME}/{CLIENT_VERSION}",
             "auth": {"token": self._token},
             "role": DEVICE_ROLE,
@@ -310,35 +352,69 @@ class OpenClawClient:
     async def disconnect(self) -> None:
         """Disconnect from the OpenClaw Gateway."""
         _LOGGER.info("Disconnecting from OpenClaw Gateway")
+        await self._teardown_connection("Disconnected")
+
+    async def _teardown_connection(
+        self, reason: str, *, clear_early_events: bool = True
+    ) -> None:
+        """Cancel background tasks, close the socket, and fail in-flight work.
+
+        Detaches the current socket/tasks first so a cancelled receive loop
+        sees it no longer owns ``self._ws`` and skips its own cleanup, leaving
+        this method as the single place that fails in-flight work.
+
+        ``clear_early_events`` is False when tearing down before a reconnect:
+        a completion may already be buffered for a request whose ``send_message``
+        is between its resolved ack and registering the run, and clearing it
+        would make that caller wait out its full timeout despite the answer.
+        """
         self._connected = False
+        ws = self._ws
+        keepalive_task = self._keepalive_task
+        receive_task = self._receive_task
+        self._ws = None
+        self._keepalive_task = None
+        self._receive_task = None
 
-        # Cancel background tasks
-        if self._keepalive_task and not self._keepalive_task.done():
-            self._keepalive_task.cancel()
+        current = asyncio.current_task()
+        for task in (keepalive_task, receive_task):
+            if task and task is not current and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        self._fail_inflight(reason, clear_early_events=clear_early_events)
+
+        if ws is not None:
             try:
-                await self._keepalive_task
-            except asyncio.CancelledError:
+                await ws.close()
+            except Exception:
                 pass
 
-        if self._receive_task and not self._receive_task.done():
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                pass
+    def _fail_inflight(self, reason: str, *, clear_early_events: bool = True) -> None:
+        """Fail pending requests and complete active runs with an error.
 
-        # Fail pending requests
+        ``clear_early_events`` is False for connection-loss cleanup from the
+        receive loop: a completion may have arrived and been buffered for a run
+        that ``send_message`` has not registered yet, and dropping it would make
+        the caller wait out its full timeout despite having the answer. Runs
+        that already completed are left untouched so an ok result is not
+        overwritten with an error.
+        """
         for future in self._pending_requests.values():
             if not future.done():
-                future.set_exception(OpenClawConnectionError("Disconnected"))
+                future.set_exception(OpenClawConnectionError(reason))
         self._pending_requests.clear()
 
-        # Complete active runs
         for run in self._agent_runs.values():
-            run.set_complete("error", "Disconnected")
+            if not run.complete_event.is_set():
+                run.set_complete("error", reason)
         self._agent_runs.clear()
 
-        await self._close_ws()
+        if clear_early_events:
+            self._early_agent_events.clear()
 
     async def _close_ws(self) -> None:
         """Close the WebSocket connection."""
@@ -382,24 +458,29 @@ class OpenClawClient:
             + text
         )
 
-        # Send agent request
-        await self._ws.send(json.dumps({
-            "type": "req",
-            "id": request_id,
-            "method": "agent",
-            "params": {
-                "message": voice_message,
-                "sessionKey": session_key,
-                "idempotencyKey": idempotency_key,
-            },
-        }))
+        # Register the response future before sending so a fast acknowledgment
+        # processed during the send await cannot be dropped.
+        future = asyncio.get_running_loop().create_future()
+        self._pending_requests[request_id] = future
+
+        try:
+            await self._ws.send(json.dumps({
+                "type": "req",
+                "id": request_id,
+                "method": "agent",
+                "params": {
+                    "message": voice_message,
+                    "sessionKey": session_key,
+                    "idempotencyKey": idempotency_key,
+                },
+            }))
+        except Exception as err:
+            self._pending_requests.pop(request_id, None)
+            raise OpenClawConnectionError(f"Failed to send agent request: {err}") from err
 
         _LOGGER.debug("Sent agent request: %s", request_id[:8])
 
         # Wait for the initial response (contains runId)
-        future = asyncio.get_event_loop().create_future()
-        self._pending_requests[request_id] = future
-
         try:
             resp = await asyncio.wait_for(future, timeout=10.0)
         except asyncio.TimeoutError:
@@ -414,9 +495,19 @@ class OpenClawClient:
         if not run_id:
             raise OpenClawError("No runId in agent response")
 
-        # Track this run and wait for completion
+        # Track this run, replaying any events that beat the registration.
         run = _AgentRun(run_id)
         self._agent_runs[run_id] = run
+        for payload in self._early_agent_events.pop(run_id, []):
+            self._apply_agent_event(run, payload)
+
+        # If the socket dropped between the ack resolving and now, no receive
+        # loop is left to complete this run — fail fast instead of waiting the
+        # full timeout. A completion that already arrived was replayed above,
+        # so only bail when the run is still pending.
+        if not run.complete_event.is_set() and not self.is_connected:
+            self._agent_runs.pop(run_id, None)
+            raise OpenClawConnectionError("Connection to OpenClaw Gateway lost")
 
         try:
             await asyncio.wait_for(run.complete_event.wait(), timeout=self._timeout)
@@ -437,10 +528,10 @@ class OpenClawClient:
 
         return run.summary or run.full_text
 
-    async def _receive_loop(self) -> None:
+    async def _receive_loop(self, ws) -> None:
         """Background task to receive and dispatch WebSocket messages."""
         try:
-            async for raw in self._ws:
+            async for raw in ws:
                 try:
                     msg = json.loads(raw)
                     await self._handle_message(msg)
@@ -449,10 +540,22 @@ class OpenClawClient:
                 except Exception as err:
                     _LOGGER.debug("Error handling message: %s", err)
         except asyncio.CancelledError:
-            return
+            raise
         except Exception as err:
             _LOGGER.warning("WebSocket receive loop ended: %s", err)
-            self._connected = False
+        finally:
+            # Only tear down shared state if this loop still owns the active
+            # socket. A stale loop whose socket was already replaced by a
+            # reconnect must not disconnect or fail the new connection.
+            if self._ws is ws:
+                self._connected = False
+                # Preserve buffered early events: a completion may have arrived
+                # for a run that send_message has not registered yet, and it
+                # still needs to replay it.
+                self._fail_inflight(
+                    "Connection to OpenClaw Gateway lost",
+                    clear_early_events=False,
+                )
 
     async def _handle_message(self, msg: Dict[str, Any]) -> None:
         """Handle an incoming WebSocket message."""
@@ -477,6 +580,10 @@ class OpenClawClient:
             except Exception:
                 pass
 
+    # Bounds for events buffered before their run is registered.
+    _MAX_EARLY_EVENT_RUNS = 8
+    _MAX_EARLY_EVENTS_PER_RUN = 32
+
     def _handle_agent_event(self, payload: Dict[str, Any]) -> None:
         """Handle an agent event (streaming output or completion)."""
         run_id = payload.get("runId")
@@ -485,13 +592,27 @@ class OpenClawClient:
 
         run = self._agent_runs.get(run_id)
         if not run:
-            _LOGGER.debug("Agent event for unknown run %s, keys: %s", run_id[:8], list(payload.keys()))
+            # The acknowledgment and first events can be processed back to
+            # back, before send_message registers the run. Buffer them so
+            # send_message can replay them instead of dropping completions.
+            _LOGGER.debug(
+                "Buffering agent event for unregistered run %s, keys: %s",
+                run_id[:8], list(payload.keys()),
+            )
+            events = self._early_agent_events.setdefault(run_id, [])
+            events.append(payload)
+            del events[:-self._MAX_EARLY_EVENTS_PER_RUN]
+            while len(self._early_agent_events) > self._MAX_EARLY_EVENT_RUNS:
+                self._early_agent_events.pop(next(iter(self._early_agent_events)))
             return
 
-        # Log all agent events for debugging
+        self._apply_agent_event(run, payload)
+
+    def _apply_agent_event(self, run: "_AgentRun", payload: Dict[str, Any]) -> None:
+        """Apply a single agent event to its run."""
         _LOGGER.debug(
             "Agent event: run=%s keys=%s output_len=%s status=%s phase=%s",
-            run_id[:8],
+            run.run_id[:8],
             list(payload.keys()),
             len(payload.get("output", "")) if payload.get("output") else 0,
             payload.get("status"),

@@ -15,7 +15,8 @@
         "data": {
           "lmstudio_url": "URL сервера",
           "api_key": "API-ключ",
-          "mcp_port": "Порт сервера MCP"
+          "mcp_port": "Порт сервера MCP",
+          "hermes_url": "URL сервера Hermes"
         }
       },
       "model": {
@@ -43,7 +44,13 @@
           "debug_mode": "Режим отладки",
           "ollama_keep_alive": "Поддерживать Ollama активным",
           "ollama_num_ctx": "Контекстное окно Ollama",
-          "clean_responses": "Очистка ответов для голосового вывода"
+          "clean_responses": "Очистка ответов для голосового вывода",
+          "openclaw_session_key": "Ключ сессии / ID сессии",
+          "hermes_session_key": "Ключ сессии памяти"
+        },
+        "data_description": {
+          "openclaw_session_key": "Используемая сессия OpenClaw: короткий ключ, например 'main', или полный ID сессии, например 'agent:main:main'.",
+          "hermes_session_key": "Постоянный ключ, ограничивающий долговременную память Hermes для этого профиля."
         }
       },
       "mcp_server": {
@@ -99,7 +106,14 @@
           "debug_mode": "Режим отладки",
           "ollama_keep_alive": "Поддерживать Ollama активным",
           "ollama_num_ctx": "Контекстное окно Ollama",
-          "clean_responses": "Очистка ответов для голосового вывода"
+          "clean_responses": "Очистка ответов для голосового вывода",
+          "openclaw_session_key": "Ключ сессии / ID сессии",
+          "hermes_url": "URL сервера Hermes",
+          "hermes_session_key": "Ключ сессии памяти"
+        },
+        "data_description": {
+          "openclaw_session_key": "Используемая сессия OpenClaw: короткий ключ, например 'main', или полный ID сессии, например 'agent:main:main'.",
+          "hermes_session_key": "Постоянный ключ, ограничивающий долговременную память Hermes для этого профиля."
         }
       },
       "mcp_server": {

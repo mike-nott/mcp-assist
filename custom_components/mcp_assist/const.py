@@ -13,6 +13,7 @@ SERVER_TYPE_ANTHROPIC = "anthropic"
 SERVER_TYPE_OPENROUTER = "openrouter"
 SERVER_TYPE_OPENCLAW = "openclaw"
 SERVER_TYPE_VLLM = "vllm"
+SERVER_TYPE_HERMES = "hermes"
 
 # Configuration keys
 CONF_PROFILE_NAME = "profile_name"
@@ -60,6 +61,12 @@ DEFAULT_OPENCLAW_PORT = 18789
 DEFAULT_OPENCLAW_USE_SSL = True
 DEFAULT_OPENCLAW_SESSION_KEY = "main"
 DEFAULT_VLLM_URL = "http://localhost:8000"
+# Hermes Agent (Nous Research) defaults — OpenAI-compatible API server
+CONF_HERMES_URL = "hermes_url"
+CONF_HERMES_SESSION_KEY = "hermes_session_key"
+DEFAULT_HERMES_URL = "http://localhost:8642"
+DEFAULT_HERMES_SESSION_KEY = "homeassistant"
+DEFAULT_HERMES_MODEL = "hermes-agent"
 DEFAULT_MCP_PORT = 8090
 DEFAULT_API_KEY = ""
 
@@ -77,6 +84,9 @@ DEFAULT_RESPONSE_MODE = "default"
 DEFAULT_FOLLOW_UP_MODE = "default"  # Keep for backward compatibility
 DEFAULT_TEMPERATURE = 0.5
 DEFAULT_MAX_TOKENS = 500
+# OpenAI reasoning models (GPT-5.x, o-series) count reasoning tokens against
+# max_completion_tokens; a 500-token voice budget yields empty visible replies
+MIN_REASONING_COMPLETION_TOKENS = 2000
 DEFAULT_MAX_HISTORY = 10
 DEFAULT_MAX_ITERATIONS = 10
 DEFAULT_DEBUG_MODE = False

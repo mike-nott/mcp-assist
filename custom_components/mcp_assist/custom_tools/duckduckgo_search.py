@@ -1,7 +1,13 @@
 """DuckDuckGo Search custom tool for MCP Assist."""
 import logging
 from typing import Dict, Any, List
-from duckduckgo_search import DDGS
+
+try:
+    from ddgs import DDGS
+    _DDGS_LEGACY = False
+except ImportError:  # old environments where only duckduckgo-search is installed
+    from duckduckgo_search import DDGS
+    _DDGS_LEGACY = True
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,12 +91,15 @@ class DuckDuckGoSearchTool:
     def _search_sync(self, query: str, count: int) -> List[Dict[str, str]]:
         """Synchronous search wrapper for thread pool execution."""
         try:
+            # First arg is positional: the kwarg was renamed keywords= -> query=
+            # in the ddgs package. Pin backend to DuckDuckGo; new ddgs defaults
+            # to mixed backends (including Bing).
             raw_results = DDGS().text(
-                keywords=query,
+                query,
                 max_results=count,
                 region="us-en",
                 safesearch="moderate",
-                backend="auto"
+                backend="auto" if _DDGS_LEGACY else "duckduckgo",
             )
 
             # Normalize format to match Brave Search return structure
