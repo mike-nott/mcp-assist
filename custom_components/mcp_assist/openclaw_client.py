@@ -27,7 +27,10 @@ CLIENT_VERSION = "1.0.0"
 CLIENT_MODE = "backend"
 DEVICE_ROLE = "operator"
 DEVICE_SCOPES = ["operator.read", "operator.write"]
-CHALLENGE_TIMEOUT = 2.0
+# Matches the reference client's preauth handshake budget (15s). The challenge
+# is mandatory on protocol 4: a connect without device auth is rejected
+# without ever creating a pending pairing request on the gateway.
+CHALLENGE_TIMEOUT = 15.0
 HANDSHAKE_TIMEOUT = 10.0
 KEEPALIVE_INTERVAL = 30
 RECONNECT_DELAY = 5
@@ -131,18 +134,29 @@ class OpenClawDeviceAuth:
         await self._store.async_save({"private_key_hex": pk_bytes.hex()})
 
     def sign_challenge(self, nonce: str, token: str, timestamp_ms: int) -> str:
-        """Sign a challenge nonce and return base64url-encoded signature."""
+        """Sign a challenge nonce and return base64url-encoded signature.
+
+        v3 payload: v2 fields plus lowercased platform and deviceFamily.
+        platform must byte-match the connect params' client.platform.
+        """
         scopes_str = ",".join(DEVICE_SCOPES)
         payload = (
-            f"v2|{self._device_id}|{CLIENT_ID}|{CLIENT_MODE}|"
-            f"{DEVICE_ROLE}|{scopes_str}|{timestamp_ms}|{token}|{nonce}"
+            f"v3|{self._device_id}|{CLIENT_ID}|{CLIENT_MODE}|"
+            f"{DEVICE_ROLE}|{scopes_str}|{timestamp_ms}|{token}|{nonce}|python|"
         )
         signature = self._private_key.sign(payload.encode("utf-8"))
         return _base64url_encode(signature)
 
-    def build_device_dict(self, nonce: str, token: str) -> Dict[str, Any]:
-        """Build the device auth dictionary for the connect handshake."""
-        timestamp_ms = int(time.time() * 1000)
+    def build_device_dict(
+        self, nonce: str, token: str, signed_at_ms: int | None = None
+    ) -> Dict[str, Any]:
+        """Build the device auth dictionary for the connect handshake.
+
+        signed_at_ms should be the challenge's ts: the gateway enforces
+        |now - signedAt| <= 120s against ITS clock, so signing our local time
+        fails silently (no pending pairing) when the HA host clock drifts.
+        """
+        timestamp_ms = signed_at_ms or int(time.time() * 1000)
         signature_b64 = self.sign_challenge(nonce, token, timestamp_ms)
         return {
             "id": self._device_id,
@@ -283,16 +297,32 @@ class OpenClawClient:
 
     async def _handshake(self) -> None:
         """Complete the WebSocket handshake with device auth."""
-        # Wait for optional connect.challenge event
+        # Wait for the connect.challenge event. Mandatory on protocol 4: a
+        # device-less connect is rejected without registering a pending
+        # pairing request, leaving nothing for `openclaw devices approve`.
         nonce = None
-        try:
-            raw = await asyncio.wait_for(self._ws.recv(), timeout=CHALLENGE_TIMEOUT)
+        challenge_ts = None
+        deadline = asyncio.get_running_loop().time() + CHALLENGE_TIMEOUT
+        while nonce is None:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                raw = await asyncio.wait_for(self._ws.recv(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
             msg = json.loads(raw)
             if msg.get("type") == "event" and msg.get("event") == "connect.challenge":
-                nonce = msg.get("payload", {}).get("nonce")
+                payload = msg.get("payload", {})
+                nonce = payload.get("nonce")
+                challenge_ts = payload.get("ts")
                 _LOGGER.debug("Received connect challenge")
-        except asyncio.TimeoutError:
-            _LOGGER.debug("No connect challenge received (legacy mode)")
+
+        if not nonce:
+            raise OpenClawConnectionError(
+                "No connect.challenge received from gateway. "
+                "OpenClaw >= 2026.5.12 (protocol 4) is required."
+            )
 
         # Build connect request
         connect_id = str(uuid.uuid4())
@@ -314,9 +344,11 @@ class OpenClawClient:
             "scopes": list(DEVICE_SCOPES),
         }
 
-        # Add device auth if we got a challenge
-        if nonce:
-            connect_params["device"] = self._device_auth.build_device_dict(nonce, self._token)
+        # Device auth is always attached; sign the challenge's ts so validity
+        # is judged against the gateway's clock, not ours
+        connect_params["device"] = self._device_auth.build_device_dict(
+            nonce, self._token, signed_at_ms=challenge_ts
+        )
 
         await self._ws.send(json.dumps({
             "type": "req",
@@ -325,9 +357,18 @@ class OpenClawClient:
             "params": connect_params,
         }))
 
-        # Wait for response
-        raw = await asyncio.wait_for(self._ws.recv(), timeout=HANDSHAKE_TIMEOUT)
-        resp = json.loads(raw)
+        # Wait for OUR response frame, skipping stray events — a late event
+        # parsed as the connect response would produce a garbage error
+        resp = None
+        deadline = asyncio.get_running_loop().time() + HANDSHAKE_TIMEOUT
+        while resp is None:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError("Timeout waiting for connect response")
+            raw = await asyncio.wait_for(self._ws.recv(), timeout=remaining)
+            msg = json.loads(raw)
+            if msg.get("type") == "res" and msg.get("id") == connect_id:
+                resp = msg
 
         if resp.get("ok"):
             _LOGGER.debug("Handshake successful")
