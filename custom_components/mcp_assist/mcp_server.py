@@ -1789,7 +1789,7 @@ class MCPServer:
                 relative = f"{days} day{'s' if days != 1 else ''} ago"
 
             # Absolute timestamp
-            absolute = state.last_changed.strftime("%H:%M:%S")
+            absolute = dt_util.as_local(state.last_changed).strftime("%H:%M:%S")
 
             # Format line
             text_parts.append(f"• {relative} ({absolute}) → {state.state}")
