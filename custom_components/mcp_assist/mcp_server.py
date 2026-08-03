@@ -212,7 +212,7 @@ class MCPServer:
             # Create and initialize custom tools if search provider is enabled
             # Done here (not in __init__) so system entry exists for reading settings
             search_provider = self._get_search_provider()
-            if search_provider in ["brave", "duckduckgo"]:
+            if search_provider in ["brave", "duckduckgo", "searxng"]:
                 try:
                     from .custom_tools import CustomToolsLoader
 
