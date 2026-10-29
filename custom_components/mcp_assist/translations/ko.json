@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Ollama 활성 유지",
           "ollama_num_ctx": "Ollama 컨텍스트 창",
           "clean_responses": "음성 출력용 응답 정리",
+          "openclaw_agent_id": "에이전트 ID",
+          "openclaw_session_mode": "세션 모드",
           "openclaw_session_key": "세션 키 / 세션 ID",
-          "hermes_session_key": "메모리 세션 키"
+          "hermes_session_key": "메모리 세션 키",
+          "system_prompt": "시스템 프롬프트"
         },
         "data_description": {
-          "openclaw_session_key": "사용할 OpenClaw 세션: 'main'과 같은 짧은 키 또는 'agent:main:main'과 같은 전체 세션 ID.",
-          "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키."
+          "openclaw_session_key": "세션 모드가 'Fixed'일 때만 사용됩니다. 'main' 같은 짧은 키나 agent:main:main 같은 전체 세션 ID를 입력하세요.",
+          "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키.",
+          "openclaw_agent_id": "이 프로필의 요청에 응답하는 OpenClaw 에이전트입니다. OpenClaw에 설정된 에이전트와 일치해야 합니다. 기본값은 'main'입니다.",
+          "openclaw_session_mode": "'Per conversation'은 Home Assistant 대화마다 별도의 OpenClaw 세션을 주며, 후속 질문은 그 세션에 남습니다. 'Fixed'는 모든 요청을 세션 키에 지정한 하나의 세션으로 보냅니다.",
+          "system_prompt": "모든 요청에 추가 시스템 프롬프트로 OpenClaw에 전송되며, 예를 들어 페르소나를 정할 때 쓸 수 있습니다. 에이전트 자체 프롬프트를 사용하려면 비워 두세요. 음성 새틀라이트의 방은 자동으로 추가됩니다."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Ollama 활성 유지",
           "ollama_num_ctx": "Ollama 컨텍스트 창",
           "clean_responses": "음성 출력용 응답 정리",
+          "openclaw_agent_id": "에이전트 ID",
+          "openclaw_session_mode": "세션 모드",
           "openclaw_session_key": "세션 키 / 세션 ID",
           "hermes_url": "Hermes 서버 URL",
           "hermes_session_key": "메모리 세션 키"
         },
         "data_description": {
-          "openclaw_session_key": "사용할 OpenClaw 세션: 'main'과 같은 짧은 키 또는 'agent:main:main'과 같은 전체 세션 ID.",
-          "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키."
+          "openclaw_session_key": "세션 모드가 'Fixed'일 때만 사용됩니다. 'main' 같은 짧은 키나 agent:main:main 같은 전체 세션 ID를 입력하세요.",
+          "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키.",
+          "openclaw_agent_id": "이 프로필의 요청에 응답하는 OpenClaw 에이전트입니다. OpenClaw에 설정된 에이전트와 일치해야 합니다. 기본값은 'main'입니다.",
+          "openclaw_session_mode": "'Per conversation'은 Home Assistant 대화마다 별도의 OpenClaw 세션을 주며, 후속 질문은 그 세션에 남습니다. 'Fixed'는 모든 요청을 세션 키에 지정한 하나의 세션으로 보냅니다."
         }
       },
       "mcp_server": {

@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Maintenir Ollama actif",
           "ollama_num_ctx": "Fenetre de contexte Ollama",
           "clean_responses": "Nettoyer les réponses pour la sortie vocale",
+          "openclaw_agent_id": "ID de l'agent",
+          "openclaw_session_mode": "Mode de session",
           "openclaw_session_key": "Clé de session / ID de session",
-          "hermes_session_key": "Clé de session mémoire"
+          "hermes_session_key": "Clé de session mémoire",
+          "system_prompt": "Instructions systeme"
         },
         "data_description": {
-          "openclaw_session_key": "Session OpenClaw à utiliser : une clé courte comme 'main' ou un ID de session complet comme 'agent:main:main'.",
-          "hermes_session_key": "Clé stable délimitant la mémoire à long terme de Hermes pour ce profil."
+          "openclaw_session_key": "Utilisée uniquement lorsque le Mode de session est 'Fixed'. Saisissez une clé courte comme 'main' ou un ID de session complet comme agent:main:main.",
+          "hermes_session_key": "Clé stable délimitant la mémoire à long terme de Hermes pour ce profil.",
+          "openclaw_agent_id": "L'agent OpenClaw qui répond aux requêtes de ce profil. Il doit correspondre à un agent configuré dans OpenClaw. La valeur par défaut est 'main'.",
+          "openclaw_session_mode": "'Per conversation' donne à chaque conversation Home Assistant sa propre session OpenClaw, où restent les questions de suivi. 'Fixed' envoie toutes les requêtes à l'unique session définie dans Clé de session.",
+          "system_prompt": "Envoyé à OpenClaw avec chaque requête comme instruction système supplémentaire, par exemple pour définir un personnage. Laissez vide pour utiliser les instructions propres à l'agent. La pièce du satellite vocal est ajoutée automatiquement."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Maintenir Ollama actif",
           "ollama_num_ctx": "Fenetre de contexte Ollama",
           "clean_responses": "Nettoyer les réponses pour la sortie vocale",
+          "openclaw_agent_id": "ID de l'agent",
+          "openclaw_session_mode": "Mode de session",
           "openclaw_session_key": "Clé de session / ID de session",
           "hermes_url": "URL du serveur Hermes",
           "hermes_session_key": "Clé de session mémoire"
         },
         "data_description": {
-          "openclaw_session_key": "Session OpenClaw à utiliser : une clé courte comme 'main' ou un ID de session complet comme 'agent:main:main'.",
-          "hermes_session_key": "Clé stable délimitant la mémoire à long terme de Hermes pour ce profil."
+          "openclaw_session_key": "Utilisée uniquement lorsque le Mode de session est 'Fixed'. Saisissez une clé courte comme 'main' ou un ID de session complet comme agent:main:main.",
+          "hermes_session_key": "Clé stable délimitant la mémoire à long terme de Hermes pour ce profil.",
+          "openclaw_agent_id": "L'agent OpenClaw qui répond aux requêtes de ce profil. Il doit correspondre à un agent configuré dans OpenClaw. La valeur par défaut est 'main'.",
+          "openclaw_session_mode": "'Per conversation' donne à chaque conversation Home Assistant sa propre session OpenClaw, où restent les questions de suivi. 'Fixed' envoie toutes les requêtes à l'unique session définie dans Clé de session."
         }
       },
       "mcp_server": {

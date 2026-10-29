@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Udrzovat Ollama aktivni",
           "ollama_num_ctx": "Kontextove okno Ollama",
           "clean_responses": "Čisté odpovědi pro hlasový výstup",
+          "openclaw_agent_id": "ID agenta",
+          "openclaw_session_mode": "Režim relace",
           "openclaw_session_key": "Klíč relace / ID relace",
-          "hermes_session_key": "Klíč relace paměti"
+          "hermes_session_key": "Klíč relace paměti",
+          "system_prompt": "Systemove instrukce"
         },
         "data_description": {
-          "openclaw_session_key": "Relace OpenClaw, která se má použít: krátký klíč jako 'main' nebo úplné ID relace jako 'agent:main:main'.",
-          "hermes_session_key": "Stabilní klíč vymezující dlouhodobou paměť Hermes pro tento profil."
+          "openclaw_session_key": "Používá se jen tehdy, když je Režim relace 'Fixed'. Zadejte krátký klíč, například 'main', nebo úplné ID relace, například agent:main:main.",
+          "hermes_session_key": "Stabilní klíč vymezující dlouhodobou paměť Hermes pro tento profil.",
+          "openclaw_agent_id": "Agent OpenClaw, který odpovídá na požadavky tohoto profilu. Musí odpovídat agentovi nastavenému v OpenClaw. Výchozí je 'main'.",
+          "openclaw_session_mode": "'Per conversation' dává každé konverzaci v Home Assistant vlastní relaci OpenClaw a navazující otázky v ní zůstávají. 'Fixed' posílá všechny požadavky do jediné relace nastavené v poli Klíč relace.",
+          "system_prompt": "Odesílá se do OpenClaw s každým požadavkem jako další systémová instrukce, například pro nastavení persony. Nechte prázdné, chcete-li použít vlastní instrukce agenta. Místnost hlasového satelitu se přidá automaticky."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Udrzovat Ollama aktivni",
           "ollama_num_ctx": "Kontextove okno Ollama",
           "clean_responses": "Čisté odpovědi pro hlasový výstup",
+          "openclaw_agent_id": "ID agenta",
+          "openclaw_session_mode": "Režim relace",
           "openclaw_session_key": "Klíč relace / ID relace",
           "hermes_url": "URL serveru Hermes",
           "hermes_session_key": "Klíč relace paměti"
         },
         "data_description": {
-          "openclaw_session_key": "Relace OpenClaw, která se má použít: krátký klíč jako 'main' nebo úplné ID relace jako 'agent:main:main'.",
-          "hermes_session_key": "Stabilní klíč vymezující dlouhodobou paměť Hermes pro tento profil."
+          "openclaw_session_key": "Používá se jen tehdy, když je Režim relace 'Fixed'. Zadejte krátký klíč, například 'main', nebo úplné ID relace, například agent:main:main.",
+          "hermes_session_key": "Stabilní klíč vymezující dlouhodobou paměť Hermes pro tento profil.",
+          "openclaw_agent_id": "Agent OpenClaw, který odpovídá na požadavky tohoto profilu. Musí odpovídat agentovi nastavenému v OpenClaw. Výchozí je 'main'.",
+          "openclaw_session_mode": "'Per conversation' dává každé konverzaci v Home Assistant vlastní relaci OpenClaw a navazující otázky v ní zůstávají. 'Fixed' posílá všechny požadavky do jediné relace nastavené v poli Klíč relace."
         }
       },
       "mcp_server": {

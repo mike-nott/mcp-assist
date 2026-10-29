@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Ollama'yi Aktif Tut",
           "ollama_num_ctx": "Ollama Baglam Penceresi",
           "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle",
+          "openclaw_agent_id": "Ajan ID'si",
+          "openclaw_session_mode": "Oturum Modu",
           "openclaw_session_key": "Oturum Anahtarı / Oturum ID'si",
-          "hermes_session_key": "Bellek Oturum Anahtarı"
+          "hermes_session_key": "Bellek Oturum Anahtarı",
+          "system_prompt": "Sistem Yonergeleri"
         },
         "data_description": {
-          "openclaw_session_key": "Kullanılacak OpenClaw oturumu: 'main' gibi kısa bir anahtar veya 'agent:main:main' gibi tam bir oturum ID'si.",
-          "hermes_session_key": "Bu profil için Hermes uzun süreli belleğini sınırlayan sabit anahtar."
+          "openclaw_session_key": "Yalnızca Oturum Modu 'Fixed' olduğunda kullanılır. 'main' gibi kısa bir anahtar ya da agent:main:main gibi tam bir oturum ID'si girin.",
+          "hermes_session_key": "Bu profil için Hermes uzun süreli belleğini sınırlayan sabit anahtar.",
+          "openclaw_agent_id": "Bu profilin isteklerini yanıtlayan OpenClaw ajanı. OpenClaw'da yapılandırılmış bir ajanla eşleşmelidir. Varsayılan 'main' değeridir.",
+          "openclaw_session_mode": "'Per conversation', Home Assistant'taki her konuşmaya kendi OpenClaw oturumunu verir ve takip soruları o oturumda kalır. 'Fixed', tüm istekleri Oturum Anahtarı'nda belirlenen tek oturuma gönderir.",
+          "system_prompt": "Her istekle birlikte OpenClaw'a ek sistem istemi olarak gönderilir, örneğin bir kişilik belirlemek için. Ajanın kendi istemlerini kullanmak için boş bırakın. Sesli uydunun odası otomatik olarak eklenir."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Ollama'yi Aktif Tut",
           "ollama_num_ctx": "Ollama Baglam Penceresi",
           "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle",
+          "openclaw_agent_id": "Ajan ID'si",
+          "openclaw_session_mode": "Oturum Modu",
           "openclaw_session_key": "Oturum Anahtarı / Oturum ID'si",
           "hermes_url": "Hermes Sunucu URL'si",
           "hermes_session_key": "Bellek Oturum Anahtarı"
         },
         "data_description": {
-          "openclaw_session_key": "Kullanılacak OpenClaw oturumu: 'main' gibi kısa bir anahtar veya 'agent:main:main' gibi tam bir oturum ID'si.",
-          "hermes_session_key": "Bu profil için Hermes uzun süreli belleğini sınırlayan sabit anahtar."
+          "openclaw_session_key": "Yalnızca Oturum Modu 'Fixed' olduğunda kullanılır. 'main' gibi kısa bir anahtar ya da agent:main:main gibi tam bir oturum ID'si girin.",
+          "hermes_session_key": "Bu profil için Hermes uzun süreli belleğini sınırlayan sabit anahtar.",
+          "openclaw_agent_id": "Bu profilin isteklerini yanıtlayan OpenClaw ajanı. OpenClaw'da yapılandırılmış bir ajanla eşleşmelidir. Varsayılan 'main' değeridir.",
+          "openclaw_session_mode": "'Per conversation', Home Assistant'taki her konuşmaya kendi OpenClaw oturumunu verir ve takip soruları o oturumda kalır. 'Fixed', tüm istekleri Oturum Anahtarı'nda belirlenen tek oturuma gönderir."
         }
       },
       "mcp_server": {

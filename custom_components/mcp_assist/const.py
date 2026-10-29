@@ -56,10 +56,18 @@ CONF_OPENCLAW_PORT = "openclaw_port"
 CONF_OPENCLAW_TOKEN = "openclaw_token"
 CONF_OPENCLAW_USE_SSL = "openclaw_use_ssl"
 CONF_OPENCLAW_SESSION_KEY = "openclaw_session_key"
+CONF_OPENCLAW_AGENT_ID = "openclaw_agent_id"
+CONF_OPENCLAW_SESSION_MODE = "openclaw_session_mode"
+OPENCLAW_SESSION_MODE_PER_CONVERSATION = "per_conversation"
+OPENCLAW_SESSION_MODE_FIXED = "fixed"
 DEFAULT_OPENCLAW_HOST = "localhost"
 DEFAULT_OPENCLAW_PORT = 18789
 DEFAULT_OPENCLAW_USE_SSL = True
 DEFAULT_OPENCLAW_SESSION_KEY = "main"
+DEFAULT_OPENCLAW_AGENT_ID = "main"
+# New profiles get a session per conversation; profiles created before the
+# setting existed keep their fixed session key
+DEFAULT_OPENCLAW_SESSION_MODE = OPENCLAW_SESSION_MODE_PER_CONVERSATION
 DEFAULT_VLLM_URL = "http://localhost:8000"
 # Hermes Agent (Nous Research) defaults — OpenAI-compatible API server
 CONF_HERMES_URL = "hermes_url"

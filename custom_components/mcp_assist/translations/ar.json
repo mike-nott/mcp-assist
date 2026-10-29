@@ -45,12 +45,18 @@
           "ollama_keep_alive": "ابق Ollama نشطا",
           "ollama_num_ctx": "نافذة سياق Ollama",
           "clean_responses": "تنظيف الردود للإخراج الصوتي",
+          "openclaw_agent_id": "معرّف الوكيل",
+          "openclaw_session_mode": "وضع الجلسة",
           "openclaw_session_key": "مفتاح الجلسة / معرّف الجلسة",
-          "hermes_session_key": "مفتاح جلسة الذاكرة"
+          "hermes_session_key": "مفتاح جلسة الذاكرة",
+          "system_prompt": "تعليمات النظام"
         },
         "data_description": {
-          "openclaw_session_key": "جلسة OpenClaw المراد استخدامها: مفتاح قصير مثل 'main' أو معرّف جلسة كامل مثل 'agent:main:main'.",
-          "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي."
+          "openclaw_session_key": "يُستخدم فقط عندما يكون وضع الجلسة 'Fixed'. أدخل مفتاحاً قصيراً مثل 'main' أو معرّف جلسة كاملاً مثل agent:main:main.",
+          "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي.",
+          "openclaw_agent_id": "وكيل OpenClaw الذي يردّ على طلبات هذا الملف الشخصي. يجب أن يطابق وكيلاً مضبوطاً في OpenClaw. الافتراضي هو 'main'.",
+          "openclaw_session_mode": "'Per conversation' يمنح كل محادثة في Home Assistant جلسة OpenClaw خاصة بها، فتبقى الأسئلة التالية ضمنها. 'Fixed' يرسل كل الطلبات إلى الجلسة الواحدة المحددة في مفتاح الجلسة.",
+          "system_prompt": "يُرسل إلى OpenClaw مع كل طلب كتعليمات نظام إضافية، مثلاً لتحديد شخصية. اتركه فارغاً لاستخدام تعليمات الوكيل الخاصة. تُضاف غرفة الجهاز الصوتي تلقائياً."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "ابق Ollama نشطا",
           "ollama_num_ctx": "نافذة سياق Ollama",
           "clean_responses": "تنظيف الردود للإخراج الصوتي",
+          "openclaw_agent_id": "معرّف الوكيل",
+          "openclaw_session_mode": "وضع الجلسة",
           "openclaw_session_key": "مفتاح الجلسة / معرّف الجلسة",
           "hermes_url": "عنوان URL لخادم Hermes",
           "hermes_session_key": "مفتاح جلسة الذاكرة"
         },
         "data_description": {
-          "openclaw_session_key": "جلسة OpenClaw المراد استخدامها: مفتاح قصير مثل 'main' أو معرّف جلسة كامل مثل 'agent:main:main'.",
-          "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي."
+          "openclaw_session_key": "يُستخدم فقط عندما يكون وضع الجلسة 'Fixed'. أدخل مفتاحاً قصيراً مثل 'main' أو معرّف جلسة كاملاً مثل agent:main:main.",
+          "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي.",
+          "openclaw_agent_id": "وكيل OpenClaw الذي يردّ على طلبات هذا الملف الشخصي. يجب أن يطابق وكيلاً مضبوطاً في OpenClaw. الافتراضي هو 'main'.",
+          "openclaw_session_mode": "'Per conversation' يمنح كل محادثة في Home Assistant جلسة OpenClaw خاصة بها، فتبقى الأسئلة التالية ضمنها. 'Fixed' يرسل كل الطلبات إلى الجلسة الواحدة المحددة في مفتاح الجلسة."
         }
       },
       "mcp_server": {

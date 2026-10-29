@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Ollama जीवित रखें",
           "ollama_num_ctx": "Ollama संदर्भ विंडो",
           "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ",
+          "openclaw_agent_id": "एजेंट ID",
+          "openclaw_session_mode": "सत्र मोड",
           "openclaw_session_key": "सत्र कुंजी / सत्र ID",
-          "hermes_session_key": "मेमोरी सत्र कुंजी"
+          "hermes_session_key": "मेमोरी सत्र कुंजी",
+          "system_prompt": "सिस्टम प्रॉम्प्ट"
         },
         "data_description": {
-          "openclaw_session_key": "उपयोग करने के लिए OpenClaw सत्र: 'main' जैसी छोटी कुंजी या 'agent:main:main' जैसी पूरी सत्र ID।",
-          "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।"
+          "openclaw_session_key": "केवल तब उपयोग होता है जब सत्र मोड 'Fixed' हो। 'main' जैसी छोटी कुंजी या agent:main:main जैसा पूरा सत्र ID दर्ज करें।",
+          "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।",
+          "openclaw_agent_id": "वह OpenClaw एजेंट जो इस प्रोफ़ाइल के अनुरोधों का उत्तर देता है। यह OpenClaw में कॉन्फ़िगर किए गए एजेंट से मेल खाना चाहिए। डिफ़ॉल्ट 'main' है।",
+          "openclaw_session_mode": "'Per conversation' हर Home Assistant बातचीत को अपना OpenClaw सत्र देता है, और अनुवर्ती प्रश्न उसी में रहते हैं। 'Fixed' सभी अनुरोधों को सत्र कुंजी में तय किए गए एक ही सत्र में भेजता है।",
+          "system_prompt": "हर अनुरोध के साथ OpenClaw को अतिरिक्त सिस्टम प्रॉम्प्ट के रूप में भेजा जाता है, उदाहरण के लिए कोई व्यक्तित्व तय करने के लिए। एजेंट के अपने प्रॉम्प्ट इस्तेमाल करने के लिए इसे खाली छोड़ें। वॉइस सैटेलाइट का कमरा अपने आप जुड़ जाता है।"
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Ollama जीवित रखें",
           "ollama_num_ctx": "Ollama संदर्भ विंडो",
           "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ",
+          "openclaw_agent_id": "एजेंट ID",
+          "openclaw_session_mode": "सत्र मोड",
           "openclaw_session_key": "सत्र कुंजी / सत्र ID",
           "hermes_url": "Hermes सर्वर URL",
           "hermes_session_key": "मेमोरी सत्र कुंजी"
         },
         "data_description": {
-          "openclaw_session_key": "उपयोग करने के लिए OpenClaw सत्र: 'main' जैसी छोटी कुंजी या 'agent:main:main' जैसी पूरी सत्र ID।",
-          "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।"
+          "openclaw_session_key": "केवल तब उपयोग होता है जब सत्र मोड 'Fixed' हो। 'main' जैसी छोटी कुंजी या agent:main:main जैसा पूरा सत्र ID दर्ज करें।",
+          "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।",
+          "openclaw_agent_id": "वह OpenClaw एजेंट जो इस प्रोफ़ाइल के अनुरोधों का उत्तर देता है। यह OpenClaw में कॉन्फ़िगर किए गए एजेंट से मेल खाना चाहिए। डिफ़ॉल्ट 'main' है।",
+          "openclaw_session_mode": "'Per conversation' हर Home Assistant बातचीत को अपना OpenClaw सत्र देता है, और अनुवर्ती प्रश्न उसी में रहते हैं। 'Fixed' सभी अनुरोधों को सत्र कुंजी में तय किए गए एक ही सत्र में भेजता है।"
         }
       },
       "mcp_server": {

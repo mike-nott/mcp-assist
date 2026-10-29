@@ -45,12 +45,18 @@
           "ollama_keep_alive": "保持Ollama活跃",
           "ollama_num_ctx": "Ollama上下文窗口",
           "clean_responses": "清理语音输出响应",
+          "openclaw_agent_id": "代理 ID",
+          "openclaw_session_mode": "会话模式",
           "openclaw_session_key": "会话密钥 / 会话ID",
-          "hermes_session_key": "记忆会话密钥"
+          "hermes_session_key": "记忆会话密钥",
+          "system_prompt": "系统提示词"
         },
         "data_description": {
-          "openclaw_session_key": "要使用的OpenClaw会话:如 'main' 的短密钥,或如 'agent:main:main' 的完整会话ID。",
-          "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。"
+          "openclaw_session_key": "仅在会话模式为 'Fixed' 时使用。可输入 'main' 这样的短密钥，或 agent:main:main 这样的完整会话 ID。",
+          "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。",
+          "openclaw_agent_id": "负责回应此配置文件请求的 OpenClaw 代理。必须与 OpenClaw 中已配置的代理一致。默认值为 'main'。",
+          "openclaw_session_mode": "'Per conversation' 为每个 Home Assistant 对话分配独立的 OpenClaw 会话，后续提问保留在该会话中。'Fixed' 将所有请求发送到会话密钥中指定的同一个会话。",
+          "system_prompt": "随每个请求作为额外的系统提示词发送给 OpenClaw，例如用于设定人设。留空则使用代理自己的提示词。语音卫星所在的房间会自动添加。"
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "保持Ollama活跃",
           "ollama_num_ctx": "Ollama上下文窗口",
           "clean_responses": "清理语音输出响应",
+          "openclaw_agent_id": "代理 ID",
+          "openclaw_session_mode": "会话模式",
           "openclaw_session_key": "会话密钥 / 会话ID",
           "hermes_url": "Hermes服务器URL",
           "hermes_session_key": "记忆会话密钥"
         },
         "data_description": {
-          "openclaw_session_key": "要使用的OpenClaw会话:如 'main' 的短密钥,或如 'agent:main:main' 的完整会话ID。",
-          "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。"
+          "openclaw_session_key": "仅在会话模式为 'Fixed' 时使用。可输入 'main' 这样的短密钥，或 agent:main:main 这样的完整会话 ID。",
+          "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。",
+          "openclaw_agent_id": "负责回应此配置文件请求的 OpenClaw 代理。必须与 OpenClaw 中已配置的代理一致。默认值为 'main'。",
+          "openclaw_session_mode": "'Per conversation' 为每个 Home Assistant 对话分配独立的 OpenClaw 会话，后续提问保留在该会话中。'Fixed' 将所有请求发送到会话密钥中指定的同一个会话。"
         }
       },
       "mcp_server": {

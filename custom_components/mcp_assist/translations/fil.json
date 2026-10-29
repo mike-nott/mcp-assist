@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Panatilihing Aktibo ang Ollama",
           "ollama_num_ctx": "Ollama Context Window",
           "clean_responses": "Linisin ang mga Tugon para sa Voice Output",
+          "openclaw_agent_id": "Agent ID",
+          "openclaw_session_mode": "Session Mode",
           "openclaw_session_key": "Session Key / Session ID",
-          "hermes_session_key": "Session Key ng Memorya"
+          "hermes_session_key": "Session Key ng Memorya",
+          "system_prompt": "Mga Tagubilin ng Sistema"
         },
         "data_description": {
-          "openclaw_session_key": "OpenClaw session na gagamitin: isang maikling key tulad ng 'main' o isang buong session ID tulad ng 'agent:main:main'.",
-          "hermes_session_key": "Stable na key na tumutukoy sa pangmatagalang memorya ng Hermes para sa profile na ito."
+          "openclaw_session_key": "Ginagamit lamang kapag 'Fixed' ang Session Mode. Maglagay ng maikling key tulad ng 'main' o buong session ID tulad ng agent:main:main.",
+          "hermes_session_key": "Stable na key na tumutukoy sa pangmatagalang memorya ng Hermes para sa profile na ito.",
+          "openclaw_agent_id": "Ang OpenClaw agent na sumasagot sa mga kahilingan ng profile na ito. Dapat itong tumugma sa agent na naka-configure sa OpenClaw. Ang default ay 'main'.",
+          "openclaw_session_mode": "Binibigyan ng 'Per conversation' ang bawat Home Assistant conversation ng sarili nitong OpenClaw session, at nananatili roon ang mga follow-up na tanong. Ipinapadala ng 'Fixed' ang lahat ng kahilingan sa iisang session na itinakda sa Session Key.",
+          "system_prompt": "Ipinapadala sa OpenClaw kasama ng bawat kahilingan bilang karagdagang system prompt, halimbawa para magtakda ng persona. Iwanang blangko para gamitin ang sariling mga prompt ng agent. Awtomatikong idinaragdag ang kuwarto ng voice satellite."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Panatilihing Aktibo ang Ollama",
           "ollama_num_ctx": "Ollama Context Window",
           "clean_responses": "Linisin ang mga Tugon para sa Voice Output",
+          "openclaw_agent_id": "Agent ID",
+          "openclaw_session_mode": "Session Mode",
           "openclaw_session_key": "Session Key / Session ID",
           "hermes_url": "URL ng Hermes Server",
           "hermes_session_key": "Session Key ng Memorya"
         },
         "data_description": {
-          "openclaw_session_key": "OpenClaw session na gagamitin: isang maikling key tulad ng 'main' o isang buong session ID tulad ng 'agent:main:main'.",
-          "hermes_session_key": "Stable na key na tumutukoy sa pangmatagalang memorya ng Hermes para sa profile na ito."
+          "openclaw_session_key": "Ginagamit lamang kapag 'Fixed' ang Session Mode. Maglagay ng maikling key tulad ng 'main' o buong session ID tulad ng agent:main:main.",
+          "hermes_session_key": "Stable na key na tumutukoy sa pangmatagalang memorya ng Hermes para sa profile na ito.",
+          "openclaw_agent_id": "Ang OpenClaw agent na sumasagot sa mga kahilingan ng profile na ito. Dapat itong tumugma sa agent na naka-configure sa OpenClaw. Ang default ay 'main'.",
+          "openclaw_session_mode": "Binibigyan ng 'Per conversation' ang bawat Home Assistant conversation ng sarili nitong OpenClaw session, at nananatili roon ang mga follow-up na tanong. Ipinapadala ng 'Fixed' ang lahat ng kahilingan sa iisang session na itinakda sa Session Key."
         }
       },
       "mcp_server": {

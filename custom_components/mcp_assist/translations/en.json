@@ -53,12 +53,18 @@
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
           "clean_responses": "Clean Responses for Voice Output",
+          "openclaw_agent_id": "Agent ID",
+          "openclaw_session_mode": "Session Mode",
           "openclaw_session_key": "Session Key / Session ID",
-          "hermes_session_key": "Memory Session Key"
+          "hermes_session_key": "Memory Session Key",
+          "system_prompt": "System Prompt"
         },
         "data_description": {
-          "openclaw_session_key": "OpenClaw session to use: a short key like 'main' or a full session ID like 'agent:main:main'.",
-          "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile."
+          "openclaw_session_key": "Only used when Session Mode is 'Fixed'. Enter a short key such as 'main' or a full session ID such as agent:main:main.",
+          "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile.",
+          "openclaw_agent_id": "The OpenClaw agent that answers this profile's requests. It must match an agent configured in OpenClaw. Default is 'main'.",
+          "openclaw_session_mode": "'Per conversation' gives each Home Assistant conversation its own OpenClaw session, so follow-up questions stay in it. 'Fixed' sends every request to the single session set in Session Key.",
+          "system_prompt": "Sent to OpenClaw with every request as an extra system prompt, for example to set a persona. Leave blank to use the agent's own prompts. The satellite's room is added automatically."
         }
       },
       "mcp_server": {
@@ -121,13 +127,17 @@
           "openclaw_port": "Gateway Port",
           "openclaw_token": "Gateway Token",
           "openclaw_use_ssl": "Use SSL/TLS",
+          "openclaw_agent_id": "Agent ID",
+          "openclaw_session_mode": "Session Mode",
           "openclaw_session_key": "Session Key / Session ID",
           "hermes_url": "Hermes Server URL",
           "hermes_session_key": "Memory Session Key"
         },
         "data_description": {
-          "openclaw_session_key": "OpenClaw session to use: a short key like 'main' or a full session ID like 'agent:main:main'.",
-          "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile."
+          "openclaw_session_key": "Only used when Session Mode is 'Fixed'. Enter a short key such as 'main' or a full session ID such as agent:main:main.",
+          "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile.",
+          "openclaw_agent_id": "The OpenClaw agent that answers this profile's requests. It must match an agent configured in OpenClaw. Default is 'main'.",
+          "openclaw_session_mode": "'Per conversation' gives each Home Assistant conversation its own OpenClaw session, so follow-up questions stay in it. 'Fixed' sends every request to the single session set in Session Key."
         }
       },
       "mcp_server": {

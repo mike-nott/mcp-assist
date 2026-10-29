@@ -466,12 +466,20 @@ class OpenClawClient:
                 pass
             self._ws = None
 
-    async def send_message(self, text: str, session_key: str) -> str:
+    async def send_message(
+        self,
+        text: str,
+        session_key: str,
+        agent_id: Optional[str] = None,
+        extra_system_prompt: Optional[str] = None,
+    ) -> str:
         """Send a message to the OpenClaw agent and return the response.
 
         Args:
             text: User message text
             session_key: OpenClaw session key (e.g., "main")
+            agent_id: OpenClaw agent to run (e.g., "voice")
+            extra_system_prompt: Extra system prompt for this run
 
         Returns:
             The agent's response text
@@ -493,8 +501,18 @@ class OpenClawClient:
         idempotency_key = str(uuid.uuid4())
 
         # The message is sent unmodified: the OpenClaw agent's own prompts
-        # (soul/agent/memory) govern style, and TTS formatting is handled
-        # downstream by the clean_responses option
+        # (soul/agent/memory) govern style, plus anything the profile adds via
+        # extraSystemPrompt. TTS formatting is handled downstream by the
+        # clean_responses option
+        params: Dict[str, Any] = {
+            "message": text,
+            "sessionKey": session_key,
+            "idempotencyKey": idempotency_key,
+        }
+        if agent_id:
+            params["agentId"] = agent_id
+        if extra_system_prompt:
+            params["extraSystemPrompt"] = extra_system_prompt
 
         # Register the response future before sending so a fast acknowledgment
         # processed during the send await cannot be dropped.
@@ -506,11 +524,7 @@ class OpenClawClient:
                 "type": "req",
                 "id": request_id,
                 "method": "agent",
-                "params": {
-                    "message": text,
-                    "sessionKey": session_key,
-                    "idempotencyKey": idempotency_key,
-                },
+                "params": params,
             }))
         except Exception as err:
             self._pending_requests.pop(request_id, None)

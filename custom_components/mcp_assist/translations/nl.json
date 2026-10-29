@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Ollama actief houden",
           "ollama_num_ctx": "Ollama contextvenster",
           "clean_responses": "Antwoorden opschonen voor spraakuitvoer",
+          "openclaw_agent_id": "Agent-ID",
+          "openclaw_session_mode": "Sessiemodus",
           "openclaw_session_key": "Sessiesleutel / sessie-ID",
-          "hermes_session_key": "Geheugensessiesleutel"
+          "hermes_session_key": "Geheugensessiesleutel",
+          "system_prompt": "Systeeminstructies"
         },
         "data_description": {
-          "openclaw_session_key": "Te gebruiken OpenClaw-sessie: een korte sleutel zoals 'main' of een volledige sessie-ID zoals 'agent:main:main'.",
-          "hermes_session_key": "Stabiele sleutel die het langetermijngeheugen van Hermes voor dit profiel afbakent."
+          "openclaw_session_key": "Alleen gebruikt als Sessiemodus 'Fixed' is. Voer een korte sleutel in zoals 'main' of een volledige sessie-ID zoals agent:main:main.",
+          "hermes_session_key": "Stabiele sleutel die het langetermijngeheugen van Hermes voor dit profiel afbakent.",
+          "openclaw_agent_id": "De OpenClaw-agent die de verzoeken van dit profiel beantwoordt. Deze moet overeenkomen met een agent die in OpenClaw is ingesteld. Standaard is 'main'.",
+          "openclaw_session_mode": "'Per conversation' geeft elk gesprek in Home Assistant een eigen OpenClaw-sessie, waarin vervolgvragen blijven. 'Fixed' stuurt alle verzoeken naar de ene sessie die bij Sessiesleutel is ingesteld.",
+          "system_prompt": "Wordt bij elk verzoek als extra systeeminstructie naar OpenClaw gestuurd, bijvoorbeeld om een persona in te stellen. Laat leeg om de eigen instructies van de agent te gebruiken. De ruimte van de spraaksatelliet wordt automatisch toegevoegd."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Ollama actief houden",
           "ollama_num_ctx": "Ollama contextvenster",
           "clean_responses": "Antwoorden opschonen voor spraakuitvoer",
+          "openclaw_agent_id": "Agent-ID",
+          "openclaw_session_mode": "Sessiemodus",
           "openclaw_session_key": "Sessiesleutel / sessie-ID",
           "hermes_url": "Hermes-server-URL",
           "hermes_session_key": "Geheugensessiesleutel"
         },
         "data_description": {
-          "openclaw_session_key": "Te gebruiken OpenClaw-sessie: een korte sleutel zoals 'main' of een volledige sessie-ID zoals 'agent:main:main'.",
-          "hermes_session_key": "Stabiele sleutel die het langetermijngeheugen van Hermes voor dit profiel afbakent."
+          "openclaw_session_key": "Alleen gebruikt als Sessiemodus 'Fixed' is. Voer een korte sleutel in zoals 'main' of een volledige sessie-ID zoals agent:main:main.",
+          "hermes_session_key": "Stabiele sleutel die het langetermijngeheugen van Hermes voor dit profiel afbakent.",
+          "openclaw_agent_id": "De OpenClaw-agent die de verzoeken van dit profiel beantwoordt. Deze moet overeenkomen met een agent die in OpenClaw is ingesteld. Standaard is 'main'.",
+          "openclaw_session_mode": "'Per conversation' geeft elk gesprek in Home Assistant een eigen OpenClaw-sessie, waarin vervolgvragen blijven. 'Fixed' stuurt alle verzoeken naar de ene sessie die bij Sessiesleutel is ingesteld."
         }
       },
       "mcp_server": {

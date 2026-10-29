@@ -94,7 +94,12 @@ from .const import (
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
     CONF_OPENCLAW_SESSION_KEY,
+    CONF_OPENCLAW_AGENT_ID,
+    CONF_OPENCLAW_SESSION_MODE,
+    OPENCLAW_SESSION_MODE_PER_CONVERSATION,
+    OPENCLAW_SESSION_MODE_FIXED,
     DEFAULT_OPENCLAW_SESSION_KEY,
+    DEFAULT_OPENCLAW_AGENT_ID,
     CONF_HERMES_URL,
     CONF_HERMES_SESSION_KEY,
     DEFAULT_HERMES_URL,
@@ -422,6 +427,43 @@ class MCPAssistConversationEntity(ConversationEntity):
             CONF_OPENCLAW_SESSION_KEY,
             self.entry.data.get(CONF_OPENCLAW_SESSION_KEY, DEFAULT_OPENCLAW_SESSION_KEY),
         )
+
+    @property
+    def openclaw_agent_id(self) -> str:
+        """Get OpenClaw agent ID (dynamic)."""
+        agent_id = self.entry.options.get(
+            CONF_OPENCLAW_AGENT_ID,
+            self.entry.data.get(CONF_OPENCLAW_AGENT_ID, DEFAULT_OPENCLAW_AGENT_ID),
+        )
+        return (agent_id or "").strip().lower() or DEFAULT_OPENCLAW_AGENT_ID
+
+    @property
+    def openclaw_session_mode(self) -> str:
+        """Get OpenClaw session mode (dynamic).
+
+        Profiles created before the setting existed have no stored value and
+        keep their fixed session key.
+        """
+        return self.entry.options.get(
+            CONF_OPENCLAW_SESSION_MODE,
+            self.entry.data.get(CONF_OPENCLAW_SESSION_MODE, OPENCLAW_SESSION_MODE_FIXED),
+        )
+
+    def _openclaw_session_target(self, conversation_id: str) -> tuple[str, str | None]:
+        """Return the OpenClaw session key and agent ID for this turn.
+
+        A key qualified as agent:<id>:... must match agentId or the gateway
+        rejects the run, so an explicitly qualified fixed key is sent without
+        agentId and decides the agent itself.
+        """
+        agent_id = self.openclaw_agent_id
+        if self.openclaw_session_mode == OPENCLAW_SESSION_MODE_PER_CONVERSATION:
+            return f"agent:{agent_id}:ha-{conversation_id.lower()}", agent_id
+
+        session_key = (self.session_key or "").strip() or DEFAULT_OPENCLAW_SESSION_KEY
+        if session_key.lower().startswith("agent:"):
+            return session_key, None
+        return session_key, agent_id
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant."""
@@ -804,8 +846,36 @@ class MCPAssistConversationEntity(ConversationEntity):
         if not client:
             raise RuntimeError("OpenClaw client not available — check integration setup")
 
-        _LOGGER.info(f"📡 Sending to OpenClaw (session: {self.session_key})...")
-        response_text = await client.send_message(user_input.text, self.session_key)
+        session_key, agent_id = self._openclaw_session_target(conversation_id)
+
+        # Persona from the profile's System Prompt, plus the satellite's room
+        # so requests like "turn the lights on" know which room is meant
+        prompt_parts = []
+        system_prompt = (
+            self.entry.options.get(
+                CONF_SYSTEM_PROMPT, self.entry.data.get(CONF_SYSTEM_PROMPT, "")
+            )
+            or ""
+        ).strip()
+        if system_prompt:
+            prompt_parts.append(system_prompt)
+        current_area = await self._get_current_area(user_input)
+        if current_area != "Unknown":
+            prompt_parts.append(f"Speaking from: {current_area}")
+        extra_system_prompt = "\n\n".join(prompt_parts)
+
+        _LOGGER.info(
+            "📡 Sending to OpenClaw (session: %s, agent: %s, extra prompt: %d chars)...",
+            session_key,
+            agent_id or "from session key",
+            len(extra_system_prompt),
+        )
+        response_text = await client.send_message(
+            user_input.text,
+            session_key,
+            agent_id=agent_id,
+            extra_system_prompt=extra_system_prompt,
+        )
         _LOGGER.info(
             f"✅ OpenClaw response received, length: %d", len(response_text)
         )

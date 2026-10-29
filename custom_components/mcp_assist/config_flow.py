@@ -78,10 +78,16 @@ from .const import (
     CONF_OPENCLAW_TOKEN,
     CONF_OPENCLAW_USE_SSL,
     CONF_OPENCLAW_SESSION_KEY,
+    CONF_OPENCLAW_AGENT_ID,
+    CONF_OPENCLAW_SESSION_MODE,
+    OPENCLAW_SESSION_MODE_PER_CONVERSATION,
+    OPENCLAW_SESSION_MODE_FIXED,
     DEFAULT_OPENCLAW_HOST,
     DEFAULT_OPENCLAW_PORT,
     DEFAULT_OPENCLAW_USE_SSL,
     DEFAULT_OPENCLAW_SESSION_KEY,
+    DEFAULT_OPENCLAW_AGENT_ID,
+    DEFAULT_OPENCLAW_SESSION_MODE,
     CONF_HERMES_URL,
     CONF_HERMES_SESSION_KEY,
     DEFAULT_HERMES_URL,
@@ -463,6 +469,31 @@ async def validate_lmstudio_connection(
         raise CannotConnect(f"Failed to connect to LM Studio: {err}") from err
 
     return {"title": f"LM Studio ({model_name})"}
+
+
+def _openclaw_session_schema(
+    agent_id: str, session_mode: str, session_key: str, system_prompt: str
+) -> dict:
+    """Build the OpenClaw agent, session and prompt fields."""
+    return {
+        vol.Optional(CONF_OPENCLAW_AGENT_ID, default=agent_id): str,
+        vol.Required(CONF_OPENCLAW_SESSION_MODE, default=session_mode): SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    {
+                        "value": OPENCLAW_SESSION_MODE_PER_CONVERSATION,
+                        "label": "Per conversation",
+                    },
+                    {"value": OPENCLAW_SESSION_MODE_FIXED, "label": "Fixed"},
+                ],
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Optional(CONF_OPENCLAW_SESSION_KEY, default=session_key): str,
+        vol.Optional(
+            CONF_SYSTEM_PROMPT, description={"suggested_value": system_prompt}
+        ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)),
+    }
 
 
 class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -962,9 +993,21 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 session_key_default = DEFAULT_OPENCLAW_SESSION_KEY
             advanced_schema_dict = {
                 vol.Required(CONF_CONTROL_HA, default=DEFAULT_CONTROL_HA): bool,
-                vol.Optional(
-                    session_key_conf, default=session_key_default
-                ): str,
+            }
+            if server_type == SERVER_TYPE_OPENCLAW:
+                advanced_schema_dict.update(
+                    _openclaw_session_schema(
+                        DEFAULT_OPENCLAW_AGENT_ID,
+                        DEFAULT_OPENCLAW_SESSION_MODE,
+                        DEFAULT_OPENCLAW_SESSION_KEY,
+                        "",
+                    )
+                )
+            else:
+                advanced_schema_dict[
+                    vol.Optional(session_key_conf, default=session_key_default)
+                ] = str
+            advanced_schema_dict.update({
                 vol.Required(
                     CONF_RESPONSE_MODE, default=DEFAULT_RESPONSE_MODE
                 ): SelectSelector(
@@ -991,7 +1034,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Coerce(int), vol.Range(min=5, max=300)
                 ),
                 vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
-            }
+            })
         else:
             # Other servers - show all fields
             advanced_schema_dict = {
@@ -1264,6 +1307,12 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         user_input[CONF_MODEL_NAME] = "main"
                     if CONF_SYSTEM_PROMPT not in user_input:
                         user_input[CONF_SYSTEM_PROMPT] = ""  # OpenClaw manages its own
+                    # Cleared fields are omitted, so fall back to defaults here
+                    # rather than to the values stored at setup
+                    if not (user_input.get(CONF_OPENCLAW_AGENT_ID) or "").strip():
+                        user_input[CONF_OPENCLAW_AGENT_ID] = DEFAULT_OPENCLAW_AGENT_ID
+                    if not (user_input.get(CONF_OPENCLAW_SESSION_KEY) or "").strip():
+                        user_input[CONF_OPENCLAW_SESSION_KEY] = DEFAULT_OPENCLAW_SESSION_KEY
                 elif server_type == SERVER_TYPE_HERMES:
                     if CONF_SYSTEM_PROMPT not in user_input:
                         user_input[CONF_SYSTEM_PROMPT] = ""  # Hermes manages its own
@@ -1493,22 +1542,51 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             response_mode_value = options.get(
                 CONF_RESPONSE_MODE, options.get(CONF_FOLLOW_UP_MODE, DEFAULT_RESPONSE_MODE)
             )
-            schema_dict.update(
-                {
-                    vol.Required(
+            schema_dict[
+                vol.Required(
+                    CONF_CONTROL_HA,
+                    default=options.get(
                         CONF_CONTROL_HA,
-                        default=options.get(
-                            CONF_CONTROL_HA,
-                            data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA),
+                        data.get(CONF_CONTROL_HA, DEFAULT_CONTROL_HA),
+                    ),
+                )
+            ] = bool
+            if server_type == SERVER_TYPE_OPENCLAW:
+                # Profiles created before the session mode setting existed
+                # keep their fixed session key
+                schema_dict.update(
+                    _openclaw_session_schema(
+                        options.get(
+                            CONF_OPENCLAW_AGENT_ID,
+                            data.get(CONF_OPENCLAW_AGENT_ID, DEFAULT_OPENCLAW_AGENT_ID),
                         ),
-                    ): bool,
+                        options.get(
+                            CONF_OPENCLAW_SESSION_MODE,
+                            data.get(
+                                CONF_OPENCLAW_SESSION_MODE, OPENCLAW_SESSION_MODE_FIXED
+                            ),
+                        ),
+                        options.get(
+                            session_key_conf,
+                            data.get(session_key_conf, session_key_default),
+                        ),
+                        options.get(
+                            CONF_SYSTEM_PROMPT, data.get(CONF_SYSTEM_PROMPT, "")
+                        ),
+                    )
+                )
+            else:
+                schema_dict[
                     vol.Optional(
                         session_key_conf,
                         default=options.get(
                             session_key_conf,
                             data.get(session_key_conf, session_key_default),
                         ),
-                    ): str,
+                    )
+                ] = str
+            schema_dict.update(
+                {
                     vol.Required(
                         CONF_RESPONSE_MODE, default=response_mode_value
                     ): SelectSelector(

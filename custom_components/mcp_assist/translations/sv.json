@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Hall Ollama aktiv",
           "ollama_num_ctx": "Ollama kontextfonster",
           "clean_responses": "Rensa svar för röstutmatning",
+          "openclaw_agent_id": "Agent-ID",
+          "openclaw_session_mode": "Sessionsläge",
           "openclaw_session_key": "Sessionsnyckel / session-ID",
-          "hermes_session_key": "Sessionsnyckel för minne"
+          "hermes_session_key": "Sessionsnyckel för minne",
+          "system_prompt": "Systeminstruktioner"
         },
         "data_description": {
-          "openclaw_session_key": "OpenClaw-session som ska användas: en kort nyckel som 'main' eller ett fullständigt session-ID som 'agent:main:main'.",
-          "hermes_session_key": "Stabil nyckel som avgränsar Hermes långtidsminne för denna profil."
+          "openclaw_session_key": "Används bara när Sessionsläge är 'Fixed'. Ange en kort nyckel som 'main' eller ett fullständigt session-ID som agent:main:main.",
+          "hermes_session_key": "Stabil nyckel som avgränsar Hermes långtidsminne för denna profil.",
+          "openclaw_agent_id": "OpenClaw-agenten som svarar på den här profilens förfrågningar. Den måste motsvara en agent som är konfigurerad i OpenClaw. Standard är 'main'.",
+          "openclaw_session_mode": "'Per conversation' ger varje samtal i Home Assistant en egen OpenClaw-session, och uppföljningsfrågor stannar i den. 'Fixed' skickar alla förfrågningar till den enda session som anges i Sessionsnyckel.",
+          "system_prompt": "Skickas till OpenClaw med varje förfrågan som en extra systeminstruktion, till exempel för att ange en persona. Lämna tomt för att använda agentens egna instruktioner. Röstsatellitens rum läggs till automatiskt."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Hall Ollama aktiv",
           "ollama_num_ctx": "Ollama kontextfonster",
           "clean_responses": "Rensa svar för röstutmatning",
+          "openclaw_agent_id": "Agent-ID",
+          "openclaw_session_mode": "Sessionsläge",
           "openclaw_session_key": "Sessionsnyckel / session-ID",
           "hermes_url": "Hermes server-URL",
           "hermes_session_key": "Sessionsnyckel för minne"
         },
         "data_description": {
-          "openclaw_session_key": "OpenClaw-session som ska användas: en kort nyckel som 'main' eller ett fullständigt session-ID som 'agent:main:main'.",
-          "hermes_session_key": "Stabil nyckel som avgränsar Hermes långtidsminne för denna profil."
+          "openclaw_session_key": "Används bara när Sessionsläge är 'Fixed'. Ange en kort nyckel som 'main' eller ett fullständigt session-ID som agent:main:main.",
+          "hermes_session_key": "Stabil nyckel som avgränsar Hermes långtidsminne för denna profil.",
+          "openclaw_agent_id": "OpenClaw-agenten som svarar på den här profilens förfrågningar. Den måste motsvara en agent som är konfigurerad i OpenClaw. Standard är 'main'.",
+          "openclaw_session_mode": "'Per conversation' ger varje samtal i Home Assistant en egen OpenClaw-session, och uppföljningsfrågor stannar i den. 'Fixed' skickar alla förfrågningar till den enda session som anges i Sessionsnyckel."
         }
       },
       "mcp_server": {

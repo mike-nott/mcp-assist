@@ -45,12 +45,18 @@
           "ollama_keep_alive": "Ollamaを維持",
           "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
           "clean_responses": "音声出力用にレスポンスを整形",
+          "openclaw_agent_id": "エージェントID",
+          "openclaw_session_mode": "セッションモード",
           "openclaw_session_key": "セッションキー / セッションID",
-          "hermes_session_key": "メモリセッションキー"
+          "hermes_session_key": "メモリセッションキー",
+          "system_prompt": "システムプロンプト"
         },
         "data_description": {
-          "openclaw_session_key": "使用するOpenClawセッション:'main' のような短いキー、または 'agent:main:main' のような完全なセッションID。",
-          "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。"
+          "openclaw_session_key": "セッションモードが 'Fixed' の場合のみ使用されます。'main' のような短いキーか、agent:main:main のような完全なセッションIDを入力します。",
+          "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。",
+          "openclaw_agent_id": "このプロファイルのリクエストに応答するOpenClawエージェントです。OpenClawで設定済みのエージェントと一致する必要があります。デフォルトは 'main' です。",
+          "openclaw_session_mode": "'Per conversation' は、Home Assistantの会話ごとに専用のOpenClawセッションを割り当て、フォローアップの質問はその中で続きます。'Fixed' は、すべてのリクエストをセッションキーで指定した1つのセッションに送ります。",
+          "system_prompt": "追加のシステムプロンプトとして、リクエストごとにOpenClawへ送信されます。たとえばペルソナの設定に使えます。エージェント自身のプロンプトを使う場合は空欄にしてください。音声サテライトの部屋は自動的に追加されます。"
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "ollama_keep_alive": "Ollamaを維持",
           "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
           "clean_responses": "音声出力用にレスポンスを整形",
+          "openclaw_agent_id": "エージェントID",
+          "openclaw_session_mode": "セッションモード",
           "openclaw_session_key": "セッションキー / セッションID",
           "hermes_url": "HermesサーバーURL",
           "hermes_session_key": "メモリセッションキー"
         },
         "data_description": {
-          "openclaw_session_key": "使用するOpenClawセッション:'main' のような短いキー、または 'agent:main:main' のような完全なセッションID。",
-          "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。"
+          "openclaw_session_key": "セッションモードが 'Fixed' の場合のみ使用されます。'main' のような短いキーか、agent:main:main のような完全なセッションIDを入力します。",
+          "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。",
+          "openclaw_agent_id": "このプロファイルのリクエストに応答するOpenClawエージェントです。OpenClawで設定済みのエージェントと一致する必要があります。デフォルトは 'main' です。",
+          "openclaw_session_mode": "'Per conversation' は、Home Assistantの会話ごとに専用のOpenClawセッションを割り当て、フォローアップの質問はその中で続きます。'Fixed' は、すべてのリクエストをセッションキーで指定した1つのセッションに送ります。"
         }
       },
       "mcp_server": {

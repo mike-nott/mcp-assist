@@ -45,12 +45,18 @@
           "debug_mode": "Debug-Modus",
           "ollama_keep_alive": "Ollama am Leben halten",
           "ollama_num_ctx": "Ollama Kontextfenster",
+          "openclaw_agent_id": "Agent-ID",
+          "openclaw_session_mode": "Sitzungsmodus",
           "openclaw_session_key": "Sitzungsschlüssel / Sitzungs-ID",
-          "hermes_session_key": "Speicher-Sitzungsschlüssel"
+          "hermes_session_key": "Speicher-Sitzungsschlüssel",
+          "system_prompt": "System-Prompt"
         },
         "data_description": {
-          "openclaw_session_key": "Zu verwendende OpenClaw-Sitzung: ein kurzer Schlüssel wie 'main' oder eine vollständige Sitzungs-ID wie 'agent:main:main'.",
-          "hermes_session_key": "Stabiler Schlüssel, der das Langzeitgedächtnis von Hermes für dieses Profil abgrenzt."
+          "openclaw_session_key": "Wird nur verwendet, wenn der Sitzungsmodus 'Fixed' ist. Geben Sie einen kurzen Schlüssel wie 'main' oder eine vollständige Sitzungs-ID wie agent:main:main ein.",
+          "hermes_session_key": "Stabiler Schlüssel, der das Langzeitgedächtnis von Hermes für dieses Profil abgrenzt.",
+          "openclaw_agent_id": "Der OpenClaw-Agent, der die Anfragen dieses Profils beantwortet. Er muss einem in OpenClaw eingerichteten Agenten entsprechen. Standard ist 'main'.",
+          "openclaw_session_mode": "'Per conversation' gibt jeder Unterhaltung in Home Assistant eine eigene OpenClaw-Sitzung, in der Folgefragen bleiben. 'Fixed' sendet alle Anfragen an die eine Sitzung aus dem Sitzungsschlüssel.",
+          "system_prompt": "Wird mit jeder Anfrage als zusätzlicher System-Prompt an OpenClaw gesendet, zum Beispiel um eine Persona festzulegen. Leer lassen, um die eigenen Prompts des Agenten zu verwenden. Der Raum des Sprachsatelliten wird automatisch hinzugefügt."
         }
       },
       "mcp_server": {
@@ -107,13 +113,17 @@
           "debug_mode": "Debug-Modus",
           "ollama_keep_alive": "Ollama am Leben halten",
           "ollama_num_ctx": "Ollama Kontextfenster",
+          "openclaw_agent_id": "Agent-ID",
+          "openclaw_session_mode": "Sitzungsmodus",
           "openclaw_session_key": "Sitzungsschlüssel / Sitzungs-ID",
           "hermes_url": "Hermes-Server-URL",
           "hermes_session_key": "Speicher-Sitzungsschlüssel"
         },
         "data_description": {
-          "openclaw_session_key": "Zu verwendende OpenClaw-Sitzung: ein kurzer Schlüssel wie 'main' oder eine vollständige Sitzungs-ID wie 'agent:main:main'.",
-          "hermes_session_key": "Stabiler Schlüssel, der das Langzeitgedächtnis von Hermes für dieses Profil abgrenzt."
+          "openclaw_session_key": "Wird nur verwendet, wenn der Sitzungsmodus 'Fixed' ist. Geben Sie einen kurzen Schlüssel wie 'main' oder eine vollständige Sitzungs-ID wie agent:main:main ein.",
+          "hermes_session_key": "Stabiler Schlüssel, der das Langzeitgedächtnis von Hermes für dieses Profil abgrenzt.",
+          "openclaw_agent_id": "Der OpenClaw-Agent, der die Anfragen dieses Profils beantwortet. Er muss einem in OpenClaw eingerichteten Agenten entsprechen. Standard ist 'main'.",
+          "openclaw_session_mode": "'Per conversation' gibt jeder Unterhaltung in Home Assistant eine eigene OpenClaw-Sitzung, in der Folgefragen bleiben. 'Fixed' sendet alle Anfragen an die eine Sitzung aus dem Sitzungsschlüssel."
         }
       },
       "mcp_server": {
