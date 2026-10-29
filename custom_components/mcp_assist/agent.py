@@ -917,18 +917,23 @@ class MCPAssistConversationEntity(ConversationEntity):
         if system_prompt:
             prompt_parts.append(system_prompt)
         current_area = await self._get_current_area(user_input)
+        message = user_input.text
         if current_area != "Unknown":
             prompt_parts.append(f"Speaking from: {current_area}")
+            # OpenClaw's voice-assist plugin routes announcements before the
+            # prompt is built, so it reads the room from the message text
+            message = f"[Room: {current_area}] {user_input.text}"
         extra_system_prompt = "\n\n".join(prompt_parts)
 
         _LOGGER.info(
-            "📡 Sending to OpenClaw (session: %s, agent: %s, extra prompt: %d chars)...",
+            "📡 Sending to OpenClaw (session: %s, agent: %s, room: %s, extra prompt: %d chars)...",
             session_key,
             agent_id or "from session key",
+            current_area,
             len(extra_system_prompt),
         )
         response_text = await client.send_message(
-            user_input.text,
+            message,
             session_key,
             agent_id=agent_id,
             extra_system_prompt=extra_system_prompt,
