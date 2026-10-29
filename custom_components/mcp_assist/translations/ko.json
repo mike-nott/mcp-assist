@@ -17,6 +17,9 @@
           "api_key": "API 키",
           "mcp_port": "MCP 서버 포트",
           "hermes_url": "Hermes 서버 URL"
+        },
+        "data_description": {
+          "api_key": "클라우드 제공업체에는 필수입니다. 로컬 서버(LM Studio, llama.cpp, Ollama, vLLM)에서는 선택 사항이며, 서버가 키를 요구하지 않으면 비워 두세요."
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "후속 문구",
           "end_words": "대화 종료 단어",
           "timeout": "응답 시간 초과",
+          "thinking_mode": "사고",
           "debug_mode": "디버그 모드",
           "ollama_keep_alive": "Ollama 활성 유지",
           "ollama_num_ctx": "Ollama 컨텍스트 창",
@@ -56,7 +60,8 @@
           "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키.",
           "openclaw_agent_id": "이 프로필의 요청에 응답하는 OpenClaw 에이전트입니다. OpenClaw에 설정된 에이전트와 일치해야 합니다. 기본값은 'main'입니다.",
           "openclaw_session_mode": "'Per conversation'은 Home Assistant 대화마다 별도의 OpenClaw 세션을 주며, 후속 질문은 그 세션에 남습니다. 'Fixed'는 모든 요청을 세션 키에 지정한 하나의 세션으로 보냅니다.",
-          "system_prompt": "모든 요청에 추가 시스템 프롬프트로 OpenClaw에 전송되며, 예를 들어 페르소나를 정할 때 쓸 수 있습니다. 에이전트 자체 프롬프트를 사용하려면 비워 두세요. 음성 새틀라이트의 방은 자동으로 추가됩니다."
+          "system_prompt": "모든 요청에 추가 시스템 프롬프트로 OpenClaw에 전송되며, 예를 들어 페르소나를 정할 때 쓸 수 있습니다. 에이전트 자체 프롬프트를 사용하려면 비워 두세요. 음성 새틀라이트의 방은 자동으로 추가됩니다.",
+          "thinking_mode": "답변 전에 생각하는 모델의 추론을 제어합니다. 끄기가 음성에 가장 빠릅니다. 서버 기본값은 아무것도 보내지 않습니다. 모든 서버가 따르지는 않습니다(LM Studio에서는 불안정)."
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "MCP 서버 포트",
           "search_provider": "웹 검색",
           "brave_api_key": "Brave Search API 키",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "추가 허용 IP/범위",
           "enable_gap_filling": "스마트 엔티티 인덱스 활성화",
           "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "SearXNG 인스턴스 주소입니다(예: http://192.168.1.10:8888). settings.yml에서 JSON 출력을 활성화해야 합니다(search: formats: json)."
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "후속 문구",
           "end_words": "대화 종료 단어",
           "timeout": "응답 시간 초과",
+          "thinking_mode": "사고",
           "debug_mode": "디버그 모드",
           "ollama_keep_alive": "Ollama 활성 유지",
           "ollama_num_ctx": "Ollama 컨텍스트 창",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "세션 모드가 'Fixed'일 때만 사용됩니다. 'main' 같은 짧은 키나 agent:main:main 같은 전체 세션 ID를 입력하세요.",
           "hermes_session_key": "이 프로필의 Hermes 장기 메모리 범위를 지정하는 고정 키.",
           "openclaw_agent_id": "이 프로필의 요청에 응답하는 OpenClaw 에이전트입니다. OpenClaw에 설정된 에이전트와 일치해야 합니다. 기본값은 'main'입니다.",
-          "openclaw_session_mode": "'Per conversation'은 Home Assistant 대화마다 별도의 OpenClaw 세션을 주며, 후속 질문은 그 세션에 남습니다. 'Fixed'는 모든 요청을 세션 키에 지정한 하나의 세션으로 보냅니다."
+          "openclaw_session_mode": "'Per conversation'은 Home Assistant 대화마다 별도의 OpenClaw 세션을 주며, 후속 질문은 그 세션에 남습니다. 'Fixed'는 모든 요청을 세션 키에 지정한 하나의 세션으로 보냅니다.",
+          "api_key": "클라우드 제공업체에는 필수입니다. 로컬 서버(LM Studio, llama.cpp, Ollama, vLLM)에서는 선택 사항이며, 서버가 키를 요구하지 않으면 비워 두세요.",
+          "thinking_mode": "답변 전에 생각하는 모델의 추론을 제어합니다. 끄기가 음성에 가장 빠릅니다. 서버 기본값은 아무것도 보내지 않습니다. 모든 서버가 따르지는 않습니다(LM Studio에서는 불안정)."
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "MCP 서버 포트",
           "search_provider": "웹 검색",
           "brave_api_key": "Brave Search API 키",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "추가 허용 IP/범위",
           "enable_gap_filling": "스마트 엔티티 인덱스 활성화",
           "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "SearXNG 인스턴스 주소입니다(예: http://192.168.1.10:8888). settings.yml에서 JSON 출력을 활성화해야 합니다(search: formats: json)."
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "서버 기본값",
+        "off": "끄기",
+        "low": "낮음",
+        "medium": "중간",
+        "high": "높음"
       }
     }
   }

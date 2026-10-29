@@ -17,6 +17,9 @@
           "api_key": "API-nokkel",
           "mcp_port": "MCP-serverport",
           "hermes_url": "Hermes server-URL"
+        },
+        "data_description": {
+          "api_key": "Påkrevd for skyleverandører. Valgfri for lokale servere (LM Studio, llama.cpp, Ollama, vLLM): la feltet stå tomt med mindre serveren krever en nøkkel."
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "Oppfolgingsfraser",
           "end_words": "Avslutt samtale-ord",
           "timeout": "Svartidsavbrudd",
+          "thinking_mode": "Tenking",
           "debug_mode": "Feilsokingsmodus",
           "ollama_keep_alive": "Hold Ollama aktiv",
           "ollama_num_ctx": "Ollama kontekstvindu",
@@ -56,7 +60,8 @@
           "hermes_session_key": "Stabil nøkkel som avgrenser Hermes' langtidsminne for denne profilen.",
           "openclaw_agent_id": "OpenClaw-agenten som svarer på forespørslene fra denne profilen. Den må samsvare med en agent som er satt opp i OpenClaw. Standard er 'main'.",
           "openclaw_session_mode": "'Per conversation' gir hver samtale i Home Assistant sin egen OpenClaw-økt, og oppfølgingsspørsmål blir i den. 'Fixed' sender alle forespørsler til den ene økten som er angitt i Øktnøkkel.",
-          "system_prompt": "Sendes til OpenClaw sammen med hver forespørsel som en ekstra systeminstruksjon, for eksempel for å angi en persona. La feltet stå tomt for å bruke agentens egne instruksjoner. Rommet til stemmesatellitten legges til automatisk."
+          "system_prompt": "Sendes til OpenClaw sammen med hver forespørsel som en ekstra systeminstruksjon, for eksempel for å angi en persona. La feltet stå tomt for å bruke agentens egne instruksjoner. Rommet til stemmesatellitten legges til automatisk.",
+          "thinking_mode": "Styrer resonneringen hos modeller som tenker før de svarer. Av er raskest for tale. Serverstandard sender ingenting. Ikke alle servere følger innstillingen (upålitelig i LM Studio)."
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "MCP-serverport",
           "search_provider": "Websok",
           "brave_api_key": "Brave Search API-nokkel",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "Ekstra tillatte IP-er/omrader",
           "enable_gap_filling": "Aktiver smart entitetsindeks",
           "max_entities_per_discovery": "Maks entiteter per sok (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "Adressen til SearXNG-instansen din, f.eks. http://192.168.1.10:8888. JSON-utdata må være aktivert i settings.yml (search: formats: json)."
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "Oppfolgingsfraser",
           "end_words": "Avslutt samtale-ord",
           "timeout": "Svartidsavbrudd",
+          "thinking_mode": "Tenking",
           "debug_mode": "Feilsokingsmodus",
           "ollama_keep_alive": "Hold Ollama aktiv",
           "ollama_num_ctx": "Ollama kontekstvindu",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "Brukes bare når Øktmodus er 'Fixed'. Skriv inn en kort nøkkel som 'main' eller en full økt-ID som agent:main:main.",
           "hermes_session_key": "Stabil nøkkel som avgrenser Hermes' langtidsminne for denne profilen.",
           "openclaw_agent_id": "OpenClaw-agenten som svarer på forespørslene fra denne profilen. Den må samsvare med en agent som er satt opp i OpenClaw. Standard er 'main'.",
-          "openclaw_session_mode": "'Per conversation' gir hver samtale i Home Assistant sin egen OpenClaw-økt, og oppfølgingsspørsmål blir i den. 'Fixed' sender alle forespørsler til den ene økten som er angitt i Øktnøkkel."
+          "openclaw_session_mode": "'Per conversation' gir hver samtale i Home Assistant sin egen OpenClaw-økt, og oppfølgingsspørsmål blir i den. 'Fixed' sender alle forespørsler til den ene økten som er angitt i Øktnøkkel.",
+          "api_key": "Påkrevd for skyleverandører. Valgfri for lokale servere (LM Studio, llama.cpp, Ollama, vLLM): la feltet stå tomt med mindre serveren krever en nøkkel.",
+          "thinking_mode": "Styrer resonneringen hos modeller som tenker før de svarer. Av er raskest for tale. Serverstandard sender ingenting. Ikke alle servere følger innstillingen (upålitelig i LM Studio)."
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "MCP-serverport",
           "search_provider": "Websok",
           "brave_api_key": "Brave Search API-nokkel",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "Ekstra tillatte IP-er/omrader",
           "enable_gap_filling": "Aktiver smart entitetsindeks",
           "max_entities_per_discovery": "Maks entiteter per sok (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "Adressen til SearXNG-instansen din, f.eks. http://192.168.1.10:8888. JSON-utdata må være aktivert i settings.yml (search: formats: json)."
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "Serverstandard",
+        "off": "Av",
+        "low": "Lav",
+        "medium": "Middels",
+        "high": "Høy"
       }
     }
   }

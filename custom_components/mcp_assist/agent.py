@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Literal
 
@@ -56,6 +57,8 @@ from .const import (
     CONF_END_WORDS,
     CONF_CLEAN_RESPONSES,
     CONF_TIMEOUT,
+    CONF_THINKING_MODE,
+    DEFAULT_THINKING_MODE,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TECHNICAL_PROMPT,
     DEFAULT_DEBUG_MODE,
@@ -108,8 +111,50 @@ from .const import (
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
+from .localization import get_spoken_symbols
 
 _LOGGER = logging.getLogger(__name__)
+
+# Tools with no side effects; a batch made only of these runs concurrently
+READ_ONLY_TOOLS = frozenset(
+    {
+        "discover_entities",
+        "get_entity_details",
+        "get_entity_history",
+        "list_areas",
+        "list_domains",
+        "get_index",
+        "search",
+        "read_url",
+    }
+)
+
+# Longest tool result passed back to the model, to protect small contexts
+MAX_TOOL_RESULT_CHARS = 16000
+
+# How long the LLM-formatted MCP tool list is reused before refetching
+MCP_TOOLS_CACHE_SECONDS = 30.0
+
+
+def _truncate_tool_result(content: Any) -> Any:
+    """Cap an oversized tool result at a line break and say how much was cut."""
+    if not isinstance(content, str) or len(content) <= MAX_TOOL_RESULT_CHARS:
+        return content
+    cut = content.rfind("\n", 0, MAX_TOOL_RESULT_CHARS)
+    if cut < MAX_TOOL_RESULT_CHARS // 2:
+        cut = MAX_TOOL_RESULT_CHARS
+    return (
+        content[:cut].rstrip()
+        + f"\n[truncated: {len(content) - cut} more characters]"
+    )
+
+
+# Per-turn values kept out of the system prompt: (placeholder, label)
+TURN_CONTEXT_PLACEHOLDERS = (
+    ("{current_area}", "Area"),
+    ("{time}", "Time"),
+    ("{date}", "Date"),
+)
 
 
 class HermesSessionError(Exception):
@@ -418,6 +463,14 @@ class MCPAssistConversationEntity(ConversationEntity):
         """Get request timeout in seconds (dynamic)."""
         return self.entry.options.get(
             CONF_TIMEOUT, self.entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+        )
+
+    @property
+    def thinking_mode(self) -> str:
+        """Get thinking/reasoning mode (dynamic)."""
+        return self.entry.options.get(
+            CONF_THINKING_MODE,
+            self.entry.data.get(CONF_THINKING_MODE, DEFAULT_THINKING_MODE),
         )
 
     @property
@@ -793,7 +846,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                 _LOGGER.info(f"📝 System prompt preview: {system_prompt[:200]}...")
 
             # Build conversation messages
-            messages = self._build_messages(system_prompt, user_input.text, history)
+            turn_context = await self._build_turn_context(user_input)
+            user_text = (
+                f"{turn_context}\n{user_input.text}" if turn_context else user_input.text
+            )
+            messages = self._build_messages(system_prompt, user_text, history)
 
             self._current_conversation_id = conversation_id
 
@@ -875,6 +932,11 @@ class MCPAssistConversationEntity(ConversationEntity):
             session_key,
             agent_id=agent_id,
             extra_system_prompt=extra_system_prompt,
+            thinking=(
+                self.thinking_mode
+                if self.thinking_mode in ("off", "low", "medium", "high")
+                else None
+            ),
         )
         _LOGGER.info(
             f"✅ OpenClaw response received, length: %d", len(response_text)
@@ -1121,7 +1183,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         # Create intent response
         intent_response = intent.IntentResponse(language=user_input.language)
-        cleaned_text = self._clean_text_for_tts(response_text)
+        cleaned_text = self._clean_text_for_tts(response_text, user_input.language)
         intent_response.async_set_speech(cleaned_text)
 
         # Check if user wants to end (stopwords+1 algorithm)
@@ -1312,6 +1374,32 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.warning("Error getting current area: %s", e)
             return "Unknown"
 
+    async def _build_turn_context(self, user_input: ConversationInput) -> str:
+        """Build the per-turn context line for the start of the user message.
+
+        Only values whose placeholder appears in the technical prompt are
+        included, so removing a placeholder still removes that value.
+        """
+        technical_prompt = self.entry.options.get(
+            CONF_TECHNICAL_PROMPT,
+            self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
+        )
+        now = dt_util.now()
+        values = {
+            "{time}": lambda: now.strftime("%H:%M"),
+            "{date}": lambda: now.strftime("%A %Y-%m-%d"),
+        }
+        parts = []
+        for placeholder, label in TURN_CONTEXT_PLACEHOLDERS:
+            if placeholder not in technical_prompt:
+                continue
+            if placeholder == "{current_area}":
+                value = await self._get_current_area(user_input)
+            else:
+                value = values[placeholder]()
+            parts.append(f"{label}: {value}")
+        return f"[{' | '.join(parts)}]" if parts else ""
+
     async def _build_system_prompt_with_context(
         self, user_input: ConversationInput
     ) -> str:
@@ -1327,15 +1415,13 @@ class MCPAssistConversationEntity(ConversationEntity):
                 self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
             )
 
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
-            technical_prompt = technical_prompt.replace("{time}", current_time)
-            technical_prompt = technical_prompt.replace("{date}", current_date)
-
-            # Get current area from satellite (if available)
-            current_area = await self._get_current_area(user_input)
-            technical_prompt = technical_prompt.replace("{current_area}", current_area)
+            # Area, time and date change every turn, so they go in the user
+            # message (see _build_turn_context). Keeping the system prompt
+            # identical between turns lets the server reuse its prompt cache
+            for placeholder, label in TURN_CONTEXT_PLACEHOLDERS:
+                technical_prompt = technical_prompt.replace(
+                    placeholder, f"given as {label} at the start of the user's message"
+                )
 
             # Inject mode-specific instructions
             mode_instructions = RESPONSE_MODE_INSTRUCTIONS.get(
@@ -1349,7 +1435,10 @@ class MCPAssistConversationEntity(ConversationEntity):
             index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
             if index_manager:
                 index = await index_manager.get_index()
-                index_json = json.dumps(index, indent=2)
+                # Compact and key-sorted: fewer tokens, stable across turns
+                index_json = json.dumps(
+                    index, separators=(",", ":"), ensure_ascii=False, sort_keys=True
+                )
             else:
                 index_json = "{}"
                 _LOGGER.warning("IndexManager not available, using empty index")
@@ -1441,6 +1530,23 @@ class MCPAssistConversationEntity(ConversationEntity):
         return messages
 
     async def _get_mcp_tools(self) -> Optional[List[Dict[str, Any]]]:
+        """Get the MCP tools in LLM format, reusing a recent fetch.
+
+        The list only changes with the MCP port or search provider, so it is
+        cached briefly instead of fetched over HTTP on every turn.
+        """
+        cache_key = (self.mcp_port, self.search_provider)
+        cached = getattr(self, "_mcp_tools_cache", None)
+        now = time.monotonic()
+        if cached and cached[0] == cache_key and now - cached[1] < MCP_TOOLS_CACHE_SECONDS:
+            return cached[2]
+
+        tools = await self._fetch_mcp_tools()
+        if tools:
+            self._mcp_tools_cache = (cache_key, now, tools)
+        return tools
+
+    async def _fetch_mcp_tools(self) -> Optional[List[Dict[str, Any]]]:
         """Fetch available tools from MCP server."""
         try:
             mcp_url = f"http://localhost:{self.mcp_port}"
@@ -1589,6 +1695,22 @@ class MCPAssistConversationEntity(ConversationEntity):
             all_matches.extend(matches)
             cleaned_text = re.sub(pattern, "", cleaned_text, flags=re.DOTALL | re.IGNORECASE)
 
+        # Unpaired tags left after removing complete blocks:
+        # - a closing tag with no opening one (chat templates that open the
+        #   block in the prompt): everything before it is reasoning
+        # - an opening tag that is never closed (output cut off or the model
+        #   ran on): everything after it is reasoning
+        for close_tag in (r"</think>", r"<\|/thought\|>"):
+            match = re.search(rf"^(.*){close_tag}", cleaned_text, re.DOTALL | re.IGNORECASE)
+            if match:
+                all_matches.append(match.group(1))
+                cleaned_text = cleaned_text[match.end():]
+        for open_tag in (r"<think>", r"<\|thought\|>"):
+            match = re.search(rf"{open_tag}(.*)$", cleaned_text, re.DOTALL | re.IGNORECASE)
+            if match:
+                all_matches.append(match.group(1))
+                cleaned_text = cleaned_text[:match.start()]
+
         if not all_matches:
             return text, ""
 
@@ -1600,7 +1722,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         return cleaned_text, thinking_content
 
-    def _clean_text_for_tts(self, text: str) -> str:
+    def _clean_text_for_tts(self, text: str, language: str | None = None) -> str:
         """Clean text for TTS to handle special characters properly."""
         # ALWAYS run character normalization (existing fixes)
         # Replace ALL apostrophe variants with standard apostrophe
@@ -1658,30 +1780,12 @@ class MCPAssistConversationEntity(ConversationEntity):
         text = re.sub(r"```[\s\S]+?```", "", text)  # ```code block``` → removed
         text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)  # # Header → Header
 
-        # 3. Convert symbols to words
-        SYMBOL_MAP = {
-            "°C": " degrees celsius",
-            "°F": " degrees fahrenheit",
-            "°": " degrees",
-            "%": " percent",
-            "€": " euros",
-            "£": " pounds",
-            "$": " dollars",
-            "&": " and",
-            "+": " plus",
-            "=": " equals",
-            "<": " less than",
-            ">": " greater than",
-            "@": " at",
-            "#": " number",
-            "×": " times",
-            "÷": " divided by",
-        }
-        for symbol, word in SYMBOL_MAP.items():
-            text = text.replace(symbol, word)
-
-        # 4. Remove URLs
+        # 3. Remove URLs (before symbols, so "=" and "&" in them stay intact)
         text = re.sub(r"https?://\S+", "", text)
+
+        # 4. Convert symbols to words in the response language
+        for symbol, word in get_spoken_symbols(language or self.hass.config.language):
+            text = text.replace(symbol, word)
 
         # Clean up extra whitespace
         text = re.sub(r"\s+", " ", text)
@@ -1716,144 +1820,80 @@ class MCPAssistConversationEntity(ConversationEntity):
     async def _execute_tool_calls(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Execute a list of tool calls and return results in OpenAI format."""
-        results = []
+        """Execute a list of tool calls and return results in OpenAI format.
 
-        for tool_call in tool_calls:
-            tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
-            function = tool_call.get("function", {})
-            tool_name = function.get("name")
-            arguments_str = function.get("arguments")
+        A batch of read-only tools runs concurrently; any batch containing an
+        action runs in order so side effects happen in the order requested.
+        """
+        tool_names = [
+            (tool_call.get("function") or {}).get("name") for tool_call in tool_calls
+        ]
+        if len(tool_calls) > 1 and all(name in READ_ONLY_TOOLS for name in tool_names):
+            _LOGGER.debug("Running %d read-only tool calls concurrently", len(tool_calls))
+            return list(
+                await asyncio.gather(
+                    *(self._execute_single_tool_call(call) for call in tool_calls)
+                )
+            )
 
-            _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
+        return [await self._execute_single_tool_call(call) for call in tool_calls]
 
-            try:
-                arguments = self._parse_tool_arguments(arguments_str)
+    async def _execute_single_tool_call(
+        self, tool_call: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute one tool call and return its result message."""
+        tool_call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:8]}")
+        function = tool_call.get("function", {})
+        tool_name = function.get("name")
+        arguments_str = function.get("arguments")
 
-                # Execute the tool
-                result = await self._call_mcp_tool(tool_name, arguments)
-
-                # Format result for OpenAI
-                if "error" in result:
-                    # Extract error message as plain text so LLM actually reads it
-                    error_data = result["error"]
-                    if isinstance(error_data, dict):
-                        error_msg = error_data.get("message", str(error_data))
-                    else:
-                        error_msg = str(error_data)
-                    content = f"ERROR: {error_msg}"
-                else:
-                    content = result.get("result", "")
-
-                # Check if this is the conversation state tool
-                if tool_name == "set_conversation_state" and content:
-                    # Parse the expecting_response value from the result
-                    if "conversation_state:true" in content.lower():
-                        self._expecting_response = True
-                        _LOGGER.debug(
-                            "🔄 Conversation will continue - expecting response"
-                        )
-                    elif "conversation_state:false" in content.lower():
-                        self._expecting_response = False
-                        _LOGGER.debug(
-                            "🔄 Conversation will close - not expecting response"
-                        )
-
-                # Format result based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama doesn't use tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "content": content if content is not None else "",
-                        }
-                    )
-                else:
-                    # OpenAI format with tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": content if content is not None else "",
-                        }
-                    )
-
-                _LOGGER.info(f"✅ Tool {tool_name} executed successfully")
-
-            except Exception as e:
-                _LOGGER.error(f"Error executing tool {tool_name}: {e}")
-                # Format error result based on server type
-                if self.server_type == SERVER_TYPE_OLLAMA:
-                    # Ollama doesn't use tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_name,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
-                else:
-                    # OpenAI format with tool_call_id
-                    results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
-
-        return results
-
-    async def _test_streaming_basic(self) -> bool:
-        """Test basic streaming without tools to isolate connection issues."""
-        payload = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": "Say hello"}],
-            "stream": True,
-            "temperature": 0.7,
-            "max_tokens": 10,
-        }
-
-        _LOGGER.info(
-            f"🧪 Testing basic streaming to: {self.base_url_dynamic}/v1/chat/completions"
-        )
-        _LOGGER.info(f"🧪 Model: {self.model_name}")
+        _LOGGER.info(f"📞 Processing tool call {tool_call_id}: {tool_name}")
 
         try:
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                url = f"{self.base_url_dynamic}/v1/chat/completions"
-                headers = self._get_auth_headers()
-                async with session.post(url, headers=headers, json=payload) as response:
-                    _LOGGER.info(
-                        f"✅ Basic streaming connected! Status: {response.status}"
+            arguments = self._parse_tool_arguments(arguments_str)
+
+            # Execute the tool
+            result = await self._call_mcp_tool(tool_name, arguments)
+
+            # Format result for OpenAI
+            if "error" in result:
+                # Extract error message as plain text so LLM actually reads it
+                error_data = result["error"]
+                if isinstance(error_data, dict):
+                    error_msg = error_data.get("message", str(error_data))
+                else:
+                    error_msg = str(error_data)
+                content = f"ERROR: {error_msg}"
+            else:
+                content = result.get("result", "")
+
+            # Check if this is the conversation state tool
+            if tool_name == "set_conversation_state" and content:
+                # Parse the expecting_response value from the result
+                if "conversation_state:true" in content.lower():
+                    self._expecting_response = True
+                    _LOGGER.debug(
+                        "🔄 Conversation will continue - expecting response"
                     )
-                    _LOGGER.info(f"📋 Headers: {dict(response.headers)}")
-
-                    # Try to read first few lines
-                    line_count = 0
-                    async for line in response.content:
-                        line_str = line.decode("utf-8").strip()
-                        _LOGGER.info(f"📨 Line {line_count}: {line_str[:100]}")
-                        line_count += 1
-                        if line_count >= 3:
-                            break
-
-                    _LOGGER.info(
-                        f"✅ Basic streaming works! Received {line_count} lines"
+                elif "conversation_state:false" in content.lower():
+                    self._expecting_response = False
+                    _LOGGER.debug(
+                        "🔄 Conversation will close - not expecting response"
                     )
-                    return True
 
-        except aiohttp.ClientConnectionError as e:
-            _LOGGER.error(f"❌ Connection error: {e}")
-            return False
+            content = _truncate_tool_result(content if content is not None else "")
+            _LOGGER.info(f"✅ Tool {tool_name} executed successfully")
+
         except Exception as e:
-            _LOGGER.error(f"❌ Basic streaming failed: {type(e).__name__}: {e}")
-            import traceback
+            _LOGGER.error(f"Error executing tool {tool_name}: {e}")
+            content = json.dumps({"error": str(e)})
 
-            _LOGGER.error(traceback.format_exc())
-            return False
+        # Format result based on server type
+        if self.server_type == SERVER_TYPE_OLLAMA:
+            # Ollama doesn't use tool_call_id
+            return {"role": "tool", "tool_name": tool_name, "content": content}
+        # OpenAI format with tool_call_id
+        return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
     def _get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers based on server type."""
@@ -1878,7 +1918,10 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "X-Title": "MCP Assist for Home Assistant",
             }
         else:
-            # Local servers (LM Studio, Ollama, llamacpp, vLLM) don't need auth
+            # Local servers (LM Studio, Ollama, llamacpp, vLLM): auth is
+            # optional, sent only when a key is configured
+            if self.api_key:
+                return {"Authorization": f"Bearer {self.api_key}"}
             return {}
 
     def _uses_official_openai_api(self) -> bool:
@@ -1906,6 +1949,60 @@ class MCPAssistConversationEntity(ConversationEntity):
         ("will return an error in future model generations").
         """
         return self.server_type == SERVER_TYPE_GEMINI
+
+    def _apply_thinking(self, payload: Dict[str, Any]) -> None:
+        """Add the provider's thinking/reasoning control to a request payload.
+
+        "default" sends nothing, leaving the server's own behaviour. Where a
+        model can't turn reasoning off, "off" uses the lowest level it accepts.
+        """
+        mode = self.thinking_mode
+        if mode not in ("off", "low", "medium", "high"):
+            return
+        off = mode == "off"
+        model = (self.model_name or "").split("/")[-1].lower()
+
+        if self.server_type == SERVER_TYPE_OLLAMA:
+            # gpt-oss takes a level and ignores booleans; others take a boolean
+            if "gpt-oss" in model:
+                payload["think"] = "low" if off else mode
+            else:
+                payload["think"] = not off
+        elif self.server_type in (
+            SERVER_TYPE_LMSTUDIO,
+            SERVER_TYPE_LLAMACPP,
+            SERVER_TYPE_VLLM,
+        ):
+            # Passed to the chat template (Qwen3 enable_thinking, gpt-oss
+            # reasoning_effort); templates ignore variables they don't use
+            kwargs = payload.setdefault("chat_template_kwargs", {})
+            kwargs["enable_thinking"] = not off
+            if not off:
+                kwargs["reasoning_effort"] = mode
+        elif self.server_type == SERVER_TYPE_OPENAI:
+            if self._uses_official_openai_api():
+                if not self._is_openai_reasoning_model():
+                    return
+                if not off:
+                    effort = mode
+                elif re.match(r"^o\d", model):
+                    effort = "low"  # o-series can't turn reasoning off
+                elif not model.startswith("gpt-5."):
+                    effort = "minimal"  # original gpt-5 family has no "none"
+                else:
+                    effort = "none"
+            else:
+                effort = "none" if off else mode
+            payload["reasoning_effort"] = effort
+        elif self.server_type == SERVER_TYPE_GEMINI:
+            # Only Gemini 2.5 Flash models can turn thinking off
+            if off:
+                effort = "none" if "2.5-flash" in model else "minimal"
+            else:
+                effort = mode
+            payload["reasoning_effort"] = effort
+        elif self.server_type == SERVER_TYPE_OPENROUTER:
+            payload["reasoning"] = {"effort": "none" if off else mode}
 
     def _build_openai_payload(
         self,
@@ -1940,6 +2037,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
+        self._apply_thinking(payload)
         return payload
 
     def _build_ollama_payload(
@@ -1999,19 +2097,12 @@ class MCPAssistConversationEntity(ConversationEntity):
         if tools:
             payload["tools"] = tools
 
+        self._apply_thinking(payload)
         return payload
 
     async def _call_llm_streaming(self, messages: List[Dict[str, Any]]) -> str:
         """Stream LLM responses with immediate TTS feedback."""
         _LOGGER.info(f"🚀 Starting streaming {self.server_type} conversation")
-
-        # Test streaming once and cache result
-        if not hasattr(self, "_streaming_available"):
-            self._streaming_available = await self._test_streaming_basic()
-
-        if not self._streaming_available:
-            _LOGGER.warning("Streaming not available, falling back to HTTP")
-            raise Exception("Streaming not available")
 
         # Get MCP tools once
         tools = await self._get_mcp_tools()

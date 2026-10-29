@@ -4,6 +4,7 @@ This module provides language-specific defaults for:
 - System prompt language instructions
 - Follow-up phrase detection patterns
 - End conversation word detection patterns
+- Spoken words for symbols in TTS output
 """
 
 from typing import Optional
@@ -99,6 +100,47 @@ END_WORDS = {
     "fil": "tigil, hinto, kanselahin, hindi, salamat, paalam, bye, tapos na, okay lang, kalimutan mo, yun lang, ayos na",
     "ar": "توقف, قف, إلغاء, لا, شكرا, مع السلامة, وداعا, انتهيت, لا بأس, انسى, هذا كل شيء, انتهى",
     "hi": "रुको, बंद करो, रद्द करो, नहीं, धन्यवाद, शुक्रिया, अलविदा, नमस्ते, हो गया, कोई बात नहीं, भूल जाओ, बस इतना ही",
+}
+
+
+# Spoken words for symbols, used by the Clean Responses option so TTS reads
+# "21°C" in the response language. Order matters: "°C" before "°".
+# English also converts currency and operators; other languages only convert
+# units, and languages where the word goes before the number (e.g. "%" in
+# Chinese and Turkish) leave that symbol for the TTS engine.
+SPOKEN_SYMBOLS = {
+    "en": [
+        ("°C", " degrees celsius"), ("°F", " degrees fahrenheit"), ("°", " degrees"),
+        ("%", " percent"), ("€", " euros"), ("£", " pounds"), ("$", " dollars"),
+        ("&", " and"), ("+", " plus"), ("=", " equals"), ("<", " less than"),
+        (">", " greater than"), ("@", " at"), ("#", " number"), ("×", " times"),
+        ("÷", " divided by"),
+    ],
+
+    # Tier 1
+    "de": [("°C", " Grad Celsius"), ("°F", " Grad Fahrenheit"), ("°", " Grad"), ("%", " Prozent")],
+    "fr": [("°C", " degrés Celsius"), ("°F", " degrés Fahrenheit"), ("°", " degrés"), ("%", " pour cent")],
+    "es": [("°C", " grados Celsius"), ("°F", " grados Fahrenheit"), ("°", " grados"), ("%", " por ciento")],
+    "it": [("°C", " gradi Celsius"), ("°F", " gradi Fahrenheit"), ("°", " gradi"), ("%", " percento")],
+    "nl": [("°C", " graden Celsius"), ("°F", " graden Fahrenheit"), ("°", " graden"), ("%", " procent")],
+    "pl": [("°C", " stopni Celsjusza"), ("°F", " stopni Fahrenheita"), ("°", " stopni"), ("%", " procent")],
+    "pt": [("°C", " graus Celsius"), ("°F", " graus Fahrenheit"), ("°", " graus"), ("%", " por cento")],
+    "ru": [("°C", " градусов Цельсия"), ("°F", " градусов по Фаренгейту"), ("°", " градусов"), ("%", " процентов")],
+    "zh-hans": [("°C", "摄氏度"), ("°F", "华氏度"), ("°", "度")],
+    "ja": [("°C", "度"), ("°F", "華氏度"), ("°", "度"), ("%", "パーセント")],
+
+    # Tier 2
+    "ko": [("°C", "도"), ("°F", "화씨 도"), ("°", "도"), ("%", "퍼센트")],
+    "sv": [("°C", " grader Celsius"), ("°F", " grader Fahrenheit"), ("°", " grader"), ("%", " procent")],
+    "nb": [("°C", " grader celsius"), ("°F", " grader fahrenheit"), ("°", " grader"), ("%", " prosent")],
+    "da": [("°C", " grader celsius"), ("°F", " grader fahrenheit"), ("°", " grader"), ("%", " procent")],
+    "fi": [("°C", " celsiusastetta"), ("°F", " fahrenheitastetta"), ("°", " astetta"), ("%", " prosenttia")],
+    "cs": [("°C", " stupňů Celsia"), ("°F", " stupňů Fahrenheita"), ("°", " stupňů"), ("%", " procent")],
+    "el": [("°C", " βαθμούς Κελσίου"), ("°F", " βαθμούς Φαρενάιτ"), ("°", " βαθμούς"), ("%", " τοις εκατό")],
+    "tr": [("°C", " santigrat derece"), ("°F", " fahrenhayt derece"), ("°", " derece")],
+    "fil": [("°C", " digri Celsius"), ("°F", " digri Fahrenheit"), ("°", " digri"), ("%", " porsiyento")],
+    "ar": [("°C", " درجة مئوية"), ("°F", " درجة فهرنهايت"), ("°", " درجة"), ("%", " بالمئة")],
+    "hi": [("°C", " डिग्री सेल्सियस"), ("°F", " डिग्री फ़ारेनहाइट"), ("°", " डिग्री"), ("%", " प्रतिशत")],
 }
 
 
@@ -202,3 +244,20 @@ def get_supported_languages() -> list[str]:
         List of ISO 639-1 language codes.
     """
     return sorted(LANGUAGE_METADATA.keys())
+
+
+def get_spoken_symbols(language_code: str) -> list[tuple[str, str]]:
+    """Get symbol-to-word replacements for TTS in the given language.
+
+    Args:
+        language_code: ISO 639-1 language code (e.g., "de", "fr-CA", "zh-Hans")
+
+    Returns:
+        Ordered (symbol, replacement) pairs. Empty for unsupported languages,
+        so English words are never spoken in another language.
+    """
+    base_code = (language_code or "en").lower()
+    if "-" in base_code and base_code not in SPOKEN_SYMBOLS:
+        base_code = base_code.split("-")[0]
+
+    return SPOKEN_SYMBOLS.get(base_code, [])

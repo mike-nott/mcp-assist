@@ -17,6 +17,9 @@
           "api_key": "مفتاح API",
           "mcp_port": "منفذ خادم MCP",
           "hermes_url": "عنوان URL لخادم Hermes"
+        },
+        "data_description": {
+          "api_key": "مطلوب لمزوّدي الخدمات السحابية. اختياري للخوادم المحلية (LM Studio وllama.cpp وOllama وvLLM): اتركه فارغاً ما لم يتطلب الخادم مفتاحاً."
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "عبارات المتابعة",
           "end_words": "كلمات انهاء المحادثة",
           "timeout": "انتهاء مهلة الاستجابة",
+          "thinking_mode": "التفكير",
           "debug_mode": "وضع التصحيح",
           "ollama_keep_alive": "ابق Ollama نشطا",
           "ollama_num_ctx": "نافذة سياق Ollama",
@@ -56,7 +60,8 @@
           "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي.",
           "openclaw_agent_id": "وكيل OpenClaw الذي يردّ على طلبات هذا الملف الشخصي. يجب أن يطابق وكيلاً مضبوطاً في OpenClaw. الافتراضي هو 'main'.",
           "openclaw_session_mode": "'Per conversation' يمنح كل محادثة في Home Assistant جلسة OpenClaw خاصة بها، فتبقى الأسئلة التالية ضمنها. 'Fixed' يرسل كل الطلبات إلى الجلسة الواحدة المحددة في مفتاح الجلسة.",
-          "system_prompt": "يُرسل إلى OpenClaw مع كل طلب كتعليمات نظام إضافية، مثلاً لتحديد شخصية. اتركه فارغاً لاستخدام تعليمات الوكيل الخاصة. تُضاف غرفة الجهاز الصوتي تلقائياً."
+          "system_prompt": "يُرسل إلى OpenClaw مع كل طلب كتعليمات نظام إضافية، مثلاً لتحديد شخصية. اتركه فارغاً لاستخدام تعليمات الوكيل الخاصة. تُضاف غرفة الجهاز الصوتي تلقائياً.",
+          "thinking_mode": "يتحكم في استدلال النماذج التي تفكر قبل الإجابة. الإيقاف هو الأسرع للصوت. افتراضي الخادم لا يرسل شيئاً. لا تلتزم كل الخوادم بهذا الإعداد (غير موثوق في LM Studio)."
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "منفذ خادم MCP",
           "search_provider": "البحث على الويب",
           "brave_api_key": "مفتاح API لـ Brave Search",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "عناوين IP/نطاقات اضافية مسموح بها",
           "enable_gap_filling": "تمكين فهرس الكيانات الذكي",
           "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "عنوان مثيل SearXNG الخاص بك، مثل http://192.168.1.10:8888. يجب تفعيل مخرجات JSON في ملف settings.yml الخاص به (search: formats: json)."
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "عبارات المتابعة",
           "end_words": "كلمات انهاء المحادثة",
           "timeout": "انتهاء مهلة الاستجابة",
+          "thinking_mode": "التفكير",
           "debug_mode": "وضع التصحيح",
           "ollama_keep_alive": "ابق Ollama نشطا",
           "ollama_num_ctx": "نافذة سياق Ollama",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "يُستخدم فقط عندما يكون وضع الجلسة 'Fixed'. أدخل مفتاحاً قصيراً مثل 'main' أو معرّف جلسة كاملاً مثل agent:main:main.",
           "hermes_session_key": "مفتاح ثابت يحدد نطاق ذاكرة Hermes طويلة المدى لهذا الملف الشخصي.",
           "openclaw_agent_id": "وكيل OpenClaw الذي يردّ على طلبات هذا الملف الشخصي. يجب أن يطابق وكيلاً مضبوطاً في OpenClaw. الافتراضي هو 'main'.",
-          "openclaw_session_mode": "'Per conversation' يمنح كل محادثة في Home Assistant جلسة OpenClaw خاصة بها، فتبقى الأسئلة التالية ضمنها. 'Fixed' يرسل كل الطلبات إلى الجلسة الواحدة المحددة في مفتاح الجلسة."
+          "openclaw_session_mode": "'Per conversation' يمنح كل محادثة في Home Assistant جلسة OpenClaw خاصة بها، فتبقى الأسئلة التالية ضمنها. 'Fixed' يرسل كل الطلبات إلى الجلسة الواحدة المحددة في مفتاح الجلسة.",
+          "api_key": "مطلوب لمزوّدي الخدمات السحابية. اختياري للخوادم المحلية (LM Studio وllama.cpp وOllama وvLLM): اتركه فارغاً ما لم يتطلب الخادم مفتاحاً.",
+          "thinking_mode": "يتحكم في استدلال النماذج التي تفكر قبل الإجابة. الإيقاف هو الأسرع للصوت. افتراضي الخادم لا يرسل شيئاً. لا تلتزم كل الخوادم بهذا الإعداد (غير موثوق في LM Studio)."
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "منفذ خادم MCP",
           "search_provider": "البحث على الويب",
           "brave_api_key": "مفتاح API لـ Brave Search",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "عناوين IP/نطاقات اضافية مسموح بها",
           "enable_gap_filling": "تمكين فهرس الكيانات الذكي",
           "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "عنوان مثيل SearXNG الخاص بك، مثل http://192.168.1.10:8888. يجب تفعيل مخرجات JSON في ملف settings.yml الخاص به (search: formats: json)."
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "افتراضي الخادم",
+        "off": "إيقاف",
+        "low": "منخفض",
+        "medium": "متوسط",
+        "high": "مرتفع"
       }
     }
   }

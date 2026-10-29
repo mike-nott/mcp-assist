@@ -21,6 +21,9 @@
           "openclaw_token": "Gateway Token",
           "openclaw_use_ssl": "Use SSL/TLS",
           "hermes_url": "Hermes Server URL"
+        },
+        "data_description": {
+          "api_key": "Required for cloud providers. Optional for local servers (LM Studio, llama.cpp, Ollama, vLLM): leave blank unless the server needs a key."
         }
       },
       "openclaw_pairing": {
@@ -50,6 +53,7 @@
           "end_words": "End Conversation Words",
           "clean_responses": "Clean Responses for Voice Output",
           "timeout": "Response Time Out",
+          "thinking_mode": "Thinking",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
@@ -64,7 +68,8 @@
           "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile.",
           "openclaw_agent_id": "The OpenClaw agent that answers this profile's requests. It must match an agent configured in OpenClaw. Default is 'main'.",
           "openclaw_session_mode": "'Per conversation' gives each Home Assistant conversation its own OpenClaw session, so follow-up questions stay in it. 'Fixed' sends every request to the single session set in Session Key.",
-          "system_prompt": "Sent to OpenClaw with every request as an extra system prompt, for example to set a persona. Leave blank to use the agent's own prompts. The satellite's room is added automatically."
+          "system_prompt": "Sent to OpenClaw with every request as an extra system prompt, for example to set a persona. Leave blank to use the agent's own prompts. The satellite's room is added automatically.",
+          "thinking_mode": "Controls reasoning on models that think before answering. Off is fastest for voice. Server default sends nothing. Not every server honours it (LM Studio is unreliable)."
         }
       },
       "mcp_server": {
@@ -74,8 +79,12 @@
           "mcp_port": "MCP Server Port",
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "Additional Allowed IPs/Ranges",
           "enable_gap_filling": "Enable Smart Entity Index"
+        },
+        "data_description": {
+          "searxng_url": "Address of your SearXNG instance, e.g. http://192.168.1.10:8888. JSON output must be enabled in its settings.yml (search: formats: json)."
         }
       }
     },
@@ -119,6 +128,7 @@
           "end_words": "End Conversation Words",
           "clean_responses": "Clean Responses for Voice Output",
           "timeout": "Response Time Out",
+          "thinking_mode": "Thinking",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
@@ -136,7 +146,9 @@
           "openclaw_session_key": "Only used when Session Mode is 'Fixed'. Enter a short key such as 'main' or a full session ID such as agent:main:main.",
           "hermes_session_key": "Stable key scoping Hermes long-term memory for this profile.",
           "openclaw_agent_id": "The OpenClaw agent that answers this profile's requests. It must match an agent configured in OpenClaw. Default is 'main'.",
-          "openclaw_session_mode": "'Per conversation' gives each Home Assistant conversation its own OpenClaw session, so follow-up questions stay in it. 'Fixed' sends every request to the single session set in Session Key."
+          "openclaw_session_mode": "'Per conversation' gives each Home Assistant conversation its own OpenClaw session, so follow-up questions stay in it. 'Fixed' sends every request to the single session set in Session Key.",
+          "api_key": "Required for cloud providers. Optional for local servers (LM Studio, llama.cpp, Ollama, vLLM): leave blank unless the server needs a key.",
+          "thinking_mode": "Controls reasoning on models that think before answering. Off is fastest for voice. Server default sends nothing. Not every server honours it (LM Studio is unreliable)."
         }
       },
       "mcp_server": {
@@ -146,9 +158,13 @@
           "mcp_port": "MCP Server Port",
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "Additional Allowed IPs/Ranges",
           "enable_gap_filling": "Enable Smart Entity Index",
           "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "Address of your SearXNG instance, e.g. http://192.168.1.10:8888. JSON output must be enabled in its settings.yml (search: formats: json)."
         }
       }
     }
@@ -157,6 +173,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "Server default",
+        "off": "Off",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
       }
     }
   }

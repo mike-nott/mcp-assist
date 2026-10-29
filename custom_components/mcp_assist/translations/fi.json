@@ -17,6 +17,9 @@
           "api_key": "API-avain",
           "mcp_port": "MCP-palvelinportti",
           "hermes_url": "Hermes-palvelimen URL"
+        },
+        "data_description": {
+          "api_key": "Pakollinen pilvipalveluntarjoajille. Valinnainen paikallisille palvelimille (LM Studio, llama.cpp, Ollama, vLLM): jätä tyhjäksi, ellei palvelin vaadi avainta."
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "Jatkokysymysfraasit",
           "end_words": "Keskustelun lopetusSanat",
           "timeout": "Vastauksen aikakatkaisu",
+          "thinking_mode": "Ajattelu",
           "debug_mode": "Virheenkorjaustila",
           "ollama_keep_alive": "Pida Ollama aktiivisena",
           "ollama_num_ctx": "Ollaman konteksti-ikkuna",
@@ -56,7 +60,8 @@
           "hermes_session_key": "Pysyvä avain, joka rajaa Hermesin pitkäaikaismuistin tälle profiilille.",
           "openclaw_agent_id": "OpenClaw-agentti, joka vastaa tämän profiilin pyyntöihin. Sen on vastattava OpenClawissa määritettyä agenttia. Oletus on 'main'.",
           "openclaw_session_mode": "'Per conversation' antaa jokaiselle Home Assistant -keskustelulle oman OpenClaw-istunnon, ja jatkokysymykset pysyvät siinä. 'Fixed' lähettää kaikki pyynnöt yhteen Istuntoavain-kentässä määritettyyn istuntoon.",
-          "system_prompt": "Lähetetään OpenClawille jokaisen pyynnön mukana lisäjärjestelmäkehotteena, esimerkiksi persoonan määrittämiseksi. Jätä tyhjäksi, jos haluat käyttää agentin omia kehotteita. Puhesatelliitin huone lisätään automaattisesti."
+          "system_prompt": "Lähetetään OpenClawille jokaisen pyynnön mukana lisäjärjestelmäkehotteena, esimerkiksi persoonan määrittämiseksi. Jätä tyhjäksi, jos haluat käyttää agentin omia kehotteita. Puhesatelliitin huone lisätään automaattisesti.",
+          "thinking_mode": "Ohjaa päättelyä malleissa, jotka ajattelevat ennen vastaamista. Pois on puheelle nopein. Palvelimen oletus ei lähetä mitään. Kaikki palvelimet eivät noudata asetusta (epäluotettava LM Studiossa)."
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "MCP-palvelinportti",
           "search_provider": "Verkkohaku",
           "brave_api_key": "Brave Search API-avain",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "Lisat sallitut IP:t/alueet",
           "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon",
           "max_entities_per_discovery": "Max entiteettia per haku (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "SearXNG-instanssisi osoite, esim. http://192.168.1.10:8888. JSON-tulosteen on oltava käytössä sen settings.yml-tiedostossa (search: formats: json)."
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "Jatkokysymysfraasit",
           "end_words": "Keskustelun lopetusSanat",
           "timeout": "Vastauksen aikakatkaisu",
+          "thinking_mode": "Ajattelu",
           "debug_mode": "Virheenkorjaustila",
           "ollama_keep_alive": "Pida Ollama aktiivisena",
           "ollama_num_ctx": "Ollaman konteksti-ikkuna",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "Käytetään vain, kun Istuntotila on 'Fixed'. Anna lyhyt avain, kuten 'main', tai täydellinen istunnon ID, kuten agent:main:main.",
           "hermes_session_key": "Pysyvä avain, joka rajaa Hermesin pitkäaikaismuistin tälle profiilille.",
           "openclaw_agent_id": "OpenClaw-agentti, joka vastaa tämän profiilin pyyntöihin. Sen on vastattava OpenClawissa määritettyä agenttia. Oletus on 'main'.",
-          "openclaw_session_mode": "'Per conversation' antaa jokaiselle Home Assistant -keskustelulle oman OpenClaw-istunnon, ja jatkokysymykset pysyvät siinä. 'Fixed' lähettää kaikki pyynnöt yhteen Istuntoavain-kentässä määritettyyn istuntoon."
+          "openclaw_session_mode": "'Per conversation' antaa jokaiselle Home Assistant -keskustelulle oman OpenClaw-istunnon, ja jatkokysymykset pysyvät siinä. 'Fixed' lähettää kaikki pyynnöt yhteen Istuntoavain-kentässä määritettyyn istuntoon.",
+          "api_key": "Pakollinen pilvipalveluntarjoajille. Valinnainen paikallisille palvelimille (LM Studio, llama.cpp, Ollama, vLLM): jätä tyhjäksi, ellei palvelin vaadi avainta.",
+          "thinking_mode": "Ohjaa päättelyä malleissa, jotka ajattelevat ennen vastaamista. Pois on puheelle nopein. Palvelimen oletus ei lähetä mitään. Kaikki palvelimet eivät noudata asetusta (epäluotettava LM Studiossa)."
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "MCP-palvelinportti",
           "search_provider": "Verkkohaku",
           "brave_api_key": "Brave Search API-avain",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "Lisat sallitut IP:t/alueet",
           "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon",
           "max_entities_per_discovery": "Max entiteettia per haku (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "SearXNG-instanssisi osoite, esim. http://192.168.1.10:8888. JSON-tulosteen on oltava käytössä sen settings.yml-tiedostossa (search: formats: json)."
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "Palvelimen oletus",
+        "off": "Pois",
+        "low": "Matala",
+        "medium": "Keskitaso",
+        "high": "Korkea"
       }
     }
   }

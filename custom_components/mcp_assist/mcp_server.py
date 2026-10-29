@@ -47,6 +47,18 @@ _LOGGER = logging.getLogger(__name__)
 _OMIT = object()
 
 
+def _merge_ids(existing: Any, extra: Any) -> List[str]:
+    """Combine single IDs or ID lists into one list without duplicates."""
+    merged: List[str] = []
+    for value in (existing, extra):
+        if value is None:
+            continue
+        for item in [value] if isinstance(value, str) else list(value):
+            if item not in merged:
+                merged.append(item)
+    return merged
+
+
 def _sanitize_log_value(value: Any, max_len: int = 500) -> str:
     """Make a client-supplied value safe to log.
 
@@ -891,11 +903,18 @@ class MCPServer:
                         },
                         "action": {
                             "type": "string",
-                            "description": "The service action (e.g., 'turn_on', 'turn_off', 'toggle', 'set_temperature')",
+                            "description": "The service action (e.g., 'turn_on', 'turn_off', 'toggle', 'set_temperature', 'set_cover_position')",
+                        },
+                        "entity_id": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "array", "items": {"type": "string"}},
+                            ],
+                            "description": "Entity ID or list of entity IDs to control",
                         },
                         "target": {
                             "type": "object",
-                            "description": "Target entities, areas, or devices",
+                            "description": "Alternative to entity_id: target entities, areas, or devices",
                             "properties": {
                                 "entity_id": {
                                     "oneOf": [
@@ -928,7 +947,7 @@ class MCPServer:
                             "additionalProperties": True,
                         },
                     },
-                    "required": ["domain", "action", "target"],
+                    "required": ["domain", "action"],
                     "additionalProperties": False,
                 },
             },
@@ -1090,6 +1109,11 @@ class MCPServer:
 
     async def tool_discover_entities(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Discover entities based on criteria with progress notifications."""
+        # Models often ask for every domain with a catch-all value
+        domain_arg = args.get("domain")
+        if isinstance(domain_arg, str) and domain_arg.strip().lower() in ("all", "any", "*"):
+            args = {**args, "domain": None}
+
         # Notify start
         self.publish_progress(
             "tool_start",
@@ -1123,6 +1147,38 @@ class MCPServer:
         # Format results based on whether it's smart discovery or general
         return self._format_discovery_results(entities, args)
 
+    def _empty_discovery_hint(self, args: Dict[str, Any]) -> str:
+        """Explain an empty discovery result so the model can retry."""
+        message = "No entities found matching the search criteria."
+
+        area = args.get("area")
+        if isinstance(area, str) and area:
+            area_registry = ar.async_get(self.hass)
+            if self.discovery._resolve_area_entry(area, area_registry) is None:
+                area_names = sorted(
+                    (entry.name for entry in area_registry.async_list_areas()),
+                    key=str.casefold,
+                )
+                return (
+                    f"{message} '{area}' is not a known area. "
+                    f"Valid areas: {', '.join(area_names)}."
+                )
+
+        filters = [
+            key
+            for key in ("area", "floor", "label", "domain", "device_class", "state",
+                        "name_contains", "name_pattern", "inferred_type")
+            if args.get(key)
+        ]
+        if len(filters) > 1:
+            return f"{message} Try again with fewer filters (used: {', '.join(filters)})."
+        if args.get("name_contains"):
+            return (
+                f"{message} Try a shorter part of the name, or search by domain "
+                "or device_class from the index instead."
+            )
+        return message
+
     def _format_discovery_results(
         self, entities: List[Dict[str, Any]], args: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -1132,7 +1188,7 @@ class MCPServer:
                 "content": [
                     {
                         "type": "text",
-                        "text": "No entities found matching the search criteria.",
+                        "text": self._empty_discovery_hint(args),
                     }
                 ]
             }
@@ -1352,8 +1408,19 @@ class MCPServer:
         """Perform an action on Home Assistant entities with progress notifications."""
         domain = args.get("domain")
         action = args.get("action")
-        target = args.get("target", {})
-        data = args.get("data", {})
+        target = args.get("target") or {}
+        target = dict(target) if isinstance(target, dict) else {}
+        data = args.get("data") or {}
+        data = dict(data) if isinstance(data, dict) else {}
+
+        # Accept a flat entity_id (small models call the tool far more reliably
+        # with it) and move any target keys the model put in data into target,
+        # so every target goes through resolution and the exposure check
+        if args.get("entity_id"):
+            target["entity_id"] = _merge_ids(target.get("entity_id"), args["entity_id"])
+        for key in ("entity_id", "area_id", "device_id"):
+            if key in data:
+                target[key] = _merge_ids(target.get(key), data.pop(key))
 
         # Validate required parameters
         if not domain:
@@ -1408,6 +1475,29 @@ class MCPServer:
             error_msg = f"Failed to resolve target: {err}"
             _LOGGER.error(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        # Only entities exposed to Assist may be controlled
+        refused = [
+            entity_id
+            for entity_id in resolved_target.get("entity_id", [])
+            if not async_should_expose(self.hass, "conversation", entity_id)
+        ]
+        if refused:
+            _LOGGER.warning(
+                "Refused action on entities not exposed to Assist: %s",
+                _sanitize_log_value(refused, 200),
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "❌ Error: these entities are not exposed to Assist and "
+                            f"cannot be controlled: {', '.join(map(str, refused))}"
+                        ),
+                    }
+                ]
+            }
 
         # Deprecated color_temp (mireds) was removed from light.turn_on in HA
         # 2026.3. Auto-convert instead of rejecting so the LLM doesn't need a
@@ -1854,9 +1944,19 @@ class MCPServer:
                 else:
                     resolved["entity_id"] = area_entities
 
-        # Pass through device_id if present (HA will handle it)
+        # Resolve device_id to its entities so each one is exposure-checked
         if "device_id" in target:
-            resolved["device_id"] = target["device_id"]
-            _LOGGER.debug(f"Using device_id: {target['device_id']}")
+            device_ids = target["device_id"]
+            if isinstance(device_ids, str):
+                device_ids = [device_ids]
+
+            entity_registry = er.async_get(self.hass)
+            device_entities = [
+                entry.entity_id
+                for device_id in device_ids
+                for entry in er.async_entries_for_device(entity_registry, device_id)
+            ]
+            _LOGGER.debug(f"Found {len(device_entities)} entities for devices {device_ids}")
+            resolved["entity_id"] = _merge_ids(resolved.get("entity_id"), device_entities)
 
         return resolved if resolved else target

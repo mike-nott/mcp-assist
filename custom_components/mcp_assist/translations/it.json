@@ -17,6 +17,9 @@
           "api_key": "Chiave API",
           "mcp_port": "Porta server MCP",
           "hermes_url": "URL del server Hermes"
+        },
+        "data_description": {
+          "api_key": "Obbligatoria per i provider cloud. Facoltativa per i server locali (LM Studio, llama.cpp, Ollama, vLLM): lasciala vuota a meno che il server non richieda una chiave."
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "Frasi di seguito",
           "end_words": "Parole per terminare conversazione",
           "timeout": "Timeout risposta",
+          "thinking_mode": "Ragionamento",
           "debug_mode": "Modalita debug",
           "ollama_keep_alive": "Mantieni Ollama attivo",
           "ollama_num_ctx": "Finestra di contesto Ollama",
@@ -56,7 +60,8 @@
           "hermes_session_key": "Chiave stabile che delimita la memoria a lungo termine di Hermes per questo profilo.",
           "openclaw_agent_id": "L'agente OpenClaw che risponde alle richieste di questo profilo. Deve corrispondere a un agente configurato in OpenClaw. Il valore predefinito è 'main'.",
           "openclaw_session_mode": "'Per conversation' assegna a ogni conversazione di Home Assistant una propria sessione OpenClaw, in cui restano le domande successive. 'Fixed' invia tutte le richieste all'unica sessione indicata in Chiave di sessione.",
-          "system_prompt": "Inviato a OpenClaw con ogni richiesta come istruzione di sistema aggiuntiva, ad esempio per definire un personaggio. Lascia vuoto per usare le istruzioni proprie dell'agente. La stanza del satellite vocale viene aggiunta automaticamente."
+          "system_prompt": "Inviato a OpenClaw con ogni richiesta come istruzione di sistema aggiuntiva, ad esempio per definire un personaggio. Lascia vuoto per usare le istruzioni proprie dell'agente. La stanza del satellite vocale viene aggiunta automaticamente.",
+          "thinking_mode": "Controlla il ragionamento dei modelli che pensano prima di rispondere. Disattivato è il più veloce per la voce. Predefinito del server non invia nulla. Non tutti i server lo rispettano (poco affidabile con LM Studio)."
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "Porta server MCP",
           "search_provider": "Ricerca web",
           "brave_api_key": "Chiave API Brave Search",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "IP/Intervalli aggiuntivi consentiti",
           "enable_gap_filling": "Abilita indice intelligente entita",
           "max_entities_per_discovery": "Max entita per ricerca (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "Indirizzo della tua istanza SearXNG, ad es. http://192.168.1.10:8888. L'output JSON deve essere abilitato nel suo settings.yml (search: formats: json)."
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "Frasi di seguito",
           "end_words": "Parole per terminare conversazione",
           "timeout": "Timeout risposta",
+          "thinking_mode": "Ragionamento",
           "debug_mode": "Modalita debug",
           "ollama_keep_alive": "Mantieni Ollama attivo",
           "ollama_num_ctx": "Finestra di contesto Ollama",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "Usato solo quando la Modalità sessione è 'Fixed'. Inserisci una chiave breve come 'main' o un ID sessione completo come agent:main:main.",
           "hermes_session_key": "Chiave stabile che delimita la memoria a lungo termine di Hermes per questo profilo.",
           "openclaw_agent_id": "L'agente OpenClaw che risponde alle richieste di questo profilo. Deve corrispondere a un agente configurato in OpenClaw. Il valore predefinito è 'main'.",
-          "openclaw_session_mode": "'Per conversation' assegna a ogni conversazione di Home Assistant una propria sessione OpenClaw, in cui restano le domande successive. 'Fixed' invia tutte le richieste all'unica sessione indicata in Chiave di sessione."
+          "openclaw_session_mode": "'Per conversation' assegna a ogni conversazione di Home Assistant una propria sessione OpenClaw, in cui restano le domande successive. 'Fixed' invia tutte le richieste all'unica sessione indicata in Chiave di sessione.",
+          "api_key": "Obbligatoria per i provider cloud. Facoltativa per i server locali (LM Studio, llama.cpp, Ollama, vLLM): lasciala vuota a meno che il server non richieda una chiave.",
+          "thinking_mode": "Controlla il ragionamento dei modelli che pensano prima di rispondere. Disattivato è il più veloce per la voce. Predefinito del server non invia nulla. Non tutti i server lo rispettano (poco affidabile con LM Studio)."
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "Porta server MCP",
           "search_provider": "Ricerca web",
           "brave_api_key": "Chiave API Brave Search",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "IP/Intervalli aggiuntivi consentiti",
           "enable_gap_filling": "Abilita indice intelligente entita",
           "max_entities_per_discovery": "Max entita per ricerca (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "Indirizzo della tua istanza SearXNG, ad es. http://192.168.1.10:8888. L'output JSON deve essere abilitato nel suo settings.yml (search: formats: json)."
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "Predefinito del server",
+        "off": "Disattivato",
+        "low": "Basso",
+        "medium": "Medio",
+        "high": "Alto"
       }
     }
   }

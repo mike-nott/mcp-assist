@@ -17,6 +17,9 @@
           "api_key": "API密钥",
           "mcp_port": "MCP服务器端口",
           "hermes_url": "Hermes服务器URL"
+        },
+        "data_description": {
+          "api_key": "云服务商必填。本地服务器（LM Studio、llama.cpp、Ollama、vLLM）可选：除非服务器需要密钥，否则留空。"
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "后续跟进短语",
           "end_words": "结束对话词语",
           "timeout": "响应超时",
+          "thinking_mode": "思考",
           "debug_mode": "调试模式",
           "ollama_keep_alive": "保持Ollama活跃",
           "ollama_num_ctx": "Ollama上下文窗口",
@@ -56,7 +60,8 @@
           "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。",
           "openclaw_agent_id": "负责回应此配置文件请求的 OpenClaw 代理。必须与 OpenClaw 中已配置的代理一致。默认值为 'main'。",
           "openclaw_session_mode": "'Per conversation' 为每个 Home Assistant 对话分配独立的 OpenClaw 会话，后续提问保留在该会话中。'Fixed' 将所有请求发送到会话密钥中指定的同一个会话。",
-          "system_prompt": "随每个请求作为额外的系统提示词发送给 OpenClaw，例如用于设定人设。留空则使用代理自己的提示词。语音卫星所在的房间会自动添加。"
+          "system_prompt": "随每个请求作为额外的系统提示词发送给 OpenClaw，例如用于设定人设。留空则使用代理自己的提示词。语音卫星所在的房间会自动添加。",
+          "thinking_mode": "控制会在回答前思考的模型的推理。关闭对语音最快。服务器默认不发送任何设置。并非所有服务器都支持（LM Studio 不稳定）。"
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "MCP服务器端口",
           "search_provider": "网络搜索",
           "brave_api_key": "Brave搜索API密钥",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "额外允许的IP/范围",
           "enable_gap_filling": "启用智能实体索引",
           "max_entities_per_discovery": "每次发现最大实体数 (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "您的 SearXNG 实例地址，例如 http://192.168.1.10:8888。必须在其 settings.yml 中启用 JSON 输出（search: formats: json）。"
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "后续跟进短语",
           "end_words": "结束对话词语",
           "timeout": "响应超时",
+          "thinking_mode": "思考",
           "debug_mode": "调试模式",
           "ollama_keep_alive": "保持Ollama活跃",
           "ollama_num_ctx": "Ollama上下文窗口",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "仅在会话模式为 'Fixed' 时使用。可输入 'main' 这样的短密钥，或 agent:main:main 这样的完整会话 ID。",
           "hermes_session_key": "用于限定此配置文件的Hermes长期记忆的固定密钥。",
           "openclaw_agent_id": "负责回应此配置文件请求的 OpenClaw 代理。必须与 OpenClaw 中已配置的代理一致。默认值为 'main'。",
-          "openclaw_session_mode": "'Per conversation' 为每个 Home Assistant 对话分配独立的 OpenClaw 会话，后续提问保留在该会话中。'Fixed' 将所有请求发送到会话密钥中指定的同一个会话。"
+          "openclaw_session_mode": "'Per conversation' 为每个 Home Assistant 对话分配独立的 OpenClaw 会话，后续提问保留在该会话中。'Fixed' 将所有请求发送到会话密钥中指定的同一个会话。",
+          "api_key": "云服务商必填。本地服务器（LM Studio、llama.cpp、Ollama、vLLM）可选：除非服务器需要密钥，否则留空。",
+          "thinking_mode": "控制会在回答前思考的模型的推理。关闭对语音最快。服务器默认不发送任何设置。并非所有服务器都支持（LM Studio 不稳定）。"
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "MCP服务器端口",
           "search_provider": "网络搜索",
           "brave_api_key": "Brave搜索API密钥",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "额外允许的IP/范围",
           "enable_gap_filling": "启用智能实体索引",
           "max_entities_per_discovery": "每次发现最大实体数 (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "您的 SearXNG 实例地址，例如 http://192.168.1.10:8888。必须在其 settings.yml 中启用 JSON 输出（search: formats: json）。"
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "服务器默认",
+        "off": "关闭",
+        "low": "低",
+        "medium": "中",
+        "high": "高"
       }
     }
   }

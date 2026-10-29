@@ -17,6 +17,9 @@
           "api_key": "API कुंजी",
           "mcp_port": "MCP सर्वर पोर्ट",
           "hermes_url": "Hermes सर्वर URL"
+        },
+        "data_description": {
+          "api_key": "क्लाउड प्रदाताओं के लिए आवश्यक। लोकल सर्वर (LM Studio, llama.cpp, Ollama, vLLM) के लिए वैकल्पिक: जब तक सर्वर को कुंजी की ज़रूरत न हो, इसे खाली छोड़ें।"
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "अनुवर्ती वाक्यांश",
           "end_words": "बातचीत समाप्त करने के शब्द",
           "timeout": "प्रतिक्रिया समय समाप्त",
+          "thinking_mode": "सोचना",
           "debug_mode": "डीबग मोड",
           "ollama_keep_alive": "Ollama जीवित रखें",
           "ollama_num_ctx": "Ollama संदर्भ विंडो",
@@ -56,7 +60,8 @@
           "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।",
           "openclaw_agent_id": "वह OpenClaw एजेंट जो इस प्रोफ़ाइल के अनुरोधों का उत्तर देता है। यह OpenClaw में कॉन्फ़िगर किए गए एजेंट से मेल खाना चाहिए। डिफ़ॉल्ट 'main' है।",
           "openclaw_session_mode": "'Per conversation' हर Home Assistant बातचीत को अपना OpenClaw सत्र देता है, और अनुवर्ती प्रश्न उसी में रहते हैं। 'Fixed' सभी अनुरोधों को सत्र कुंजी में तय किए गए एक ही सत्र में भेजता है।",
-          "system_prompt": "हर अनुरोध के साथ OpenClaw को अतिरिक्त सिस्टम प्रॉम्प्ट के रूप में भेजा जाता है, उदाहरण के लिए कोई व्यक्तित्व तय करने के लिए। एजेंट के अपने प्रॉम्प्ट इस्तेमाल करने के लिए इसे खाली छोड़ें। वॉइस सैटेलाइट का कमरा अपने आप जुड़ जाता है।"
+          "system_prompt": "हर अनुरोध के साथ OpenClaw को अतिरिक्त सिस्टम प्रॉम्प्ट के रूप में भेजा जाता है, उदाहरण के लिए कोई व्यक्तित्व तय करने के लिए। एजेंट के अपने प्रॉम्प्ट इस्तेमाल करने के लिए इसे खाली छोड़ें। वॉइस सैटेलाइट का कमरा अपने आप जुड़ जाता है।",
+          "thinking_mode": "उन मॉडलों की तर्क प्रक्रिया नियंत्रित करता है जो जवाब देने से पहले सोचते हैं। आवाज़ के लिए बंद सबसे तेज़ है। सर्वर डिफ़ॉल्ट कुछ नहीं भेजता। हर सर्वर इसे नहीं मानता (LM Studio में अविश्वसनीय)।"
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "MCP सर्वर पोर्ट",
           "search_provider": "वेब खोज",
           "brave_api_key": "Brave Search API कुंजी",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "अतिरिक्त अनुमत IP/रेंज",
           "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें",
           "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "आपके SearXNG इंस्टेंस का पता, जैसे http://192.168.1.10:8888। इसकी settings.yml में JSON आउटपुट चालू होना चाहिए (search: formats: json)।"
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "अनुवर्ती वाक्यांश",
           "end_words": "बातचीत समाप्त करने के शब्द",
           "timeout": "प्रतिक्रिया समय समाप्त",
+          "thinking_mode": "सोचना",
           "debug_mode": "डीबग मोड",
           "ollama_keep_alive": "Ollama जीवित रखें",
           "ollama_num_ctx": "Ollama संदर्भ विंडो",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "केवल तब उपयोग होता है जब सत्र मोड 'Fixed' हो। 'main' जैसी छोटी कुंजी या agent:main:main जैसा पूरा सत्र ID दर्ज करें।",
           "hermes_session_key": "इस प्रोफ़ाइल के लिए Hermes की दीर्घकालिक मेमोरी को सीमित करने वाली स्थिर कुंजी।",
           "openclaw_agent_id": "वह OpenClaw एजेंट जो इस प्रोफ़ाइल के अनुरोधों का उत्तर देता है। यह OpenClaw में कॉन्फ़िगर किए गए एजेंट से मेल खाना चाहिए। डिफ़ॉल्ट 'main' है।",
-          "openclaw_session_mode": "'Per conversation' हर Home Assistant बातचीत को अपना OpenClaw सत्र देता है, और अनुवर्ती प्रश्न उसी में रहते हैं। 'Fixed' सभी अनुरोधों को सत्र कुंजी में तय किए गए एक ही सत्र में भेजता है।"
+          "openclaw_session_mode": "'Per conversation' हर Home Assistant बातचीत को अपना OpenClaw सत्र देता है, और अनुवर्ती प्रश्न उसी में रहते हैं। 'Fixed' सभी अनुरोधों को सत्र कुंजी में तय किए गए एक ही सत्र में भेजता है।",
+          "api_key": "क्लाउड प्रदाताओं के लिए आवश्यक। लोकल सर्वर (LM Studio, llama.cpp, Ollama, vLLM) के लिए वैकल्पिक: जब तक सर्वर को कुंजी की ज़रूरत न हो, इसे खाली छोड़ें।",
+          "thinking_mode": "उन मॉडलों की तर्क प्रक्रिया नियंत्रित करता है जो जवाब देने से पहले सोचते हैं। आवाज़ के लिए बंद सबसे तेज़ है। सर्वर डिफ़ॉल्ट कुछ नहीं भेजता। हर सर्वर इसे नहीं मानता (LM Studio में अविश्वसनीय)।"
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "MCP सर्वर पोर्ट",
           "search_provider": "वेब खोज",
           "brave_api_key": "Brave Search API कुंजी",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "अतिरिक्त अनुमत IP/रेंज",
           "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें",
           "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "आपके SearXNG इंस्टेंस का पता, जैसे http://192.168.1.10:8888। इसकी settings.yml में JSON आउटपुट चालू होना चाहिए (search: formats: json)।"
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "सर्वर डिफ़ॉल्ट",
+        "off": "बंद",
+        "low": "कम",
+        "medium": "मध्यम",
+        "high": "उच्च"
       }
     }
   }

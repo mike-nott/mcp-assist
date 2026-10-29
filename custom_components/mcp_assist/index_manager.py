@@ -401,10 +401,12 @@ class IndexManager:
             for label_id in getattr(area_entry, "labels", set()) or set():
                 label_areas[label_id].add(area_entry.id)
 
+        # Looked up via the registry helper: mapping access on
+        # device_reg.devices is deprecated (removed in HA 2027.9)
         label_devices = defaultdict(set)
-        for device_entry in device_reg.devices.values():
-            for label_id in getattr(device_entry, "labels", set()) or set():
-                label_devices[label_id].add(device_entry.id)
+        for label_entry in label_reg.async_list_labels():
+            for device_entry in dr.async_entries_for_label(device_reg, label_entry.label_id):
+                label_devices[label_entry.label_id].add(device_entry.id)
 
         label_entities = defaultdict(set)
         for entity_entry in entity_reg.entities.values():

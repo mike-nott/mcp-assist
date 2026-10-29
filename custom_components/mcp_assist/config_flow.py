@@ -46,6 +46,9 @@ from .const import (
     CONF_MAX_HISTORY,
     CONF_MAX_ITERATIONS,
     CONF_DEBUG_MODE,
+    CONF_THINKING_MODE,
+    DEFAULT_THINKING_MODE,
+    THINKING_MODES,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
@@ -123,13 +126,15 @@ from .const import (
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
     CONF_SEARXNG_URL,
-    DEFAULT_SEARXNG_URL, 
+    DEFAULT_SEARXNG_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]:
+async def fetch_models_from_lmstudio(
+    hass: HomeAssistant, url: str, api_key: str = ""
+) -> list[str]:
     """Fetch available models from local inference server (LM Studio/Ollama)."""
     _LOGGER.info("🌐 FETCH: Starting model fetch from %s", url)
     try:
@@ -139,7 +144,8 @@ async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]
         timeout = aiohttp.ClientTimeout(total=5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             _LOGGER.info("📡 FETCH: Sending request to %s/v1/models", url)
-            async with session.get(f"{url}/v1/models") as resp:
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            async with session.get(f"{url}/v1/models", headers=headers) as resp:
                 _LOGGER.info("📥 FETCH: Got response with status %d", resp.status)
                 if resp.status != 200:
                     _LOGGER.warning("⚠️ FETCH: Non-200 status, returning empty list")
@@ -473,6 +479,32 @@ async def validate_lmstudio_connection(
     return {"title": f"LM Studio ({model_name})"}
 
 
+def _with_thinking_field(schema_dict: dict, server_type: str, current: str) -> dict:
+    """Add the thinking mode dropdown just before Debug Mode.
+
+    Hermes runs its own agent, and Anthropic's compatible endpoint has no
+    equivalent request field, so neither gets the setting.
+    """
+    if server_type in (SERVER_TYPE_HERMES, SERVER_TYPE_ANTHROPIC):
+        return schema_dict
+    field = vol.Required(CONF_THINKING_MODE, default=current)
+    selector = SelectSelector(
+        SelectSelectorConfig(
+            options=THINKING_MODES,
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key="thinking_mode",
+        )
+    )
+    result = {}
+    for key, value in schema_dict.items():
+        if str(key) == CONF_DEBUG_MODE:
+            result[field] = selector
+        result[key] = value
+    if field not in result:
+        result[field] = selector
+    return result
+
+
 def _openclaw_session_schema(
     agent_id: str, session_mode: str, session_key: str, system_prompt: str
 ) -> dict:
@@ -604,6 +636,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             server_schema = vol.Schema(
                 {
                     vol.Required(CONF_LMSTUDIO_URL, default=default_url): str,
+                    vol.Optional(CONF_API_KEY): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                 }
             )
         elif server_type == SERVER_TYPE_OPENAI:
@@ -744,7 +779,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL
             ).rstrip("/")
             _LOGGER.debug("Attempting to fetch models from %s", server_url)
-            models = await fetch_models_from_lmstudio(self.hass, server_url)
+            models = await fetch_models_from_lmstudio(
+                self.hass, server_url, self.step2_data.get(CONF_API_KEY, "")
+            )
             _LOGGER.debug("Fetched %d models: %s", len(models), models)
             # Show error if fetch failed
             if not models:
@@ -935,6 +972,9 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_BRAVE_API_KEY: existing_entry.data.get(
                                 CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
                             ),
+                            CONF_SEARXNG_URL: existing_entry.data.get(
+                                CONF_SEARXNG_URL, DEFAULT_SEARXNG_URL
+                            ),
                             CONF_ALLOWED_IPS: existing_entry.data.get(
                                 CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS
                             ),
@@ -1098,7 +1138,11 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             )
 
-        advanced_schema = vol.Schema(advanced_schema_dict)
+        advanced_schema = vol.Schema(
+            _with_thinking_field(
+                advanced_schema_dict, server_type, DEFAULT_THINKING_MODE
+            )
+        )
 
         # Set description based on server type
         if server_type == SERVER_TYPE_OPENCLAW:
@@ -1215,7 +1259,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             },
                             {
                                 "value": "searxng",
-                                "label": "SearXNG Search Requires local search server setup",
+                                "label": "SearXNG Search (requires local search server)",
                             },
                         ],
                         mode=SelectSelectorMode.DROPDOWN,
@@ -1326,6 +1370,14 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 elif server_type == SERVER_TYPE_HERMES:
                     if CONF_SYSTEM_PROMPT not in user_input:
                         user_input[CONF_SYSTEM_PROMPT] = ""  # Hermes manages its own
+                elif server_type in (
+                    SERVER_TYPE_LMSTUDIO,
+                    SERVER_TYPE_LLAMACPP,
+                    SERVER_TYPE_OLLAMA,
+                    SERVER_TYPE_VLLM,
+                ):
+                    # A cleared optional key is omitted; store "" so it is removed
+                    user_input.setdefault(CONF_API_KEY, "")
 
                 # Store profile settings and proceed to MCP server settings
                 self.profile_options = user_input
@@ -1367,7 +1419,11 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 f"🔍 OPTIONS: Attempting to fetch models from {server_type} at {server_url}"
             )
             try:
-                models = await fetch_models_from_lmstudio(self.hass, server_url)
+                models = await fetch_models_from_lmstudio(
+                    self.hass,
+                    server_url,
+                    options.get(CONF_API_KEY, data.get(CONF_API_KEY, "")),
+                )
                 _LOGGER.info(f"✅ OPTIONS: Successfully fetched {len(models)} models")
             except Exception as err:
                 _LOGGER.error(f"❌ OPTIONS: Failed to fetch models: {err}")
@@ -1489,6 +1545,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 CONF_LMSTUDIO_URL, data.get(CONF_LMSTUDIO_URL, DEFAULT_LMSTUDIO_URL)
             )
             schema_dict[vol.Required(CONF_LMSTUDIO_URL, default=server_url)] = str
+            api_key = options.get(CONF_API_KEY, data.get(CONF_API_KEY, ""))
+            schema_dict[
+                vol.Optional(CONF_API_KEY, description={"suggested_value": api_key})
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
         elif server_type == SERVER_TYPE_OPENAI:
             # OpenAI - hybrid (URL + API key)
             server_url = options.get(
@@ -1768,7 +1828,16 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             )
 
         # Create the schema from the built dictionary
-        options_schema = vol.Schema(schema_dict)
+        options_schema = vol.Schema(
+            _with_thinking_field(
+                schema_dict,
+                server_type,
+                options.get(
+                    CONF_THINKING_MODE,
+                    data.get(CONF_THINKING_MODE, DEFAULT_THINKING_MODE),
+                ),
+            )
+        )
 
         # Set description based on server type
         if server_type == SERVER_TYPE_OPENCLAW:

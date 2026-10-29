@@ -127,7 +127,7 @@ class SmartDiscovery:
             return await self._discover_pet_entities(name_contains, limit)
         elif query_type == QueryType.AGGREGATE and not device_class and not name_pattern and not inferred_type and not floor and not label:
             return await self._discover_aggregate_entities(domain, state, limit)
-        elif area and not floor and not label and not device_class and not name_pattern and not inferred_type:
+        elif area and not name_contains and not floor and not label and not device_class and not name_pattern and not inferred_type:
             return await self._discover_area_entities(area, domain, state, limit)
         else:
             # Fall back to general discovery (handles device_class, name_pattern, and inferred_type)
@@ -166,7 +166,8 @@ class SmartDiscovery:
                 return QueryType.PERSON
 
             # Check for aggregate queries
-            if any(word in name_lower for word in ["who", "anyone", "everyone", "all"]):
+            # Whole words only: "all" must not match "hallway"
+            if re.search(r"\b(who|anyone|everyone|all)\b", name_lower):
                 return QueryType.AGGREGATE
 
         # Area-based query
@@ -1109,13 +1110,14 @@ class SmartDiscovery:
                         entity_count += 1
 
             # Count entities via devices in this area
-            for device_entry in device_registry.devices.values():
-                if device_entry.area_id == area_entry.id:
-                    for entity_entry in entity_registry.entities.values():
-                        if (entity_entry.device_id == device_entry.id
-                            and not entity_entry.area_id  # Not already counted
-                            and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
-                            entity_count += 1
+            # Looked up via the registry helper: mapping access on
+            # device_registry.devices is deprecated (removed in HA 2027.9)
+            for device_entry in dr.async_entries_for_area(device_registry, area_entry.id):
+                for entity_entry in entity_registry.entities.values():
+                    if (entity_entry.device_id == device_entry.id
+                        and not entity_entry.area_id  # Not already counted
+                        and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
+                        entity_count += 1
 
             floor_id = getattr(area_entry, "floor_id", None)
             floor_name = None

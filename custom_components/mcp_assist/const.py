@@ -44,7 +44,8 @@ CONF_FOLLOW_UP_PHRASES = "follow_up_phrases"
 CONF_END_WORDS = "end_words"
 CONF_CLEAN_RESPONSES = "clean_responses"
 CONF_TIMEOUT = "timeout"
-CONF_SEARXNG_URL= "searxng_url"
+CONF_THINKING_MODE = "thinking_mode"
+CONF_SEARXNG_URL = "searxng_url"
 
 # Default values
 DEFAULT_SERVER_TYPE = "lmstudio"
@@ -111,6 +112,9 @@ DEFAULT_FOLLOW_UP_PHRASES = "anything else, what else, would you, do you, should
 DEFAULT_END_WORDS = "stop, cancel, no, nope, thanks, thank you, bye, goodbye, done, never mind, nevermind, forget it, that's all, that's it"
 DEFAULT_CLEAN_RESPONSES = False
 DEFAULT_TIMEOUT = 30
+# Thinking/reasoning control: "default" sends nothing (server decides)
+THINKING_MODES = ["default", "off", "low", "medium", "high"]
+DEFAULT_THINKING_MODE = "default"
 
 # MCP Server settings
 MCP_SERVER_NAME = "ha-entity-discovery"

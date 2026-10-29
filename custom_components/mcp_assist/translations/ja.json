@@ -17,6 +17,9 @@
           "api_key": "APIキー",
           "mcp_port": "MCPサーバーポート",
           "hermes_url": "HermesサーバーURL"
+        },
+        "data_description": {
+          "api_key": "クラウドプロバイダーでは必須です。ローカルサーバー（LM Studio、llama.cpp、Ollama、vLLM）では任意です。サーバーがキーを要求しない場合は空欄にしてください。"
         }
       },
       "model": {
@@ -41,6 +44,7 @@
           "follow_up_phrases": "フォローアップフレーズ",
           "end_words": "会話終了ワード",
           "timeout": "応答タイムアウト",
+          "thinking_mode": "思考",
           "debug_mode": "デバッグモード",
           "ollama_keep_alive": "Ollamaを維持",
           "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
@@ -56,7 +60,8 @@
           "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。",
           "openclaw_agent_id": "このプロファイルのリクエストに応答するOpenClawエージェントです。OpenClawで設定済みのエージェントと一致する必要があります。デフォルトは 'main' です。",
           "openclaw_session_mode": "'Per conversation' は、Home Assistantの会話ごとに専用のOpenClawセッションを割り当て、フォローアップの質問はその中で続きます。'Fixed' は、すべてのリクエストをセッションキーで指定した1つのセッションに送ります。",
-          "system_prompt": "追加のシステムプロンプトとして、リクエストごとにOpenClawへ送信されます。たとえばペルソナの設定に使えます。エージェント自身のプロンプトを使う場合は空欄にしてください。音声サテライトの部屋は自動的に追加されます。"
+          "system_prompt": "追加のシステムプロンプトとして、リクエストごとにOpenClawへ送信されます。たとえばペルソナの設定に使えます。エージェント自身のプロンプトを使う場合は空欄にしてください。音声サテライトの部屋は自動的に追加されます。",
+          "thinking_mode": "回答前に思考するモデルの推論を制御します。オフが音声では最速です。サーバー既定では何も送信しません。すべてのサーバーが対応しているわけではありません（LM Studio では不安定）。"
         }
       },
       "mcp_server": {
@@ -66,9 +71,13 @@
           "mcp_port": "MCPサーバーポート",
           "search_provider": "Web検索",
           "brave_api_key": "Brave Search APIキー",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "追加の許可IP/範囲",
           "enable_gap_filling": "スマートエンティティインデックスを有効化",
           "max_entities_per_discovery": "検索あたりの最大エンティティ数 (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "SearXNG インスタンスのアドレスです（例: http://192.168.1.10:8888）。settings.yml で JSON 出力を有効にする必要があります（search: formats: json）。"
         }
       }
     },
@@ -109,6 +118,7 @@
           "follow_up_phrases": "フォローアップフレーズ",
           "end_words": "会話終了ワード",
           "timeout": "応答タイムアウト",
+          "thinking_mode": "思考",
           "debug_mode": "デバッグモード",
           "ollama_keep_alive": "Ollamaを維持",
           "ollama_num_ctx": "Ollamaコンテキストウィンドウ",
@@ -123,7 +133,9 @@
           "openclaw_session_key": "セッションモードが 'Fixed' の場合のみ使用されます。'main' のような短いキーか、agent:main:main のような完全なセッションIDを入力します。",
           "hermes_session_key": "このプロファイルのHermes長期メモリを区分する固定キー。",
           "openclaw_agent_id": "このプロファイルのリクエストに応答するOpenClawエージェントです。OpenClawで設定済みのエージェントと一致する必要があります。デフォルトは 'main' です。",
-          "openclaw_session_mode": "'Per conversation' は、Home Assistantの会話ごとに専用のOpenClawセッションを割り当て、フォローアップの質問はその中で続きます。'Fixed' は、すべてのリクエストをセッションキーで指定した1つのセッションに送ります。"
+          "openclaw_session_mode": "'Per conversation' は、Home Assistantの会話ごとに専用のOpenClawセッションを割り当て、フォローアップの質問はその中で続きます。'Fixed' は、すべてのリクエストをセッションキーで指定した1つのセッションに送ります。",
+          "api_key": "クラウドプロバイダーでは必須です。ローカルサーバー（LM Studio、llama.cpp、Ollama、vLLM）では任意です。サーバーがキーを要求しない場合は空欄にしてください。",
+          "thinking_mode": "回答前に思考するモデルの推論を制御します。オフが音声では最速です。サーバー既定では何も送信しません。すべてのサーバーが対応しているわけではありません（LM Studio では不安定）。"
         }
       },
       "mcp_server": {
@@ -133,9 +145,13 @@
           "mcp_port": "MCPサーバーポート",
           "search_provider": "Web検索",
           "brave_api_key": "Brave Search APIキー",
+          "searxng_url": "SearXNG URL",
           "allowed_ips": "追加の許可IP/範囲",
           "enable_gap_filling": "スマートエンティティインデックスを有効化",
           "max_entities_per_discovery": "検索あたりの最大エンティティ数 (20-500)"
+        },
+        "data_description": {
+          "searxng_url": "SearXNG インスタンスのアドレスです（例: http://192.168.1.10:8888）。settings.yml で JSON 出力を有効にする必要があります（search: formats: json）。"
         }
       }
     }
@@ -144,6 +160,17 @@
     "conversation": {
       "mcp_assist": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "thinking_mode": {
+      "options": {
+        "default": "サーバー既定",
+        "off": "オフ",
+        "low": "低",
+        "medium": "中",
+        "high": "高"
       }
     }
   }
