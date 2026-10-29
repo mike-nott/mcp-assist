@@ -1,17 +1,19 @@
 # MCP Assist for Home Assistant
 
-A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
+A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, vLLM, OpenAI (and OpenAI-compatible services), Google Gemini, Anthropic Claude, and OpenRouter, and can hand conversations to an OpenClaw or Hermes Agent gateway.
 
 ## Key Features
 
 - ✅ **95% Token Reduction**: Uses MCP tools for dynamic entity discovery instead of sending all entities
 - ✅ **No Entity Dumps**: Never sends 12,000+ token entity lists to the LLM
 - ✅ **Smart Entity Index**: Pre-generated system structure index (~400-800 tokens) for context-aware queries
-- ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
+- ✅ **Multi-Platform Support**: Works with LM Studio, llama.cpp, Ollama, vLLM, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter
+- ✅ **Agent Gateways**: Send voice requests to an [OpenClaw](#openclaw) agent or Hermes Agent (experimental)
 - ✅ **Multilingual Support**: 21 languages with localized UI, system prompts, and speech detection
 - ✅ **Multi-turn Conversations**: Maintains conversation context and history
 - ✅ **Dynamic Discovery**: Finds entities by area, type, device_class, state, or name on-demand
-- ✅ **Web Search Tools**: Optional DuckDuckGo or Brave Search integration for current information
+- ✅ **Thinking Control**: Turn reasoning off (or set its level) per profile for faster voice replies
+- ✅ **Web Search Tools**: Optional DuckDuckGo, Brave Search, or SearXNG integration for current information
 - ✅ **Works with 1000+ Entities**: Efficient even with large Home Assistant installations
 - ✅ **Multi-Profile Support**: Run multiple conversation agents with different models
 
@@ -33,12 +35,14 @@ Instead of dumping all entities, MCP Assist:
    - `get_index` - Get system structure index (areas, domains, device_classes, people, etc.)
    - `discover_entities` - Find entities by type, area, domain, device_class, or state
    - `get_entity_details` - Get current state and attributes
-   - `perform_action` - Control devices
+   - `get_entity_history` - Get recent state changes
+   - `perform_action` - Control devices (only entities exposed to Assist)
    - `run_script` - Execute scripts and return response data
    - `run_automation` - Trigger automations manually
    - `list_areas` - List all areas in your home
    - `list_domains` - List all entity types
    - `set_conversation_state` - Smart follow-up handling
+   - `search` / `read_url` - Web search and page reading (when web search is enabled)
 3. **LLM uses the index for smart queries** - Understands what exists without full context dump
 4. **LLM discovers on-demand** - Only fetches the entities it needs for each request
 5. **Token usage drops** from 12,000+ to ~400 tokens per request
@@ -63,8 +67,9 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 
 - Home Assistant 2024.1+
 - One of:
-  - **Local LLMs**: LM Studio v0.3.17+, llama.cpp, or Ollama
-  - **Cloud LLMs**: OpenAI, Google Gemini, Anthropic Claude, or OpenRouter (API key required)
+  - **Local LLMs**: LM Studio v0.3.17+, llama.cpp, Ollama, or vLLM
+  - **Cloud LLMs**: OpenAI (or an OpenAI-compatible service), Google Gemini, Anthropic Claude, or OpenRouter (API key required)
+  - **Agent gateways**: OpenClaw (protocol 4) or Hermes Agent
 - Python 3.11+
 
 ## Installation
@@ -97,22 +102,34 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
   - **LM Studio** - Local, free, runs on your machine
   - **llama.cpp** - Local, free, official llama.cpp server
   - **Ollama** - Local, free, command-line based
-  - **OpenAI** - Cloud, paid, GPT-5.2 series
-  - **Google Gemini** - Cloud, paid/free tier, Gemini 3.0 series
+  - **vLLM** - Local, free, high-throughput inference server
+  - **OpenAI** - Cloud, paid, GPT-5 series (or any OpenAI-compatible service via a custom URL)
+  - **Google Gemini** - Cloud, paid/free tier
+  - **Anthropic Claude** - Cloud, paid
   - **OpenRouter** - Cloud, multi-model gateway with access to 200+ models
+  - **OpenClaw** - Hands each request to an OpenClaw agent (see [OpenClaw](#openclaw))
+  - **Hermes Agent** - Hands each request to a Hermes Agent server (experimental)
 
 **Step 2 - Server Configuration:**
 
-*For Local Servers (LM Studio / llama.cpp / Ollama):*
+*For Local Servers (LM Studio / llama.cpp / Ollama / vLLM):*
 - Server URL: Where your LLM server is running
   - LM Studio: `http://localhost:1234` (default)
   - llama.cpp: `http://localhost:8080` (default)
   - Ollama: `http://localhost:11434` (default)
-- MCP Server Port: Port for the MCP server (default: 8090)
+  - vLLM: `http://localhost:8000` (default)
+- API Key (optional): Only if your server requires one (e.g. LM Studio authentication, vLLM `--api-key`)
 
 *For Cloud Providers (OpenAI / Gemini / Anthropic / OpenRouter):*
-- API Key: Your provider API key (see below for setup)
-- MCP Server Port: Port for the MCP server (default: 8090)
+- API Key: Your provider API key
+- OpenAI also lets you change the URL to use an OpenAI-compatible service (enter it without `/v1`)
+
+*For OpenClaw:*
+- Gateway host, port (default: `18789`), token, and SSL
+- On first connection, approve the device on the OpenClaw server (`openclaw devices approve` or the Control UI), then click Submit
+
+*For Hermes Agent:*
+- Server URL (default: `http://localhost:8642`) and API key
 
 **Step 3 - Model & Prompts:**
 - Model Name: Select from auto-loaded models or enter manually
@@ -127,8 +144,9 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 - End Conversation Words: Words/phrases that end conversations (default: "bye, thanks, stop", etc.)
 - Control Home Assistant: Enable/disable device control
 - Max Tool Iterations: How many tool calls allowed per request
-- Web Search Provider: Choose none, DuckDuckGo, or Brave Search
-- Brave Search API Key: Your API key (if using Brave Search)
+- Clean Responses for Voice Output: Strip markdown and emojis, and speak symbols as words in the reply's language
+- Timeout: How long to wait for the LLM
+- **Thinking**: Server default / Off / Low / Medium / High. Off is fastest for voice. Server default sends nothing. Supported for Ollama, vLLM, llama.cpp, LM Studio (unreliable), OpenAI, Gemini, OpenRouter, and OpenClaw
 - Debug Mode: Extra logging for troubleshooting
 - **Ollama Keep Alive** (Ollama only): Control how long models stay loaded in memory
   - `-1` = Keep loaded indefinitely
@@ -136,6 +154,9 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
   - `"5m"` = Keep for 5 minutes (default)
   - Duration strings like `"24h"`, `"168h"` also supported
 - **Ollama Context Window** (Ollama only): Custom context window size (0 = use model default)
+
+**Step 5 - Shared MCP Server Settings (first profile only):**
+- MCP Server Port (default: 8090), allowed IPs, web search provider, and Smart Entity Index gap-filling. See [Shared vs Per-Profile Settings](#shared-vs-per-profile-settings).
 
 ### 3. Set as Voice Assistant
 
@@ -191,11 +212,24 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 - "Search for the latest Home Assistant updates"
 - "What time does the store close?"
 
+## OpenClaw
+
+With the **OpenClaw** server type, MCP Assist sends each voice request to an agent on your OpenClaw gateway, which answers using its own tools and memory. Settings (Configure on the profile):
+
+- **Agent ID**: Which OpenClaw agent answers (default: `main`). Must match an agent configured in OpenClaw.
+- **Session Mode**:
+  - **Per conversation** (recommended): each Home Assistant conversation gets its own session, `agent:<agent id>:ha-<conversation_id>`. Follow-ups stay in it, and rooms and people don't share one growing history.
+  - **Fixed**: every request goes to the session in **Session Key** (e.g. `main` or `agent:main:main`). Profiles created before v0.18.0 stay on Fixed until you switch them.
+- **System Prompt** (optional): sent with every request as OpenClaw's `extraSystemPrompt`, e.g. to set a persona. Leave blank to use the agent's own prompts.
+- **Thinking**: sent as OpenClaw's thinking level.
+
+When Home Assistant knows the satellite's area, the message is sent as `[Room: Kitchen] turn the lights on`, and `Speaking from: Kitchen` is added to the system prompt. Assign each voice satellite to an area (Settings → Devices → the satellite → Area) so this works. Otherwise the user's words are sent unchanged. Enable **Clean Responses for Voice Output** if the agent's replies contain markdown.
+
 ## Configuration Options
 
 ### Profile Settings
 - **Profile Name**: Unique name for this assistant
-- **Server Type**: LM Studio, Ollama (more coming)
+- **Server Type**: Any of the providers above (can't be changed after setup)
 - **Server URL**: Where your LLM is running
 - **Model Name**: Which model to use
 
@@ -225,9 +259,10 @@ Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). 
 | **OpenAI (GPT-4)** | `0.5` | Balanced for reliable tool calling |
 | **OpenAI (GPT-5/o1)** | N/A | Reasoning models don't use temperature |
 | **Anthropic Claude** | `0.5` | Works well across 0.5-1.0 range |
-| **LM Studio / llama.cpp** | `0.5` | Lower temps improve tool calling accuracy |
+| **LM Studio / llama.cpp / vLLM** | `0.5` | Lower temps improve tool calling accuracy |
 | **Ollama** | `0.5` | Model-dependent, lower is safer for tools |
 | **OpenRouter** | `0.5` | Depends on underlying model |
+| **OpenClaw / Hermes Agent** | N/A | The agent manages its own model settings |
 
 **Note**: You can always override these defaults in Advanced Settings. For Home Assistant voice control, lower temperatures (0.5-0.7) generally provide more consistent tool calling and accurate entity control.
 
@@ -240,7 +275,9 @@ Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). 
   - **None**: Search disabled
   - **DuckDuckGo**: Free web search (no API key required)
   - **Brave Search**: Requires API key from https://brave.com/search/api/
+  - **SearXNG**: Your own SearXNG instance. JSON output must be enabled in its `settings.yml` (`search: formats: [html, json]`)
 - **Brave Search API Key**: Required only if using Brave Search
+- **SearXNG URL**: Address of your instance (e.g. `http://192.168.1.10:8888`), required only if using SearXNG
 
 ### Shared vs Per-Profile Settings
 
@@ -248,14 +285,15 @@ MCP Assist has two types of settings:
 
 **Per-Profile Settings** (independent per conversation agent):
 - Model name, system prompt, technical instructions
-- Temperature, max tokens, response mode
-- Debug mode, max iterations
-- Server URL (for local LLMs)
+- Temperature, max tokens, response mode, thinking
+- Debug mode, max iterations, timeout
+- Server URL and API key
+- OpenClaw agent ID, session mode and session key
 
 **Shared Settings** (affect ALL profiles):
 - MCP server port
-- Web search provider (none/duckduckgo/brave)
-- Brave API key
+- Web search provider (none/duckduckgo/brave/searxng)
+- Brave API key, SearXNG URL
 - Allowed IPs/CIDR ranges
 - Smart entity index (gap-filling)
 
@@ -263,7 +301,7 @@ When you change shared settings in one profile's options, they apply to all prof
 
 ## Model Compatibility Guide
 
-Not all LLM models support tool calling (function calling) equally well. **This integration works best with frontier models** (GPT-5.2, Claude Opus 4.5, Gemini 3 Flash) **or higher-spec local models**. Smaller models may struggle with complex multi-entity queries that require synthesizing large tool result sets.  
+Not all LLM models support tool calling (function calling) equally well. **This integration works best with frontier models** (OpenAI GPT-5 series, Anthropic Claude, Google Gemini) **or higher-spec local models**. Smaller models may struggle with complex multi-entity queries that require synthesizing large tool result sets.  
 
 ### Understanding Tool Calling Requirements
 
@@ -296,15 +334,17 @@ Tool calling (function calling) requires the model to:
 
 Choose the model type that best fits your use case. Thinking/reasoning models offer better reliability with complex multi-tool queries, while instruct models provide faster responses for simple commands.
 
+With a hybrid model (e.g. Qwen3), you can get both: set **Thinking** to **Off** in Advanced Settings for fast voice replies, or **Low** / **Medium** / **High** for harder requests. You can also create two profiles with the same model and different Thinking settings.
+
 ### Recommended Models
 
 **Consistently Reliable**:
 - ✅ **Qwen3 VL 32B Instruct** - Excellent tool calling
 - ✅ **Qwen3 30B A3B Instruct** - Very good tool calling
 - ✅ **Qwen3 8B Instruct** - Good balance, works reliably
-- ✅ **Anthropic Opus 4.5** - The very best at tool calling (cloud)
-- ✅ **OpenAI GPT-5.2** - Excellent tool calling, very fast (cloud)
-- ✅ **Google Gemini 3 Flash** - Excellent tool calling, fast, cost-effective (cloud)
+- ✅ **Anthropic Claude** - Excellent tool calling (cloud)
+- ✅ **OpenAI GPT-5 series** - Excellent tool calling, very fast (cloud)
+- ✅ **Google Gemini Flash** - Excellent tool calling, fast, cost-effective (cloud)
 
 ### Testing Your Model
 
@@ -386,7 +426,7 @@ One of MCP Assist's features is **dynamic model switching** - you can change mod
 
 ## Entity Exposure
 
-The integration only discovers entities that are exposed to the "conversation" assistant. To expose entities:
+The integration only discovers and controls entities that are exposed to the "conversation" assistant. Actions on entities that aren't exposed are refused, including ones reached through a device or area. To expose entities:
 
 1. Go to **Settings** → **Voice Assistants** → **Expose**
 2. Select entities you want the assistant to control
