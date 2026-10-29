@@ -111,6 +111,10 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                     CONF_BRAVE_API_KEY,
                     first_profile.data.get(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY)
                 ),
+                CONF_SEARXNG_URL: first_profile.options.get(
+                    CONF_SEARXNG_URL,
+                    first_profile.data.get(CONF_SEARXNG_URL, DEFAULT_SEARXNG_URL)
+                ),
                 CONF_ALLOWED_IPS: first_profile.options.get(
                     CONF_ALLOWED_IPS,
                     first_profile.data.get(CONF_ALLOWED_IPS, DEFAULT_ALLOWED_IPS)
@@ -127,6 +131,7 @@ async def ensure_system_entry(hass: HomeAssistant) -> ConfigEntry:
                 CONF_MCP_PORT: DEFAULT_MCP_PORT,
                 CONF_SEARCH_PROVIDER: DEFAULT_SEARCH_PROVIDER,
                 CONF_BRAVE_API_KEY: DEFAULT_BRAVE_API_KEY,
+                CONF_SEARXNG_URL: DEFAULT_SEARXNG_URL,
                 CONF_ALLOWED_IPS: DEFAULT_ALLOWED_IPS,
                 CONF_ENABLE_GAP_FILLING: DEFAULT_ENABLE_GAP_FILLING,
             }

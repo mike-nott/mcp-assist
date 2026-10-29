@@ -122,6 +122,8 @@ from .const import (
     GEMINI_BASE_URL,
     ANTHROPIC_BASE_URL,
     OPENROUTER_BASE_URL,
+    CONF_SEARXNG_URL,
+    DEFAULT_SEARXNG_URL, 
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1211,6 +1213,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 "value": "brave",
                                 "label": "Brave Search (requires API key)",
                             },
+                            {
+                                "value": "searxng",
+                                "label": "SearXNG Search Requires local search server setup",
+                            },
                         ],
                         mode=SelectSelectorMode.DROPDOWN,
                     )
@@ -1226,6 +1232,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
                     default=DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
+                vol.Optional(
+                    CONF_SEARXNG_URL,
+                    default=DEFAULT_SEARXNG_URL
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
             }
         )
 
@@ -1873,6 +1883,10 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                                 "value": "brave",
                                 "label": "Brave Search (requires API key)",
                             },
+                            {
+                                "value": "searxng",
+                                "label": "SearXNG Search (requires local search server)",
+                            },
                         ],
                         mode=SelectSelectorMode.DROPDOWN,
                     )
@@ -1900,6 +1914,13 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_SEARXNG_URL,
+                    default=sys_options.get(
+                        CONF_SEARXNG_URL,
+                        sys_data.get(CONF_SEARXNG_URL, DEFAULT_SEARXNG_URL),
+                    ),
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
                 vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
                     default=sys_options.get(

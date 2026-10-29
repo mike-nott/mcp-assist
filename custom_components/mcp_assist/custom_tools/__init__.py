@@ -38,9 +38,18 @@ class CustomToolsLoader:
                 _LOGGER.debug("✅ DuckDuckGo Search tool initialized")
             except Exception as e:
                 _LOGGER.error(f"Failed to initialize DuckDuckGo Search tool: {e}")
+        elif search_provider == "searxng":
+            try:
+                from .searxng_search import SearXNGSearchTool
+                local_url = self._get_searxng_local_url()
+                self.tools["search"] = SearXNGSearchTool(self.hass, local_url)
+                await self.tools["search"].initialize()
+                _LOGGER.debug("✅ SearXNG Search tool initialized")
+            except Exception as e:
+                _LOGGER.error(f"Failed to initialize SearXNG Search tool: {e}")
 
         # Load read_url tool if search is enabled
-        if search_provider in ["brave", "duckduckgo"]:
+        if search_provider in ["brave", "duckduckgo", "searxng"]:
             try:
                 from .read_url import ReadUrlTool
                 self.tools["read_url"] = ReadUrlTool(self.hass)
@@ -88,6 +97,11 @@ class CustomToolsLoader:
         """Get Brave API key (shared setting)."""
         from ..const import CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY
         return self._get_shared_setting(CONF_BRAVE_API_KEY, DEFAULT_BRAVE_API_KEY)
+
+    def _get_searxng_local_url(self) -> str:
+        """Get SearXNG Local URL (shared setting)."""
+        from ..const import CONF_SEARXNG_URL, DEFAULT_SEARXNG_URL
+        return self._get_shared_setting(CONF_SEARXNG_URL, DEFAULT_SEARXNG_URL)
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """Get MCP tool definitions for all enabled tools."""
