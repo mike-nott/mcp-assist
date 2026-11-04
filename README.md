@@ -74,14 +74,17 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 
 ## Installation
 
-### Add to HACS
-
-[![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mike-nott&repository=mcp-assist&category=integration)
-
 ### Option A: HACS (Recommended)
-1. Click the badge above to add this repository to HACS, or manually add it as a custom repository
-2. Install "MCP Assist" from HACS
+
+MCP Assist is in the HACS default repositories.
+
+1. In Home Assistant, open **HACS** and search for **MCP Assist**
+2. Open it and select **Download**
 3. Restart Home Assistant
+
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mike-nott&repository=mcp-assist&category=integration)
+
+If MCP Assist does not show up in the search, add it as a custom repository instead: in HACS, open the **⋮** menu → **Custom repositories**, enter `https://github.com/mike-nott/mcp-assist` with the type **Integration**, then download it as above.
 
 ### Option B: Manual Installation
 1. Copy the `custom_components/mcp_assist` folder to your Home Assistant `custom_components` directory
