@@ -1947,13 +1947,33 @@ class MCPAssistConversationEntity(ConversationEntity):
         model = self.model_name.split("/")[-1]
         return model.startswith("gpt-5") or bool(re.match(r"^o\d", model))
 
+    def _is_anthropic_no_sampling_model(self) -> bool:
+        """Claude Opus 4.7 and later reject temperature/top_p/top_k with a 400.
+
+        Matches claude-opus-4-7, claude-opus-4.8, claude-opus-5-5, claude-opus-5
+        and dated variants. Older ids like claude-opus-4-20250514 still accept
+        temperature (the date is not mistaken for a minor version).
+        """
+        if self.server_type != SERVER_TYPE_ANTHROPIC:
+            return False
+        model = (self.model_name or "").split("/")[-1].lower()
+        match = re.match(r"^claude-opus-(\d+)(?:[.-](\d{1,2})(?!\d))?", model)
+        if not match:
+            return False
+        version = (int(match.group(1)), int(match.group(2) or 0))
+        return version >= (4, 7)
+
     def _skip_sampling_params(self) -> bool:
-        """Providers whose current models reject sampling params.
+        """Providers/models that reject sampling params.
 
         Gemini deprecated temperature/top_p/top_k from gemini-3.6 onward
-        ("will return an error in future model generations").
+        ("will return an error in future model generations"). Claude Opus 4.7+
+        returns 400 "temperature is deprecated for this model".
         """
-        return self.server_type == SERVER_TYPE_GEMINI
+        return (
+            self.server_type == SERVER_TYPE_GEMINI
+            or self._is_anthropic_no_sampling_model()
+        )
 
     def _apply_thinking(self, payload: Dict[str, Any]) -> None:
         """Add the provider's thinking/reasoning control to a request payload.
